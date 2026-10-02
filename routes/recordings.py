@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import JSONResponse
 from pathlib import Path
 import os
 import time
 import json
 from openai import OpenAI
 from database import query, run
-from middleware.auth import get_current_user, require_role
+from middleware.auth import get_current_user, require_role, APIError
 
 router = APIRouter()
 
@@ -34,17 +35,17 @@ async def upload_recording(
     try:
         # Validate audio file type
         if audio.content_type not in ALLOWED_AUDIO_TYPES:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=400,
-                detail={"error": "Only audio files are allowed"}
+                content={"error": "Only audio files are allowed"}
             )
         
         # Check file size (50MB limit)
         content = await audio.read()
         if len(content) > 50 * 1024 * 1024:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=400,
-                detail={"error": "File size exceeds 50MB limit"}
+                content={"error": "File size exceeds 50MB limit"}
             )
         
         # Generate unique filename
@@ -79,13 +80,11 @@ async def upload_recording(
             }
         }
     
-    except HTTPException:
-        raise
     except Exception as error:
         print(f"Upload error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error during upload"}
+            content={"error": "Server error during upload"}
         )
 
 @router.get("/my-recordings")
@@ -100,9 +99,9 @@ async def get_my_recordings(current_user: dict = Depends(require_role(["emt"])))
     
     except Exception as error:
         print(f"Get recordings error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error getting recordings"}
+            content={"error": "Server error getting recordings"}
         )
 
 @router.get("/{id}")
@@ -115,20 +114,18 @@ async def get_recording(id: int, current_user: dict = Depends(get_current_user))
         )
         
         if len(recordings) == 0:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=404,
-                detail={"error": "Recording not found"}
+                content={"error": "Recording not found"}
             )
         
         return recordings[0]
     
-    except HTTPException:
-        raise
     except Exception as error:
         print(f"Get recording error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error getting recording"}
+            content={"error": "Server error getting recording"}
         )
 
 # Background processing functions

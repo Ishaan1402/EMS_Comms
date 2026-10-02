@@ -51,7 +51,7 @@ class TestAuthentication:
         response = client.post("/api/auth/register", json=TEST_EMT)
         assert response.status_code == 400
         data = response.json()
-        assert data["detail"]["error"] == "Username or email already exists"
+        assert data["error"] == "Username or email already exists"
     
     def test_login_demo_user_success(self):
         """POST /api/auth/login - Demo user login should work with password123."""
@@ -76,7 +76,7 @@ class TestAuthentication:
         })
         assert response.status_code == 400
         data = response.json()
-        assert data["detail"]["error"] == "Invalid credentials"
+        assert data["error"] == "Invalid credentials"
     
     def test_login_nonexistent_user(self):
         """POST /api/auth/login - Non-existent user should return 400 (same as wrong password)."""
@@ -86,14 +86,14 @@ class TestAuthentication:
         })
         assert response.status_code == 400
         data = response.json()
-        assert data["detail"]["error"] == "Invalid credentials"
+        assert data["error"] == "Invalid credentials"
     
     def test_profile_no_token(self):
         """GET /api/auth/profile - No token should return 401."""
         response = client.get("/api/auth/profile")
         assert response.status_code == 401
         data = response.json()
-        assert data["detail"]["error"] == "Access denied. No token provided."
+        assert data["error"] == "Access denied. No token provided."
     
     def test_profile_invalid_token(self):
         """GET /api/auth/profile - Invalid token should return 400."""
@@ -103,7 +103,7 @@ class TestAuthentication:
         )
         assert response.status_code == 400
         data = response.json()
-        assert data["detail"]["error"] == "Invalid token."
+        assert data["error"] == "Invalid token."
     
     def test_profile_with_valid_token(self):
         """GET /api/auth/profile - Valid token should return user profile."""
@@ -153,7 +153,7 @@ class TestRoleBasedAccess:
         )
         assert response.status_code == 403
         data = response.json()
-        assert data["detail"]["error"] == "Access denied. Insufficient permissions."
+        assert data["error"] == "Access denied. Insufficient permissions."
     
     def test_doctor_can_access_notifications(self):
         """GET /api/doctors/notifications - Doctor should succeed."""
@@ -246,7 +246,7 @@ class TestErrorMessages:
         response = client.get("/api/auth/profile")
         assert response.status_code == 401
         data = response.json()
-        assert data["detail"]["error"] == "Access denied. No token provided."
+        assert data["error"] == "Access denied. No token provided."
     
     def test_invalid_token_message(self):
         """Verify exact error message for invalid token."""
@@ -256,7 +256,7 @@ class TestErrorMessages:
         )
         assert response.status_code == 400
         data = response.json()
-        assert data["detail"]["error"] == "Invalid token."
+        assert data["error"] == "Invalid token."
     
     def test_insufficient_permissions_message(self):
         """Verify exact error message for insufficient permissions."""
@@ -272,7 +272,7 @@ class TestErrorMessages:
         )
         assert response.status_code == 403
         data = response.json()
-        assert data["detail"]["error"] == "Access denied. Insufficient permissions."
+        assert data["error"] == "Access denied. Insufficient permissions."
 
 
 if __name__ == "__main__":

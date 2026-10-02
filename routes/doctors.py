@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from database import query, run
-from middleware.auth import get_current_user, require_role
+from middleware.auth import get_current_user, require_role, APIError
 
 router = APIRouter()
 
@@ -24,9 +25,9 @@ async def get_available_doctors():
     
     except Exception as error:
         print(f"Get doctors error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error getting doctors"}
+            content={"error": "Server error getting doctors"}
         )
 
 @router.get("/notifications")
@@ -63,9 +64,9 @@ async def get_doctor_notifications(
     
     except Exception as error:
         print(f"Get notifications error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error getting notifications"}
+            content={"error": "Server error getting notifications"}
         )
 
 @router.get("/recording/{id}")
@@ -84,20 +85,18 @@ async def get_recording_details(
         )
         
         if len(recordings) == 0:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=404,
-                detail={"error": "Recording not found"}
+                content={"error": "Recording not found"}
             )
         
         return recordings[0]
     
-    except HTTPException:
-        raise
     except Exception as error:
         print(f"Get recording error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error getting recording"}
+            content={"error": "Server error getting recording"}
         )
 
 @router.patch("/availability")
@@ -122,9 +121,9 @@ async def update_availability(
     
     except Exception as error:
         print(f"Update availability error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error updating availability"}
+            content={"error": "Server error updating availability"}
         )
 
 @router.patch("/notifications/{id}/read")
@@ -143,9 +142,9 @@ async def mark_notification_read(
     
     except Exception as error:
         print(f"Mark read error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error marking notification as read"}
+            content={"error": "Server error marking notification as read"}
         )
 
 @router.post("/recordings/{id}/respond")
@@ -165,7 +164,7 @@ async def respond_to_recording(
     
     except Exception as error:
         print(f"Response error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error recording response"}
+            content={"error": "Server error recording response"}
         )

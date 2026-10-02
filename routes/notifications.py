@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 import os
@@ -7,7 +8,7 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from datetime import datetime
 from database import query, run
-from middleware.auth import get_current_user, require_role
+from middleware.auth import get_current_user, require_role, APIError
 
 router = APIRouter()
 
@@ -48,9 +49,9 @@ async def send_notification(
         )
         
         if len(recordings) == 0 or len(doctors) == 0:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=404,
-                detail={"error": "Recording or doctor not found"}
+                content={"error": "Recording or doctor not found"}
             )
         
         recording_data = recordings[0]
@@ -71,13 +72,11 @@ async def send_notification(
         
         return {"message": "Notification sent successfully"}
     
-    except HTTPException:
-        raise
     except Exception as error:
         print(f"Send notification error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error sending notification"}
+            content={"error": "Server error sending notification"}
         )
 
 async def send_sms(phone_number: str, recording: dict, doctor: dict):
@@ -213,20 +212,18 @@ async def get_notification_status(
         )
         
         if len(notifications) == 0:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=404,
-                detail={"error": "Notification not found"}
+                content={"error": "Notification not found"}
             )
         
         return notifications[0]
     
-    except HTTPException:
-        raise
     except Exception as error:
         print(f"Get notification status error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error getting notification status"}
+            content={"error": "Server error getting notification status"}
         )
 
 @router.post("/test")
@@ -261,7 +258,7 @@ async def test_notification(
     
     except Exception as error:
         print(f"Test notification error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error sending test notification"}
+            content={"error": "Server error sending test notification"}
         )

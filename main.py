@@ -1,18 +1,29 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from dotenv import load_dotenv
 import pathlib
 
 # Load environment variables
 load_dotenv()
 
+# Import custom exception
+from middleware.auth import APIError
+
 # Import routers
 from routes import auth, recordings, doctors, notifications
 
 app = FastAPI(title="Asclepius EMT System")
+
+# Custom exception handler for Express-style error responses
+@app.exception_handler(APIError)
+async def api_error_handler(request: Request, exc: APIError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.error}
+    )
 
 # CORS configuration
 app.add_middleware(
@@ -58,13 +69,16 @@ if os.getenv("NODE_ENV") == "production":
                 return FileResponse(file_path)
             return FileResponse(client_build / "index.html")
 
-# Error handling
+# Error handling - Express style
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
+async def global_exception_handler(request: Request, exc: Exception):
     import traceback
     print(f"Error: {exc}")
     traceback.print_exc()
-    return {"error": "Something went wrong!"}
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Something went wrong!"}
+    )
 
 if __name__ == "__main__":
     import uvicorn

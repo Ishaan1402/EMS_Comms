@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 import bcrypt
 from database import query, run
-from middleware.auth import create_access_token, get_current_user
+from middleware.auth import create_access_token, get_current_user, APIError
 
 router = APIRouter()
 
@@ -32,9 +33,9 @@ async def register(req: RegisterRequest):
         )
         
         if len(existing_users) > 0:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=400,
-                detail={"error": "Username or email already exists"}
+                content={"error": "Username or email already exists"}
             )
         
         # Hash password
@@ -67,13 +68,11 @@ async def register(req: RegisterRequest):
             "token": token
         }
     
-    except HTTPException:
-        raise
     except Exception as error:
         print(f"Registration error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error during registration"}
+            content={"error": "Server error during registration"}
         )
 
 @router.post("/login")
@@ -87,9 +86,9 @@ async def login(req: LoginRequest):
         )
         
         if len(users) == 0:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=400,
-                detail={"error": "Invalid credentials"}
+                content={"error": "Invalid credentials"}
             )
         
         user = users[0]
@@ -98,9 +97,9 @@ async def login(req: LoginRequest):
         is_valid_password = bcrypt.checkpw(req.password.encode('utf-8'), user["password_hash"].encode('utf-8'))
         
         if not is_valid_password:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=400,
-                detail={"error": "Invalid credentials"}
+                content={"error": "Invalid credentials"}
             )
         
         # Generate JWT token
@@ -123,13 +122,11 @@ async def login(req: LoginRequest):
             "token": token
         }
     
-    except HTTPException:
-        raise
     except Exception as error:
         print(f"Login error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error during login"}
+            content={"error": "Server error during login"}
         )
 
 @router.get("/profile")
@@ -144,9 +141,9 @@ async def get_profile(current_user: dict = Depends(get_current_user)):
         )
         
         if len(users) == 0:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=404,
-                detail={"error": "User not found"}
+                content={"error": "User not found"}
             )
         
         user = users[0]
@@ -154,11 +151,9 @@ async def get_profile(current_user: dict = Depends(get_current_user)):
         
         return user
     
-    except HTTPException:
-        raise
     except Exception as error:
         print(f"Profile error: {error}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail={"error": "Server error getting profile"}
+            content={"error": "Server error getting profile"}
         )
