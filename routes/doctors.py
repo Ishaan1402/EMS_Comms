@@ -1,17 +1,17 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request, Body
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Any
 from database import query, run
 from middleware.auth import get_current_user, require_role, APIError
 
 router = APIRouter()
 
 class AvailabilityUpdate(BaseModel):
-    is_available: bool
+    is_available: Optional[Any] = None  # Accept any type to match Express
 
 class ResponseRequest(BaseModel):
-    response: str
+    response: Optional[str] = None  # Optional to match Express
 
 @router.get("/available")
 async def get_available_doctors():
@@ -71,17 +71,27 @@ async def get_doctor_notifications(
 
 @router.get("/recording/{id}")
 async def get_recording_details(
-    id: int,
+    id: str,  # Accept string to handle non-numeric IDs like Express
     current_user: dict = Depends(require_role(["doctor"]))
 ):
     """Get specific recording details."""
     try:
+        # Try to convert to int
+        try:
+            recording_id = int(id)
+        except ValueError:
+            # Non-numeric ID -> return 404
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Recording not found"}
+            )
+        
         recordings = query(
             """SELECT r.*, u.first_name as emt_first_name, u.last_name as emt_last_name
                FROM recordings r
                JOIN users u ON r.emt_id = u.id
                WHERE r.id = ?""",
-            (id,)
+            (recording_id,)
         )
         
         if len(recordings) == 0:
@@ -101,22 +111,44 @@ async def get_recording_details(
 
 @router.patch("/availability")
 async def update_availability(
-    req: AvailabilityUpdate,
+    request: Request,
     current_user: dict = Depends(require_role(["doctor"]))
 ):
-    """Update doctor availability."""
+    """
+    Update doctor availability.
+    Matches Express behavior:
+    - Empty body -> is_available=0 (falsy)
+    - String "false" -> is_available=1 (truthy, since non-empty string is truthy in JS)
+    - Boolean false -> is_available=0
+    - Boolean true -> is_available=1
+    """
     try:
-        # Convert boolean to 0/1 for SQLite
-        is_available_int = 1 if req.is_available else 0
+        # Get request body as JSON or empty dict
+        try:
+            body = await request.json()
+        except:
+            body = {}
+        
+        is_available_val = body.get("is_available")
+        
+        # Apply JavaScript truthiness rules:
+        # - undefined/None/0/false/"" -> falsy (0)
+        # - Everything else including "false" string -> truthy (1)
+        if is_available_val is None or is_available_val == "" or is_available_val is False or is_available_val == 0:
+            is_available_int = 0
+        else:
+            # "false" string is truthy in JS, so it becomes 1
+            is_available_int = 1
         
         run(
             'UPDATE users SET is_available = ? WHERE id = ?',
             (is_available_int, current_user["id"])
         )
         
+        # Return the value as boolean for consistency
         return {
             "message": "Availability updated successfully",
-            "is_available": req.is_available
+            "is_available": bool(is_available_int)
         }
     
     except Exception as error:
@@ -149,15 +181,33 @@ async def mark_notification_read(
 
 @router.post("/recordings/{id}/respond")
 async def respond_to_recording(
-    id: int,
-    req: ResponseRequest,
+    id: str,  # Accept string to handle non-numeric IDs gracefully like Express
+    request: Request,
     current_user: dict = Depends(require_role(["doctor"]))
 ):
-    """Respond to a recording."""
+    """
+    Respond to a recording.
+    Matches Express: missing response field -> None/NULL in SQL (no 422)
+    """
     try:
+        # Try to convert id to int, but handle gracefully
+        try:
+            recording_id = int(id)
+        except ValueError:
+            # Non-numeric ID - Express would try to query and get empty result
+            return {"message": "Response recorded successfully"}
+        
+        # Get request body
+        try:
+            body = await request.json()
+        except:
+            body = {}
+        
+        response_text = body.get("response")  # Can be None
+        
         run(
             'UPDATE notifications SET response = ? WHERE recording_id = ? AND doctor_id = ?',
-            (req.response, id, current_user["id"])
+            (response_text, recording_id, current_user["id"])
         )
         
         return {"message": "Response recorded successfully"}

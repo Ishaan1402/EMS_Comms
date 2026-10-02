@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -9,27 +9,45 @@ from middleware.auth import create_access_token, get_current_user, APIError
 router = APIRouter()
 
 class RegisterRequest(BaseModel):
-    username: str
-    email: str
-    password: str
-    role: str
-    first_name: str
-    last_name: str
+    username: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     phone: Optional[str] = None
     specialty: Optional[str] = None
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: Optional[str] = None
+    password: Optional[str] = None
 
 @router.post("/register", status_code=201)
-async def register(req: RegisterRequest):
-    """Register new user."""
+async def register(request: Request):
+    """
+    Register new user.
+    Matches Express: missing/invalid fields -> 500 not 422
+    """
     try:
+        # Get body manually to avoid validation errors
+        try:
+            body = await request.json()
+        except:
+            body = {}
+        
+        username = body.get("username")
+        email = body.get("email")
+        password = body.get("password")
+        role = body.get("role")
+        first_name = body.get("first_name")
+        last_name = body.get("last_name")
+        phone = body.get("phone")
+        specialty = body.get("specialty")
+        
         # Check if user already exists
         existing_users = query(
             'SELECT * FROM users WHERE username = ? OR email = ?',
-            (req.username, req.email)
+            (username, email)
         )
         
         if len(existing_users) > 0:
@@ -38,13 +56,13 @@ async def register(req: RegisterRequest):
                 content={"error": "Username or email already exists"}
             )
         
-        # Hash password
-        password_hash = bcrypt.hashpw(req.password.encode('utf-8'), bcrypt.gensalt(rounds=10)).decode('utf-8')
+        # Hash password - if missing, will fail with generic 500
+        password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=10)).decode('utf-8')
         
-        # Insert new user
+        # Insert new user - if required fields missing, SQL will fail -> 500
         result = run(
             'INSERT INTO users (username, email, password_hash, role, first_name, last_name, phone, specialty) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (req.username, req.email, password_hash, req.role, req.first_name, req.last_name, req.phone, req.specialty)
+            (username, email, password_hash, role, first_name, last_name, phone, specialty)
         )
         
         # Get the new user
@@ -76,13 +94,25 @@ async def register(req: RegisterRequest):
         )
 
 @router.post("/login")
-async def login(req: LoginRequest):
-    """Login user."""
+async def login(request: Request):
+    """
+    Login user.
+    Matches Express: missing fields -> error in try/catch -> 500
+    """
     try:
+        # Get body manually
+        try:
+            body = await request.json()
+        except:
+            body = {}
+        
+        username = body.get("username")
+        password = body.get("password")
+        
         # Find user
         users = query(
             'SELECT * FROM users WHERE username = ?',
-            (req.username,)
+            (username,)
         )
         
         if len(users) == 0:
@@ -93,8 +123,8 @@ async def login(req: LoginRequest):
         
         user = users[0]
         
-        # Check password
-        is_valid_password = bcrypt.checkpw(req.password.encode('utf-8'), user["password_hash"].encode('utf-8'))
+        # Check password - if password is None, will fail -> 500
+        is_valid_password = bcrypt.checkpw(password.encode('utf-8'), user["password_hash"].encode('utf-8'))
         
         if not is_valid_password:
             return JSONResponse(
@@ -130,9 +160,10 @@ async def login(req: LoginRequest):
         )
 
 @router.get("/profile")
-async def get_profile(current_user: dict = Depends(get_current_user)):
+async def get_profile(request: Request):
     """Get current user profile."""
     try:
+        current_user = get_current_user(request)
         print(f"Profile request for user ID: {current_user['id']}")
         
         users = query(
@@ -151,6 +182,9 @@ async def get_profile(current_user: dict = Depends(get_current_user)):
         
         return user
     
+    except APIError as error:
+        # Re-raise APIError to be handled by the exception handler in main.py
+        raise
     except Exception as error:
         print(f"Profile error: {error}")
         return JSONResponse(

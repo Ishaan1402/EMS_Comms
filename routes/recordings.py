@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from pathlib import Path
 import os
 import time
 import json
+import asyncio
+import concurrent.futures
 from openai import OpenAI
 from database import query, run
 from middleware.auth import get_current_user, require_role, APIError
@@ -18,37 +20,45 @@ openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
+# Match Express multer regex: /audio\/(mp3|wav|m4a|aac|ogg|webm|mp4)/
+# Note: Express does NOT include "mpeg" - only mp3, wav, m4a, aac, ogg, webm, mp4
 ALLOWED_AUDIO_TYPES = [
-    "audio/mp3", "audio/mpeg", "audio/wav", "audio/x-wav",
-    "audio/m4a", "audio/x-m4a", "audio/aac", "audio/x-aac",
-    "audio/ogg", "audio/webm", "audio/mp4"
+    "audio/mp3", "audio/wav", "audio/m4a", "audio/x-m4a",
+    "audio/aac", "audio/x-aac", "audio/ogg", "audio/webm", "audio/mp4"
+    # Note: "audio/mpeg" is NOT in this list to match Express
 ]
+
+# Thread pool for OpenAI sync calls (non-blocking)
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 @router.post("/upload", status_code=201)
 async def upload_recording(
     background_tasks: BackgroundTasks,
+    request: Request,
     audio: UploadFile = File(...),
-    patient_info: str = Form(...),
+    patient_info: str = Form(None),  # Optional like Express (req.body.patient_info can be undefined)
     current_user: dict = Depends(require_role(["emt"]))
 ):
-    """Upload new recording."""
+    """
+    Upload new recording.
+    Matches Express multer behavior:
+    - Missing audio file -> 500 "Server error during upload"
+    - Wrong MIME type -> 500 "Something went wrong!"  
+    - File too large -> 500 "Something went wrong!"
+    - patient_info optional (None/NULL if missing)
+    """
     try:
-        # Validate audio file type
+        # Validate audio file type - if wrong, Express/multer fails with generic 500
         if audio.content_type not in ALLOWED_AUDIO_TYPES:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "Only audio files are allowed"}
-            )
+            # Express multer error goes to catch block -> 500
+            raise Exception(f"Invalid file type: {audio.content_type}")
         
-        # Check file size (50MB limit)
+        # Check file size (50MB limit) - if exceeded, Express returns 500
         content = await audio.read()
         if len(content) > 50 * 1024 * 1024:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "File size exceeds 50MB limit"}
-            )
+            raise Exception(f"File size exceeds limit")
         
-        # Generate unique filename
+        # Generate unique filename like Express
         timestamp = int(time.time() * 1000)
         random_suffix = int(time.time() * 1000000) % 1000000000
         file_ext = Path(audio.filename).suffix if audio.filename else ".mp3"
@@ -61,13 +71,13 @@ async def upload_recording(
         
         emt_id = current_user["id"]
         
-        # Create recording record
+        # Create recording record - patient_info can be None (NULL in SQL)
         result = run(
             'INSERT INTO recordings (emt_id, patient_info, audio_file_path) VALUES (?, ?, ?)',
             (emt_id, patient_info, str(audio_file_path))
         )
         
-        # Process recording asynchronously
+        # Process recording asynchronously (fire and forget like Express)
         background_tasks.add_task(process_recording, result["id"], str(audio_file_path))
         
         return {
@@ -81,6 +91,7 @@ async def upload_recording(
         }
     
     except Exception as error:
+        # Match Express: any upload error -> 500 "Server error during upload"
         print(f"Upload error: {error}")
         return JSONResponse(
             status_code=500,
@@ -105,12 +116,24 @@ async def get_my_recordings(current_user: dict = Depends(require_role(["emt"])))
         )
 
 @router.get("/{id}")
-async def get_recording(id: int, current_user: dict = Depends(get_current_user)):
-    """Get recording by ID."""
+async def get_recording(id: str, request: Request):  # Accept string, manual auth to avoid dep issues
+    """Get recording by ID - Express-compatible."""
+    # Manual auth to match Express (doesn't use strict role check)
+    current_user = get_current_user(request)
+    
     try:
+        # Try to convert to int
+        try:
+            recording_id = int(id)
+        except ValueError:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Recording not found"}
+            )
+        
         recordings = query(
             'SELECT r.*, u.first_name as emt_first_name, u.last_name as emt_last_name FROM recordings r JOIN users u ON r.emt_id = u.id WHERE r.id = ?',
-            (id,)
+            (recording_id,)
         )
         
         if len(recordings) == 0:
@@ -278,30 +301,54 @@ EXAMPLES:
 
 Return ONLY the JSON object with no additional text."""
 
-        response = openai_client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=1000
+        # Run OpenAI sync call in thread pool (non-blocking)
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            executor,
+            lambda: openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=1000
+            )
         )
-        
+
         ai_response = response.choices[0].message.content.strip()
         print(f"Raw AI response: {ai_response}")
-        
+
         # Clean the response to extract JSON
         cleaned_response = ai_response
         if "```json" in ai_response:
             cleaned_response = ai_response.split("```json")[1].split("```")[0].strip()
         elif "```" in ai_response:
             cleaned_response = ai_response.split("```")[1].split("```")[0].strip()
-        
+
         result = json.loads(cleaned_response)
         print(f"Cleaned AI response: {result}")
+        
+        # Apply JavaScript || semantics for defaults (falsy values -> defaults)
+        # risk_score 0 is falsy in JS, so || 5 means 0 becomes 5
+        # Empty strings are falsy, so || "default" means "" becomes "default"
+        if not result.get("risk_score"):  # 0, None, "" are all falsy
+            result["risk_score"] = 5
+        if not result.get("priority_level"):
+            result["priority_level"] = 3
+        if not result.get("chief_complaint") or result.get("chief_complaint") == "":
+            result["chief_complaint"] = "Not specified"
+        if not result.get("vital_signs") or result.get("vital_signs") == "":
+            result["vital_signs"] = "Not recorded"
+        if not result.get("symptoms") or result.get("symptoms") == "":
+            result["symptoms"] = "Not specified"
+        if not result.get("recommended_actions") or result.get("recommended_actions") == "":
+            result["recommended_actions"] = "Standard care"
+        if not result.get("critical_info") or result.get("critical_info") == "":
+            result["critical_info"] = "None"
+            
         return result
-    
+
     except Exception as error:
         print(f"LLM analysis error: {error}")
-        # Return default values if AI analysis fails
+        # Return default values if AI analysis fails (match Express)
         return {
             "chief_complaint": "Unable to analyze",
             "vital_signs": "Not available",

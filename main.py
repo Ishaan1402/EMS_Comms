@@ -1,10 +1,13 @@
 import os
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from dotenv import load_dotenv
 import pathlib
+import json
 
 # Load environment variables
 load_dotenv()
@@ -25,7 +28,27 @@ async def api_error_handler(request: Request, exc: APIError):
         content={"error": exc.error}
     )
 
-# CORS configuration
+# Handle FastAPI validation errors like Express (map to 500 or appropriate status)
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # Express typically returns 500 "Server error" for malformed requests
+    # or lets them through as undefined/null values
+    # We'll map validation errors to Express-style responses
+    print(f"Validation error: {exc.errors()}")
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Something went wrong!"}
+    )
+
+# Handle JSON decode errors (malformed JSON body)
+@app.exception_handler(json.JSONDecodeError)
+async def json_decode_error_handler(request: Request, exc: json.JSONDecodeError):
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Something went wrong!"}
+    )
+
+# CORS configuration - match Express cors()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -34,13 +57,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Security headers (helmet equivalent)
+# Security headers (helmet equivalent) - match Express helmet defaults
 @app.middleware("http")
 async def add_security_headers(request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    # Note: helmet also adds other headers, but these are the key ones Express sets
     return response
 
 # Create uploads directory if it doesn't exist
