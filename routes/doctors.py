@@ -116,11 +116,9 @@ async def update_availability(
 ):
     """
     Update doctor availability.
-    Matches Express behavior:
-    - Empty body -> is_available=0 (falsy)
-    - String "false" -> is_available=1 (truthy, since non-empty string is truthy in JS)
-    - Boolean false -> is_available=0
-    - Boolean true -> is_available=1
+    Matches Express behavior exactly:
+    - Empty body -> is_available=0 (falsy), response OMITS is_available key
+    - String "false" -> is_available=1 (truthy), response ECHOES "is_available":"false" (string)
     """
     try:
         # Get request body as JSON or empty dict
@@ -145,11 +143,18 @@ async def update_availability(
             (is_available_int, current_user["id"])
         )
         
-        # Return the value as boolean for consistency
-        return {
-            "message": "Availability updated successfully",
-            "is_available": bool(is_available_int)
-        }
+        # Build response matching Express:
+        # Express does: res.json({ message: 'Availability updated successfully', is_available });
+        # where is_available is the VALUE FROM req.body (not from DB)
+        response_obj = {"message": "Availability updated successfully"}
+        
+        # Only include is_available in response if it was in the request body
+        # Express: if is_available was undefined, key is omitted (undefined values not serialized)
+        if "is_available" in body:
+            # Echo back the value exactly as received (preserve string vs bool)
+            response_obj["is_available"] = is_available_val
+        
+        return response_obj
     
     except Exception as error:
         print(f"Update availability error: {error}")

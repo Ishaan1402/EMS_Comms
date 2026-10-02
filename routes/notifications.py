@@ -33,12 +33,16 @@ async def send_notification(
     """
     Send notification to doctor.
     Matches Express: missing fields -> 404 or 500, not 422
+    Array body -> 404 (lookup fails), not 500
     Twilio/SendGrid failures -> 500, don't mark delivered=1
     """
     try:
         # Get request body
         try:
             body = await request.json()
+            # If body is an array, treat as invalid (Express would fail lookup -> 404)
+            if isinstance(body, list):
+                body = {}
         except:
             body = {}
         
@@ -100,8 +104,10 @@ async def send_sms(phone_number: str, recording: dict, doctor: dict):
         summary = recording.get("llm_summary")
         # In JS: summary?.substring(0, 100) when summary is null/undefined -> undefined
         # Then template `${undefined}...` -> "undefined..."
-        if summary is None or summary == "":
+        if summary is None:
             summary_preview = "undefined"
+        elif summary == "":
+            summary_preview = ""
         else:
             summary_preview = summary[:100]
         # Always append "..." like JS template after substring
@@ -117,9 +123,11 @@ async def send_sms(phone_number: str, recording: dict, doctor: dict):
         if emt_last_name is None:
             emt_last_name = "undefined"
         
-        # Get urgency - don't invent "unknown", use empty or undefined-like behavior
+        # Get urgency - render literal null/undefined like JS string coercion
         urgency_level = recording.get("urgency_level")
-        if urgency_level is None or urgency_level == "":
+        if urgency_level is None:
+            urgency_level = "null"  # JS null coerces to string "null"
+        elif urgency_level == "":
             urgency_level = ""
         
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
@@ -156,8 +164,10 @@ async def send_email(email: str, recording: dict, doctor: dict):
     try:
         # Get data - match JS behavior
         summary = recording.get("llm_summary")
-        if summary is None or summary == "":
-            summary = "Summary not available"
+        if summary is None:
+            summary = "null"  # JS null coerces to string "null"
+        elif summary == "":
+            summary = ""
         
         emt_first_name = recording.get("emt_first_name")
         emt_last_name = recording.get("emt_last_name")
@@ -166,28 +176,38 @@ async def send_email(email: str, recording: dict, doctor: dict):
         if emt_last_name is None:
             emt_last_name = "undefined"
         
-        urgency_level = recording.get("urgency_level", "")
+        urgency_level = recording.get("urgency_level")
         if urgency_level is None:
+            urgency_level = "null"  # JS null coerces to string "null"
+        elif urgency_level == "":
             urgency_level = ""
         
         created_at = recording.get("created_at", "")
         
-        # Format time to match JS toLocaleString() behavior
+        # Format time to match JS toLocaleString() behavior WITHOUT zero-padded day
         # JS: new Date(recording.created_at).toLocaleString()
-        # This gives something like "10/2/2026, 9:00:00 PM"
+        # This gives "10/2/2026, 9:00:00 PM" (no leading zero on day)
         try:
             from datetime import datetime as dt
             dt_obj = dt.fromisoformat(created_at.replace("Z", "+00:00"))
             # Match toLocaleString format: "M/D/YYYY, H:MM:SS AM/PM"
-            formatted_time = dt_obj.strftime("%m/%d/%Y, %I:%M:%S %p").lstrip("0").replace(" 0", " ")
+            # Remove leading zero from day by using %-d (Unix) or #d (Windows-compatible: lstrip)
+            month = dt_obj.strftime("%m").lstrip("0") or "0"
+            day = dt_obj.strftime("%d").lstrip("0") or "0"
+            year = dt_obj.strftime("%Y")
+            time_part = dt_obj.strftime("%I:%M:%S %p").lstrip("0")
+            formatted_time = f"{month}/{day}/{year}, {time_part}"
         except:
             formatted_time = str(created_at)
         
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         urgency_color = get_urgency_color(urgency_level)
         
-        # Build urgency display - uppercase like Express
-        urgency_display = urgency_level.upper() if urgency_level else ""
+        # Build urgency display - uppercase if not null/empty
+        if urgency_level and urgency_level != "null":
+            urgency_display = urgency_level.upper()
+        else:
+            urgency_display = urgency_level
         
         html_content = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">

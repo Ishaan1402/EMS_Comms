@@ -1,8 +1,9 @@
 import os
+import sys
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
 from dotenv import load_dotenv
@@ -11,6 +12,17 @@ import json
 
 # Load environment variables
 load_dotenv()
+
+# Check for required environment variables at startup (like Express)
+# Express exits if OpenAI API key is missing when creating the client
+# Skip check during tests
+if not os.getenv("PYTEST_CURRENT_TEST"):
+    required_env_vars = ["JWT_SECRET", "OPENAI_API_KEY"]
+    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+    if missing_vars:
+        print(f"❌ Error: Missing required environment variables: {', '.join(missing_vars)}")
+        print("Please set these variables in your .env file")
+        sys.exit(1)
 
 # Import custom exception
 from middleware.auth import APIError
@@ -28,19 +40,17 @@ async def api_error_handler(request: Request, exc: APIError):
         content={"error": exc.error}
     )
 
-# Handle FastAPI validation errors like Express (map to 500 or appropriate status)
+# Handle FastAPI validation errors like Express (map to 500)
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    # Express typically returns 500 "Server error" for malformed requests
-    # or lets them through as undefined/null values
-    # We'll map validation errors to Express-style responses
+    # Express typically returns 500 "Something went wrong!" for validation errors
     print(f"Validation error: {exc.errors()}")
     return JSONResponse(
         status_code=500,
         content={"error": "Something went wrong!"}
     )
 
-# Handle JSON decode errors (malformed JSON body)
+# Handle JSON decode errors (malformed JSON body) - map to 500
 @app.exception_handler(json.JSONDecodeError)
 async def json_decode_error_handler(request: Request, exc: json.JSONDecodeError):
     return JSONResponse(
@@ -48,23 +58,50 @@ async def json_decode_error_handler(request: Request, exc: json.JSONDecodeError)
         content={"error": "Something went wrong!"}
     )
 
-# CORS configuration - match Express cors()
+# CORS configuration - match Express cors() (NO credentials)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # Express cors() default is false
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Security headers (helmet equivalent) - match Express helmet defaults
+# Security headers - match Express helmet() defaults exactly
 @app.middleware("http")
 async def add_security_headers(request, call_next):
     response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    # Note: helmet also adds other headers, but these are the key ones Express sets
+    
+    # Helmet defaults (as of helmet 4.x used by Express)
+    response.headers["x-content-type-options"] = "nosniff"
+    response.headers["x-frame-options"] = "SAMEORIGIN"  # Not DENY
+    response.headers["x-xss-protection"] = "0"  # Helmet 4 disables this
+    response.headers["x-dns-prefetch-control"] = "off"
+    response.headers["x-download-options"] = "noopen"
+    response.headers["x-permitted-cross-domain-policies"] = "none"
+    response.headers["referrer-policy"] = "no-referrer"
+    response.headers["cross-origin-opener-policy"] = "same-origin"
+    response.headers["cross-origin-resource-policy"] = "same-origin"
+    response.headers["origin-agent-cluster"] = "?1"
+    
+    # CSP
+    response.headers["content-security-policy"] = (
+        "default-src 'self';"
+        "base-uri 'self';"
+        "font-src 'self' https: data:;"
+        "form-action 'self';"
+        "frame-ancestors 'self';"
+        "img-src 'self' data:;"
+        "object-src 'none';"
+        "script-src 'self';"
+        "script-src-attr 'none';"
+        "style-src 'self' https: 'unsafe-inline';"
+        "upgrade-insecure-requests"
+    )
+    
+    # HSTS
+    response.headers["strict-transport-security"] = "max-age=15552000; includeSubDomains"
+    
     return response
 
 # Create uploads directory if it doesn't exist
@@ -92,6 +129,43 @@ if os.getenv("NODE_ENV") == "production":
             if file_path.exists() and file_path.is_file():
                 return FileResponse(file_path)
             return FileResponse(client_build / "index.html")
+
+# 404 handler - return HTML like Express default (not JSON)
+# Express returns 404 HTML for both unknown routes AND wrong methods (not 405)
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc):
+    # Match Express default 404 response (HTML, not JSON)
+    return HTMLResponse(
+        content="""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Error</title>
+</head>
+<body>
+<pre>Cannot {method} {path}</pre>
+</body>
+</html>""".format(method=request.method, path=request.url.path),
+        status_code=404
+    )
+
+# Wrong method (405) - Express also returns 404 HTML (not 405)
+@app.exception_handler(405)
+async def method_not_allowed_handler(request: Request, exc):
+    # Express returns 404 for wrong methods too, not 405
+    return HTMLResponse(
+        content="""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Error</title>
+</head>
+<body>
+<pre>Cannot {method} {path}</pre>
+</body>
+</html>""".format(method=request.method, path=request.url.path),
+        status_code=404  # 404, not 405!
+    )
 
 # Error handling - Express style
 @app.exception_handler(Exception)

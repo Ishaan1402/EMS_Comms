@@ -42,21 +42,22 @@ async def upload_recording(
     """
     Upload new recording.
     Matches Express multer behavior:
-    - Missing audio file -> 500 "Server error during upload"
-    - Wrong MIME type -> 500 "Something went wrong!"  
-    - File too large -> 500 "Something went wrong!"
-    - patient_info optional (None/NULL if missing)
+    - Missing audio file -> 500 "Server error during upload" (caught in route)
+    - Wrong MIME type -> 500 "Something went wrong!" (global handler)
+    - File too large -> 500 "Something went wrong!" (global handler)
+    - patient_info optional (omit key if None)
     """
     try:
-        # Validate audio file type - if wrong, Express/multer fails with generic 500
+        # Validate audio file type - if wrong, raise to global handler
         if audio.content_type not in ALLOWED_AUDIO_TYPES:
-            # Express multer error goes to catch block -> 500
-            raise Exception(f"Invalid file type: {audio.content_type}")
+            # Express multer fileFilter error goes to global handler -> "Something went wrong!"
+            raise Exception(f"Multer file filter error: Invalid file type")
         
-        # Check file size (50MB limit) - if exceeded, Express returns 500
+        # Check file size (50MB limit) - if exceeded, raise to global handler
         content = await audio.read()
         if len(content) > 50 * 1024 * 1024:
-            raise Exception(f"File size exceeds limit")
+            # Express multer size limit error goes to global handler -> "Something went wrong!"
+            raise Exception(f"Multer size limit exceeded")
         
         # Generate unique filename like Express
         timestamp = int(time.time() * 1000)
@@ -80,18 +81,29 @@ async def upload_recording(
         # Process recording asynchronously (fire and forget like Express)
         background_tasks.add_task(process_recording, result["id"], str(audio_file_path))
         
+        # Build response - OMIT patient_info key when null/None like Express
+        recording_obj = {
+            "id": result["id"],
+            "emt_id": emt_id,
+            "audio_file_path": str(audio_file_path)
+        }
+        # Only include patient_info if not None
+        if patient_info is not None:
+            recording_obj["patient_info"] = patient_info
+        
         return {
             "message": "Recording uploaded successfully",
-            "recording": {
-                "id": result["id"],
-                "emt_id": emt_id,
-                "patient_info": patient_info,
-                "audio_file_path": str(audio_file_path)
-            }
+            "recording": recording_obj
         }
     
     except Exception as error:
-        # Match Express: any upload error -> 500 "Server error during upload"
+        # Check if it's a multer-style error (should go to global handler)
+        error_str = str(error)
+        if "Multer" in error_str or "file filter" in error_str or "size limit" in error_str:
+            # Re-raise to be caught by global handler -> "Something went wrong!"
+            raise
+        
+        # Otherwise it's a route-level error -> "Server error during upload"
         print(f"Upload error: {error}")
         return JSONResponse(
             status_code=500,
@@ -154,7 +166,10 @@ async def get_recording(id: str, request: Request):  # Accept string, manual aut
 # Background processing functions
 
 async def process_recording(recording_id: int, audio_file_path: str):
-    """Process recording (transcription + LLM analysis)."""
+    """
+    Process recording (transcription + LLM analysis).
+    Matches Express: blocking I/O in threadpool, apply || defaults at storage time.
+    """
     try:
         # Update status to processing
         run(
@@ -170,13 +185,28 @@ async def process_recording(recording_id: int, audio_file_path: str):
         
         patient_info = recording[0]["patient_info"] if recording else ""
         
-        # Step 2: Transcribe audio using OpenAI Whisper
-        transcription = await transcribe_audio(audio_file_path)
+        # Step 2: Transcribe audio (blocking I/O in threadpool)
+        loop = asyncio.get_event_loop()
+        transcription = await loop.run_in_executor(executor, transcribe_audio_sync, audio_file_path)
         
-        # Step 3: Analyze with LLM (including both transcription and patient info)
+        # Step 3: Analyze with LLM (returns RAW response)
         analysis = await analyze_with_llm(transcription, patient_info)
         
-        # Step 4: Update recording with structured results
+        # Step 4: Apply JavaScript || semantics at storage time (like Express)
+        # Store llm_summary as medical_summary OR full JSON stringified
+        llm_summary_value = analysis.get("medical_summary") or json.dumps(analysis)
+        
+        # Apply || defaults for column fields
+        risk_score_value = analysis.get("risk_score") or 5
+        priority_level_value = analysis.get("priority_level") or 3
+        chief_complaint_value = analysis.get("chief_complaint") or "Not specified"
+        vital_signs_value = analysis.get("vital_signs") or "Not recorded"
+        symptoms_value = analysis.get("symptoms") or "Not specified"
+        recommended_actions_value = analysis.get("recommended_actions") or "Standard care"
+        critical_info_value = analysis.get("critical_info") or "None"
+        urgency_level_value = analysis.get("urgency_level") or "moderate"
+        
+        # Update recording with structured results
         run(
             """UPDATE recordings SET 
                 transcription = ?, 
@@ -188,35 +218,39 @@ async def process_recording(recording_id: int, audio_file_path: str):
                 symptoms = ?, 
                 recommended_actions = ?, 
                 critical_info = ?,
+                urgency_level = ?,
                 status = ? 
             WHERE id = ?""",
             (
                 transcription,
-                analysis.get("medical_summary") or json.dumps(analysis),
-                analysis.get("risk_score", 5),
-                analysis.get("priority_level", 3),
-                analysis.get("chief_complaint", "Not specified"),
-                analysis.get("vital_signs", "Not recorded"),
-                analysis.get("symptoms", "Not specified"),
-                analysis.get("recommended_actions", "Standard care"),
-                analysis.get("critical_info", "None"),
+                llm_summary_value,
+                risk_score_value,
+                priority_level_value,
+                chief_complaint_value,
+                vital_signs_value,
+                symptoms_value,
+                recommended_actions_value,
+                critical_info_value,
+                urgency_level_value,
                 'completed',
                 recording_id
             )
         )
         
+        print(f"✅ Recording {recording_id} processed successfully")
+        
         # Step 5: Notify appropriate doctors
-        await notify_doctors(recording_id, analysis.get("medical_summary") or json.dumps(analysis))
+        await notify_doctors(recording_id, llm_summary_value)
     
     except Exception as error:
-        print(f"Processing error: {error}")
+        print(f"❌ Processing error for recording {recording_id}: {error}")
         run(
             'UPDATE recordings SET status = ? WHERE id = ?',
             ('error', recording_id)
         )
 
-async def transcribe_audio(audio_file_path: str) -> str:
-    """Transcribe audio using OpenAI Whisper."""
+def transcribe_audio_sync(audio_file_path: str) -> str:
+    """Sync version of transcribe for thread pool execution."""
     if not openai_client:
         raise Exception("OpenAI API key not configured")
     
@@ -233,8 +267,12 @@ async def transcribe_audio(audio_file_path: str) -> str:
         print(f"Transcription error: {error}")
         raise error
 
+async def transcribe_audio(audio_file_path: str) -> str:
+    """Transcribe audio using OpenAI Whisper."""
+    return transcribe_audio_sync(audio_file_path)
+
 async def analyze_with_llm(transcription: str, patient_info: str = "") -> dict:
-    """Analyze transcription with LLM."""
+    """Analyze transcription with LLM - returns RAW LLM response."""
     if not openai_client:
         # Return default values if OpenAI not configured
         return {
@@ -326,24 +364,8 @@ Return ONLY the JSON object with no additional text."""
         result = json.loads(cleaned_response)
         print(f"Cleaned AI response: {result}")
         
-        # Apply JavaScript || semantics for defaults (falsy values -> defaults)
-        # risk_score 0 is falsy in JS, so || 5 means 0 becomes 5
-        # Empty strings are falsy, so || "default" means "" becomes "default"
-        if not result.get("risk_score"):  # 0, None, "" are all falsy
-            result["risk_score"] = 5
-        if not result.get("priority_level"):
-            result["priority_level"] = 3
-        if not result.get("chief_complaint") or result.get("chief_complaint") == "":
-            result["chief_complaint"] = "Not specified"
-        if not result.get("vital_signs") or result.get("vital_signs") == "":
-            result["vital_signs"] = "Not recorded"
-        if not result.get("symptoms") or result.get("symptoms") == "":
-            result["symptoms"] = "Not specified"
-        if not result.get("recommended_actions") or result.get("recommended_actions") == "":
-            result["recommended_actions"] = "Standard care"
-        if not result.get("critical_info") or result.get("critical_info") == "":
-            result["critical_info"] = "None"
-            
+        # Return RAW result - do NOT apply defaults here
+        # Express applies defaults only at storage time for specific columns
         return result
 
     except Exception as error:
