@@ -1,0 +1,73 @@
+import os
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from dotenv import load_dotenv
+import pathlib
+
+# Load environment variables
+load_dotenv()
+
+# Import routers
+from routes import auth, recordings, doctors, notifications
+
+app = FastAPI(title="Asclepius EMT System")
+
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Security headers (helmet equivalent)
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
+
+# Create uploads directory if it doesn't exist
+uploads_dir = pathlib.Path("uploads")
+uploads_dir.mkdir(exist_ok=True)
+
+# Static files for uploaded audio
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+# Routes
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(recordings.router, prefix="/api/recordings", tags=["recordings"])
+app.include_router(doctors.router, prefix="/api/doctors", tags=["doctors"])
+app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
+
+# Serve React app in production
+if os.getenv("NODE_ENV") == "production":
+    client_build = pathlib.Path("client/build")
+    if client_build.exists():
+        app.mount("/static", StaticFiles(directory="client/build/static"), name="static")
+        
+        @app.get("/{full_path:path}")
+        async def serve_react_app(full_path: str):
+            file_path = client_build / full_path
+            if file_path.exists() and file_path.is_file():
+                return FileResponse(file_path)
+            return FileResponse(client_build / "index.html")
+
+# Error handling
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    import traceback
+    print(f"Error: {exc}")
+    traceback.print_exc()
+    return {"error": "Something went wrong!"}
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 5000))
+    print(f"🏥 Asclepius EMT System running on port {port}")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

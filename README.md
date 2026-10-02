@@ -2,6 +2,17 @@
 
 An AI-powered emergency triage system that enables EMTs to record patient conversations, automatically classify risk levels, prioritize cases by urgency, and instantly notify doctors for faster emergency response.
 
+## 🐍 Python/FastAPI Backend Available
+
+This repository now includes a **Python/FastAPI backend** as an alternative to the Node/Express backend. Both backends are functionally identical and maintain full API compatibility.
+
+- **Node/Express** (original): `npm start` or `node server.js`
+- **Python/FastAPI** (new): `python3 main.py` or `./start-python.sh`
+
+See [PYTHON_BACKEND.md](PYTHON_BACKEND.md) for complete Python backend documentation.
+
+---
+
 ## ✨ Features
 
 ### For EMTs/Paramedics
