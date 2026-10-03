@@ -43,7 +43,7 @@ def run(sql: str, params: tuple = ()):
         return {"id": cursor.lastrowid, "changes": cursor.rowcount}
 
 def init_database():
-    """Initialize database tables and seed data."""
+    """Create database tables if they do not exist. Does not seed users."""
     print("✅ SQLite database connected successfully")
     print(f"📁 Database file: {DB_PATH}")
     
@@ -111,8 +111,6 @@ def init_database():
     with get_db() as conn:
         conn.executescript(schema)
         print("✅ Database schema created successfully")
-    
-    insert_sample_data()
 
 def insert_sample_data():
     """Insert sample data with proper password hashes."""
@@ -142,5 +140,9 @@ def insert_sample_data():
     except Exception as error:
         print(f"❌ Error creating sample data: {error}")
 
-# Initialize database on import
-init_database()
+if __name__ == "__main__":
+    # `python3 database.py --seed` creates the schema and the demo users.
+    import sys
+    init_database()
+    if "--seed" in sys.argv:
+        insert_sample_data()

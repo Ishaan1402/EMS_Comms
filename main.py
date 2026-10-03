@@ -1,5 +1,5 @@
 import os
-import sys
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -13,24 +13,27 @@ import json
 # Load environment variables
 load_dotenv()
 
-# Check for required environment variables at startup (like Express)
-# Express exits if OpenAI API key or Twilio credentials are missing when creating clients
-# Skip check during tests
-if not os.getenv("PYTEST_CURRENT_TEST"):
-    required_env_vars = ["JWT_SECRET", "OPENAI_API_KEY", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]
-    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-    if missing_vars:
-        print(f"❌ Error: Missing required environment variables: {', '.join(missing_vars)}")
-        print("Please set these variables in your .env file")
-        sys.exit(1)
-
 # Import custom exception
 from middleware.auth import APIError
 
 # Import routers
 from routes import auth, recordings, doctors, notifications
+from database import init_database, insert_sample_data
 
-app = FastAPI(title="Asclepius EMT System")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Missing keys only fail the routes that need them; warn instead of exiting.
+    expected_env_vars = ["JWT_SECRET", "OPENAI_API_KEY", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]
+    missing_vars = [var for var in expected_env_vars if not os.getenv(var)]
+    if missing_vars:
+        print(f"⚠️  Missing environment variables: {', '.join(missing_vars)}. Routes that need them will fail.")
+
+    init_database()
+    if os.getenv("SEED_DEMO_USERS", "").lower() in ("1", "true", "yes"):
+        insert_sample_data()
+    yield
+
+app = FastAPI(title="Asclepius EMT System", lifespan=lifespan)
 
 # Custom exception handler for Express-style error responses
 @app.exception_handler(APIError)
