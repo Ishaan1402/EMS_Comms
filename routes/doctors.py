@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, Query, Request, Body
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Any
-from database import query, run
+import json
+from database import query, run, get_db
 from middleware.auth import get_current_user, require_role, APIError
 
 router = APIRouter()
@@ -122,10 +123,21 @@ async def update_availability(
     - String "false" -> is_available=1 (truthy), response ECHOES "is_available":"false" (string)
     """
     try:
+        # Get request body - reject malformed nonempty JSON
         try:
-            body = await request.json()
-        except:
-            body = {}
+            body_bytes = await request.body()
+            if body_bytes:
+                # Nonempty body must be valid JSON
+                body = json.loads(body_bytes)
+            else:
+                # Empty body is OK (treated as {})
+                body = {}
+        except json.JSONDecodeError:
+            # Malformed nonempty JSON -> reject before any write
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Invalid JSON"}
+            )
         
         is_available_val = body.get("is_available")
         
@@ -193,10 +205,21 @@ async def respond_to_recording(
             # Nothing can match a non-numeric id, so report success without a write.
             return {"message": "Response recorded successfully"}
         
+        # Get request body - reject malformed nonempty JSON
         try:
-            body = await request.json()
-        except:
-            body = {}
+            body_bytes = await request.body()
+            if body_bytes:
+                # Nonempty body must be valid JSON
+                body = json.loads(body_bytes)
+            else:
+                # Empty body is OK (treated as {})
+                body = {}
+        except json.JSONDecodeError:
+            # Malformed nonempty JSON -> reject before any write
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Invalid JSON"}
+            )
         
         response_text = body.get("response")  # Can be None
         

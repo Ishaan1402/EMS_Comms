@@ -122,9 +122,25 @@ if os.getenv("NODE_ENV") == "production":
         
         @app.get("/{full_path:path}")
         async def serve_react_app(full_path: str):
+            # Resolve the path and ensure it stays within client_build
             file_path = client_build / full_path
-            if file_path.exists() and file_path.is_file():
-                return FileResponse(file_path)
+            try:
+                # Resolve to absolute path and check it's within client_build
+                resolved_file = file_path.resolve()
+                resolved_build = client_build.resolve()
+                
+                # Ensure the resolved path is within client_build
+                if not str(resolved_file).startswith(str(resolved_build)):
+                    # Path escapes client/build - return index.html
+                    return FileResponse(client_build / "index.html")
+                
+                # Check if it's a file that exists
+                if resolved_file.exists() and resolved_file.is_file():
+                    return FileResponse(resolved_file)
+            except (ValueError, OSError):
+                # Invalid path - return index.html
+                pass
+            
             return FileResponse(client_build / "index.html")
 
 # Unknown routes get a plain HTML 404 page, not JSON.

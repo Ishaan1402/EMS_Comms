@@ -8,9 +8,9 @@ from twilio.rest import Client as TwilioClient
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from datetime import datetime
-from database import query, run
+from database import query, run, get_db
 from middleware.auth import get_current_user, require_role, APIError
-from routes.recordings import executor
+from routes.recordings import slow_executor
 
 router = APIRouter()
 
@@ -131,7 +131,7 @@ View full details at: {frontend_url}/recording/{recording['id']}
 Reply STOP to unsubscribe"""
 
         await asyncio.get_running_loop().run_in_executor(
-            executor,
+            slow_executor,
             lambda: twilio_client.messages.create(
                 body=message,
                 from_=os.getenv("TWILIO_PHONE_NUMBER"),
@@ -231,7 +231,7 @@ async def send_email(email: str, recording: dict, doctor: dict):
             html_content=html_content
         )
         
-        await asyncio.get_running_loop().run_in_executor(executor, sendgrid_client.send, message)
+        await asyncio.get_running_loop().run_in_executor(slow_executor, sendgrid_client.send, message)
         print(f"Email sent to {email}")
     
     except Exception as error:

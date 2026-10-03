@@ -25,8 +25,17 @@ ALLOWED_AUDIO_TYPES = [
     "audio/aac", "audio/x-aac", "audio/ogg", "audio/webm", "audio/mp4"
 ]
 
-# Shared pool for blocking calls (OpenAI, bcrypt, file writes, Twilio/SendGrid).
-executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+def is_audio_type_allowed(content_type: str) -> bool:
+    """Check if audio MIME type is allowed, handling parameters like codecs."""
+    if not content_type:
+        return False
+    # Parse base MIME type (before semicolon) to handle parameterized types
+    base_type = content_type.split(';')[0].strip()
+    return base_type in ALLOWED_AUDIO_TYPES
+
+# Separate pools: fast ops (auth, file writes) vs slow external calls (OpenAI, notifications)
+fast_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="fast")
+slow_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="slow")
 
 @router.post("/upload", status_code=201)
 async def upload_recording(
@@ -45,7 +54,7 @@ async def upload_recording(
     """
     try:
         # Type and size errors go to the global handler ("Something went wrong!").
-        if audio.content_type not in ALLOWED_AUDIO_TYPES:
+        if not is_audio_type_allowed(audio.content_type):
             raise Exception(f"Multer file filter error: Invalid file type")
         
         content = await audio.read()
@@ -58,7 +67,7 @@ async def upload_recording(
         filename = f"recording-{timestamp}-{random_suffix}{file_ext}"
         audio_file_path = UPLOAD_DIR / filename
         
-        await asyncio.get_running_loop().run_in_executor(executor, audio_file_path.write_bytes, content)
+        await asyncio.get_running_loop().run_in_executor(fast_executor, audio_file_path.write_bytes, content)
         
         emt_id = current_user["id"]
         
@@ -164,7 +173,7 @@ async def process_recording(recording_id: int, audio_file_path: str):
         patient_info = recording[0]["patient_info"] if recording else ""
         
         loop = asyncio.get_event_loop()
-        transcription = await loop.run_in_executor(executor, transcribe_audio_sync, audio_file_path)
+        transcription = await loop.run_in_executor(slow_executor, transcribe_audio_sync, audio_file_path)
         
         analysis = await analyze_with_llm(transcription, patient_info)
         
@@ -306,7 +315,7 @@ Return ONLY the JSON object with no additional text."""
 
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
-            executor,
+            slow_executor,
             lambda: openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": prompt}],

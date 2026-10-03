@@ -7,7 +7,7 @@ import bcrypt
 import json
 from database import query, run
 from middleware.auth import create_access_token, get_current_user, APIError
-from routes.recordings import executor
+from routes.recordings import fast_executor
 
 router = APIRouter()
 
@@ -60,7 +60,7 @@ async def register(request: Request):
         
         # Hash password - if missing, will fail with generic 500
         password_hash = (await asyncio.get_running_loop().run_in_executor(
-            executor, bcrypt.hashpw, password.encode('utf-8'), bcrypt.gensalt(rounds=10)
+            fast_executor, bcrypt.hashpw, password.encode('utf-8'), bcrypt.gensalt(rounds=10)
         )).decode('utf-8')
         
         # Insert new user - if required fields missing, SQL will fail -> 500
@@ -124,7 +124,7 @@ async def login(request: Request):
         
         # Check password - if password is None, will fail -> 500
         is_valid_password = await asyncio.get_running_loop().run_in_executor(
-            executor, bcrypt.checkpw, password.encode('utf-8'), user["password_hash"].encode('utf-8')
+            fast_executor, bcrypt.checkpw, password.encode('utf-8'), user["password_hash"].encode('utf-8')
         )
         
         if not is_valid_password:
