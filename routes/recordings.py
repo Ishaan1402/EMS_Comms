@@ -82,14 +82,15 @@ async def upload_recording(
         background_tasks.add_task(process_recording, result["id"], str(audio_file_path))
         
         # Build response - OMIT patient_info key when null/None like Express
+        # Express key order: id, emt_id, patient_info, audio_file_path
         recording_obj = {
             "id": result["id"],
-            "emt_id": emt_id,
-            "audio_file_path": str(audio_file_path)
+            "emt_id": emt_id
         }
-        # Only include patient_info if not None
+        # Only include patient_info if not None (insert before audio_file_path)
         if patient_info is not None:
             recording_obj["patient_info"] = patient_info
+        recording_obj["audio_file_path"] = str(audio_file_path)
         
         return {
             "message": "Recording uploaded successfully",

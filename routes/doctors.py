@@ -14,14 +14,18 @@ class ResponseRequest(BaseModel):
     response: Optional[str] = None  # Optional to match Express
 
 @router.get("/available")
-async def get_available_doctors():
+async def get_available_doctors(request: Request):
     """Get all available doctors (public endpoint)."""
     try:
         doctors = query(
             'SELECT id, first_name, last_name, specialty, phone, email FROM users WHERE role = ? AND is_available = ?',
             ('doctor', 1)
         )
-        return doctors
+        # Express always adds Access-Control-Allow-Origin: * even without Origin header
+        return JSONResponse(
+            content=doctors,
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
     
     except Exception as error:
         print(f"Get doctors error: {error}")

@@ -203,8 +203,9 @@ async def send_email(email: str, recording: dict, doctor: dict):
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         urgency_color = get_urgency_color(urgency_level)
         
-        # Build urgency display - uppercase if not null/empty
-        if urgency_level and urgency_level != "null":
+        # Build urgency display - uppercase if not null/empty/undefined
+        # Express: null urgency renders as lowercase "undefined" in email body
+        if urgency_level and urgency_level != "null" and urgency_level != "undefined":
             urgency_display = urgency_level.upper()
         else:
             urgency_display = urgency_level
