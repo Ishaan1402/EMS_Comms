@@ -648,25 +648,18 @@ class TestSecurityFixes:
         })
         self.doctor_token = doctor_response.json()["token"]
     
-    def test_path_traversal_blocked(self):
+    def test_path_traversal_blocked(self, tmp_path, monkeypatch):
         """Issue 1: Path traversal attempts must not escape client/build in production."""
         import os
         import pathlib
-        import shutil
         
         # Save original NODE_ENV
         original_env = os.environ.get("NODE_ENV")
         
         try:
-            # Create synthetic client/build and sibling directories
-            build_dir = pathlib.Path("client/build")
-            backup_dir = pathlib.Path("client/build-backup")
-            
-            # Clean up if they exist
-            if build_dir.exists():
-                shutil.rmtree(build_dir)
-            if backup_dir.exists():
-                shutil.rmtree(backup_dir)
+            # Create synthetic filesystem in pytest's tmp_path (safe, never deletes real files)
+            build_dir = tmp_path / "client" / "build"
+            backup_dir = tmp_path / "client" / "build-backup"
             
             # Create directories including static subdir
             build_dir.mkdir(parents=True, exist_ok=True)
@@ -686,6 +679,9 @@ class TestSecurityFixes:
             except (OSError, NotImplementedError):
                 # Symlink creation may fail on some systems
                 pass
+            
+            # Change to tmp_path so app sees our synthetic client/build
+            monkeypatch.chdir(tmp_path)
             
             # Set production mode and reload the app
             os.environ["NODE_ENV"] = "production"
@@ -728,19 +724,13 @@ class TestSecurityFixes:
                 assert "PRIVATE SECRET" not in response.text
             
         finally:
-            # Clean up
-            if build_dir.exists():
-                shutil.rmtree(build_dir)
-            if backup_dir.exists():
-                shutil.rmtree(backup_dir)
-            
             # Restore environment
             if original_env is None:
                 os.environ.pop("NODE_ENV", None)
             else:
                 os.environ["NODE_ENV"] = original_env
             
-            # Reload to restore non-production mode
+            # Reload to restore non-production mode (tmp_path cleanup is automatic)
             import importlib
             import main
             importlib.reload(main)
