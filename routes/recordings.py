@@ -12,23 +12,20 @@ from middleware.auth import get_current_user, require_role, APIError
 
 router = APIRouter()
 
-# Configure OpenAI (allow None for tests)
+# None when OPENAI_API_KEY is unset; processing then marks recordings as error.
 openai_api_key = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
 
-# Configure uploads
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# Match Express multer regex: /audio\/(mp3|wav|m4a|aac|ogg|webm|mp4)/
-# Note: Express does NOT include "mpeg" - only mp3, wav, m4a, aac, ogg, webm, mp4
+# audio/mpeg is deliberately not accepted.
 ALLOWED_AUDIO_TYPES = [
     "audio/mp3", "audio/wav", "audio/m4a", "audio/x-m4a",
     "audio/aac", "audio/x-aac", "audio/ogg", "audio/webm", "audio/mp4"
-    # Note: "audio/mpeg" is NOT in this list to match Express
 ]
 
-# Thread pool for OpenAI sync calls (non-blocking)
+# Shared pool for blocking calls (OpenAI, bcrypt, file writes, Twilio/SendGrid).
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 @router.post("/upload", status_code=201)
@@ -36,57 +33,47 @@ async def upload_recording(
     background_tasks: BackgroundTasks,
     request: Request,
     audio: UploadFile = File(...),
-    patient_info: str = Form(None),  # Optional like Express (req.body.patient_info can be undefined)
+    patient_info: str = Form(None),
     current_user: dict = Depends(require_role(["emt"]))
 ):
     """
     Upload new recording.
-    Matches Express multer behavior:
     - Missing audio file -> 500 "Server error during upload" (caught in route)
     - Wrong MIME type -> 500 "Something went wrong!" (global handler)
     - File too large -> 500 "Something went wrong!" (global handler)
     - patient_info optional (omit key if None)
     """
     try:
-        # Validate audio file type - if wrong, raise to global handler
+        # Type and size errors go to the global handler ("Something went wrong!").
         if audio.content_type not in ALLOWED_AUDIO_TYPES:
-            # Express multer fileFilter error goes to global handler -> "Something went wrong!"
             raise Exception(f"Multer file filter error: Invalid file type")
         
-        # Check file size (50MB limit) - if exceeded, raise to global handler
         content = await audio.read()
         if len(content) > 50 * 1024 * 1024:
-            # Express multer size limit error goes to global handler -> "Something went wrong!"
             raise Exception(f"Multer size limit exceeded")
         
-        # Generate unique filename like Express
         timestamp = int(time.time() * 1000)
         random_suffix = int(time.time() * 1000000) % 1000000000
         file_ext = Path(audio.filename).suffix if audio.filename else ".mp3"
         filename = f"recording-{timestamp}-{random_suffix}{file_ext}"
         audio_file_path = UPLOAD_DIR / filename
         
-        # Save file (blocking I/O in threadpool)
         await asyncio.get_running_loop().run_in_executor(executor, audio_file_path.write_bytes, content)
         
         emt_id = current_user["id"]
         
-        # Create recording record - patient_info can be None (NULL in SQL)
         result = run(
             'INSERT INTO recordings (emt_id, patient_info, audio_file_path) VALUES (?, ?, ?)',
             (emt_id, patient_info, str(audio_file_path))
         )
         
-        # Process recording asynchronously (fire and forget like Express)
         background_tasks.add_task(process_recording, result["id"], str(audio_file_path))
         
-        # Build response - OMIT patient_info key when null/None like Express
-        # Express key order: id, emt_id, patient_info, audio_file_path
+        # Key order is id, emt_id, patient_info, audio_file_path; patient_info is omitted when None.
         recording_obj = {
             "id": result["id"],
             "emt_id": emt_id
         }
-        # Only include patient_info if not None (insert before audio_file_path)
         if patient_info is not None:
             recording_obj["patient_info"] = patient_info
         recording_obj["audio_file_path"] = str(audio_file_path)
@@ -97,13 +84,10 @@ async def upload_recording(
         }
     
     except Exception as error:
-        # Check if it's a multer-style error (should go to global handler)
         error_str = str(error)
         if "Multer" in error_str or "file filter" in error_str or "size limit" in error_str:
-            # Re-raise to be caught by global handler -> "Something went wrong!"
             raise
         
-        # Otherwise it's a route-level error -> "Server error during upload"
         print(f"Upload error: {error}")
         return JSONResponse(
             status_code=500,
@@ -128,13 +112,11 @@ async def get_my_recordings(current_user: dict = Depends(require_role(["emt"])))
         )
 
 @router.get("/{id}")
-async def get_recording(id: str, request: Request):  # Accept string, manual auth to avoid dep issues
-    """Get recording by ID - Express-compatible."""
-    # Manual auth to match Express (doesn't use strict role check)
+async def get_recording(id: str, request: Request):
+    """Get recording by ID. Any authenticated role may read it."""
     current_user = get_current_user(request)
     
     try:
-        # Try to convert to int
         try:
             recording_id = int(id)
         except ValueError:
@@ -163,21 +145,17 @@ async def get_recording(id: str, request: Request):  # Accept string, manual aut
             content={"error": "Server error getting recording"}
         )
 
-# Background processing functions
-
 async def process_recording(recording_id: int, audio_file_path: str):
     """
     Process recording (transcription + LLM analysis).
-    Matches Express: blocking I/O in threadpool, apply || defaults at storage time.
+    Defaults for empty analysis fields are applied at storage time.
     """
     try:
-        # Update status to processing
         run(
             'UPDATE recordings SET status = ? WHERE id = ?',
             ('processing', recording_id)
         )
         
-        # Step 1: Get patient information from database
         recording = query(
             'SELECT patient_info FROM recordings WHERE id = ?',
             (recording_id,)
@@ -185,21 +163,16 @@ async def process_recording(recording_id: int, audio_file_path: str):
         
         patient_info = recording[0]["patient_info"] if recording else ""
         
-        # Step 2: Transcribe audio (blocking I/O in threadpool)
         loop = asyncio.get_event_loop()
         transcription = await loop.run_in_executor(executor, transcribe_audio_sync, audio_file_path)
         
-        # Step 3: Analyze with LLM (returns RAW response)
         analysis = await analyze_with_llm(transcription, patient_info)
         
-        # Step 4: Apply JavaScript || semantics at storage time (like Express)
-        # Store llm_summary as compact JSON (json.dumps with no spaces, like JSON.stringify)
+        # Without a medical_summary, store the whole analysis as compact JSON.
         llm_summary_value = analysis.get("medical_summary")
         if not llm_summary_value:
-            # Store compact JSON without spaces (JSON.stringify default)
             llm_summary_value = json.dumps(analysis, separators=(',', ':'))
         
-        # Apply || defaults for column fields
         risk_score_value = analysis.get("risk_score") or 5
         priority_level_value = analysis.get("priority_level") or 3
         chief_complaint_value = analysis.get("chief_complaint") or "Not specified"
@@ -207,10 +180,8 @@ async def process_recording(recording_id: int, audio_file_path: str):
         symptoms_value = analysis.get("symptoms") or "Not specified"
         recommended_actions_value = analysis.get("recommended_actions") or "Standard care"
         critical_info_value = analysis.get("critical_info") or "None"
-        # DO NOT set urgency_level - Express does not set this column in processRecording
-        # It stays at DB default "medium"
+        # urgency_level is intentionally not written; it keeps the DB default "medium".
         
-        # Update recording with structured results (no urgency_level update)
         run(
             """UPDATE recordings SET 
                 transcription = ?, 
@@ -241,7 +212,6 @@ async def process_recording(recording_id: int, audio_file_path: str):
         
         print(f"✅ Recording {recording_id} processed successfully")
         
-        # Step 5: Notify appropriate doctors
         await notify_doctors(recording_id, llm_summary_value)
     
     except Exception as error:
@@ -334,7 +304,6 @@ EXAMPLES:
 
 Return ONLY the JSON object with no additional text."""
 
-        # Run OpenAI sync call in thread pool (non-blocking)
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             executor,
@@ -359,8 +328,7 @@ Return ONLY the JSON object with no additional text."""
         result = json.loads(cleaned_response)
         print(f"Cleaned AI response: {result}")
         
-        # Return RAW result - do NOT apply defaults here
-        # Express applies defaults only at storage time for specific columns
+        # Defaults are applied by the caller at storage time.
         return result
 
     except Exception as error:

@@ -4,8 +4,6 @@ from pathlib import Path
 import bcrypt
 from contextlib import contextmanager
 
-# Database path - same as Node.js version
-# Use absolute path based on project root
 DB_PATH = Path(__file__).parent / "asclepius.db"
 
 def get_db_connection():
@@ -115,8 +113,7 @@ def init_database():
 def insert_sample_data():
     """Insert sample data with proper password hashes."""
     try:
-        # Hash the password "password123" for all demo accounts
-        # Using bcrypt directly, compatible with bcryptjs from Node
+        # All demo accounts share the password "password123"
         password_hash = bcrypt.hashpw("password123".encode('utf-8'), bcrypt.gensalt(rounds=10)).decode('utf-8')
         
         sample_users = [

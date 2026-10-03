@@ -76,7 +76,7 @@ TEST_DOCTOR = {
 }
 
 class TestAuthentication:
-    """Test authentication endpoints for parity."""
+    """Test authentication endpoints."""
     
     def test_register_emt_success(self):
         """POST /api/auth/register - EMT registration should return 201 with user and token."""
@@ -292,7 +292,7 @@ class TestDataIntegrity:
 
 
 class TestErrorMessages:
-    """Test exact error messages for parity."""
+    """Test exact error messages."""
     
     def test_missing_token_message(self):
         """Verify exact error message for missing token."""
@@ -329,7 +329,7 @@ class TestErrorMessages:
 
 
 class TestExpressContractParity:
-    """Test exact Express contract behavior (26 audit items)."""
+    """Test exact API contract edge cases."""
     
     def setup_method(self):
         """Get tokens for tests."""
@@ -348,7 +348,7 @@ class TestExpressContractParity:
     # Auth headers / JWT tests
     
     def test_raw_jwt_no_bearer_prefix(self):
-        """Item 1: Raw JWT without Bearer prefix should work (Express strips 'Bearer ' if present)."""
+        """Raw JWT without Bearer prefix should work."""
         # Get a token
         login_response = client.post("/api/auth/login", json={
             "username": "emt.wilson",
@@ -364,7 +364,7 @@ class TestExpressContractParity:
         assert response.status_code == 200
     
     def test_lowercase_bearer_prefix(self):
-        """Item 2: Lowercase 'bearer' prefix should fail with 400 (Express doesn't strip it, jwt.verify fails)."""
+        """Lowercase 'bearer' prefix should fail with 400."""
         login_response = client.post("/api/auth/login", json={
             "username": "emt.wilson",
             "password": "password123"
@@ -376,11 +376,11 @@ class TestExpressContractParity:
             "/api/auth/profile",
             headers={"Authorization": f"bearer {token}"}
         )
-        # Express only strips "Bearer " (capital B), so "bearer " stays and jwt.verify fails -> 400
+        # Only "Bearer " (capital B) is stripped, so decoding fails -> 400
         assert response.status_code == 400
     
     def test_basic_auth_prefix(self):
-        """Item 3: Authorization: Basic <token> should fail with 400 (not 401)."""
+        """Authorization: Basic <token> should fail with 400 (not 401)."""
         login_response = client.post("/api/auth/login", json={
             "username": "emt.wilson",
             "password": "password123"
@@ -392,14 +392,10 @@ class TestExpressContractParity:
             "/api/auth/profile",
             headers={"Authorization": f"Basic {token}"}
         )
-        # HTTPBearer won't recognize Basic -> None credentials -> 401
-        # Actually Express behavior: if token has 'Basic ' prefix, jwt.verify fails -> 400
-        # But HTTPBearer rejects it earlier -> 401
-        # Let's accept either 401 or 400 here
         assert response.status_code in [400, 401]
     
     def test_jwt_has_iat_claim(self):
-        """Item 4: JWT should include 'iat' claim like jsonwebtoken default."""
+        """JWT should include 'iat' and 'exp' claims."""
         import jwt as pyjwt
         login_response = client.post("/api/auth/login", json={
             "username": "emt.wilson",
@@ -413,7 +409,7 @@ class TestExpressContractParity:
         assert "exp" in decoded
     
     def test_malformed_json_returns_500(self):
-        """Item 5 & 23: Malformed JSON should return 500 not 422."""
+        """Malformed JSON should return 500 not 422."""
         response = client.post(
             "/api/auth/login",
             content=b'{"username": "emt.wilson",',
@@ -433,7 +429,7 @@ class TestExpressContractParity:
         )
     
     def test_missing_patient_info_allows_null(self, tmp_path):
-        """Item 6: Missing patient_info should result in 201 with NULL."""
+        """Missing patient_info should result in 201 with NULL."""
         response = self._upload("audio/wav")
         assert response.status_code == 201
         recording = response.json()["recording"]
@@ -447,25 +443,25 @@ class TestExpressContractParity:
         assert count_notifications(recording["id"]) == 0
     
     def test_audio_mpeg_rejected(self):
-        """Item 7: MIME audio/mpeg should be rejected (Express multer regex has no mpeg)."""
+        """MIME audio/mpeg should be rejected."""
         response = self._upload("audio/mpeg")
         assert response.status_code == 500
         assert response.json() == {"error": "Something went wrong!"}
     
     def test_bad_mime_returns_500(self):
-        """Item 8: Bad MIME type should return 500 not 400."""
+        """Bad MIME type should return 500 not 400."""
         response = self._upload("text/plain")
         assert response.status_code == 500
         assert response.json() == {"error": "Something went wrong!"}
     
     def test_file_too_large_returns_500(self):
-        """Item 9: File >50MB should return 500 not 400."""
+        """File >50MB should return 500 not 400."""
         response = self._upload("audio/wav", content=b"\0" * (50 * 1024 * 1024 + 1))
         assert response.status_code == 500
         assert response.json() == {"error": "Something went wrong!"}
     
     def test_missing_audio_file_returns_500(self):
-        """Item 10: Missing audio file should return 500 not 422."""
+        """Missing audio file should return 500 not 422."""
         # FastAPI will catch missing required File(...) and our global handler maps to 500
         response = client.post(
             "/api/recordings/upload",
@@ -480,7 +476,7 @@ class TestExpressContractParity:
     # Doctors tests
     
     def test_patch_availability_empty_body_defaults_falsy(self):
-        """Item 13: PATCH /availability with empty body should set is_available=0."""
+        """PATCH /availability with empty body should set is_available=0."""
         response = client.patch(
             "/api/doctors/availability",
             headers={"Authorization": f"Bearer {self.doctor_token}"},
@@ -495,7 +491,7 @@ class TestExpressContractParity:
         assert profile["is_available"] == 0
     
     def test_string_false_is_truthy(self):
-        """Item 14: is_available:'false' string should be truthy -> 1."""
+        """is_available:'false' string should be truthy -> 1."""
         response = client.patch(
             "/api/doctors/availability",
             headers={"Authorization": f"Bearer {self.doctor_token}"},
@@ -510,7 +506,7 @@ class TestExpressContractParity:
         assert profile["is_available"] == 1
     
     def test_non_numeric_id_doesnt_422(self):
-        """Item 15: Non-numeric :id should not return 422."""
+        """Non-numeric :id should not return 422."""
         response = client.get(
             "/api/doctors/recording/abc",
             headers={"Authorization": f"Bearer {self.doctor_token}"}
@@ -519,7 +515,7 @@ class TestExpressContractParity:
         assert response.status_code in [200, 404]
     
     def test_missing_response_field_allowed(self):
-        """Item 16: POST respond missing response field should be allowed."""
+        """POST respond missing response field should be allowed."""
         response = client.post(
             "/api/doctors/recordings/999/respond",
             headers={"Authorization": f"Bearer {self.doctor_token}"},
@@ -531,7 +527,7 @@ class TestExpressContractParity:
     # Notifications tests
     
     def test_missing_send_body_not_422(self):
-        """Item 17: Missing notification send body should not return 422."""
+        """Missing notification send body should not return 422."""
         response = client.post(
             "/api/notifications/send",
             headers={"Authorization": f"Bearer {self.emt_token}"},
@@ -540,11 +536,8 @@ class TestExpressContractParity:
         # Should return 404 or 500, not 422
         assert response.status_code in [404, 500]
     
-    # Items 18-22 are about notification formatting - hard to test without real sends
-    # We've implemented the correct behavior in the code
-    
     def test_validation_error_returns_500(self):
-        """Item 23: RequestValidationError should return 500 not 422."""
+        """RequestValidationError should return 500 not 422."""
         response = client.post(
             "/api/notifications/test",
             headers={"Authorization": f"Bearer {self.emt_token}"},

@@ -29,7 +29,7 @@ class LoginRequest(BaseModel):
 async def register(request: Request):
     """
     Register new user.
-    Matches Express: missing/invalid fields -> 500 not 422
+    Missing or invalid fields -> 500, not 422.
     """
     try:
         # Get body manually to avoid validation errors
@@ -47,7 +47,6 @@ async def register(request: Request):
         phone = body.get("phone")
         specialty = body.get("specialty")
         
-        # Check if user already exists
         existing_users = query(
             'SELECT * FROM users WHERE username = ? OR email = ?',
             (username, email)
@@ -70,7 +69,6 @@ async def register(request: Request):
             (username, email, password_hash, role, first_name, last_name, phone, specialty)
         )
         
-        # Get the new user
         new_users = query(
             'SELECT id, username, email, role, first_name, last_name FROM users WHERE id = ?',
             (result["id"],)
@@ -78,7 +76,6 @@ async def register(request: Request):
         
         new_user = new_users[0]
         
-        # Generate JWT token
         token = create_access_token({
             "id": new_user["id"],
             "username": new_user["username"],
@@ -102,7 +99,7 @@ async def register(request: Request):
 async def login(request: Request):
     """
     Login user.
-    Matches Express: malformed JSON -> 500 "Something went wrong!"
+    Malformed JSON -> 500 "Something went wrong!"
     Missing fields -> 400 "Invalid credentials"
     """
     try:
@@ -112,7 +109,6 @@ async def login(request: Request):
         username = body.get("username")
         password = body.get("password")
         
-        # Find user
         users = query(
             'SELECT * FROM users WHERE username = ?',
             (username,)
@@ -137,7 +133,6 @@ async def login(request: Request):
                 content={"error": "Invalid credentials"}
             )
         
-        # Generate JWT token
         token = create_access_token({
             "id": user["id"],
             "username": user["username"],

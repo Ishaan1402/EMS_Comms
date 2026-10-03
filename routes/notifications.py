@@ -14,12 +14,11 @@ from routes.recordings import executor
 
 router = APIRouter()
 
-# Configure Twilio (allow None for tests, but will fail if actually used)
+# Clients are None when unconfigured; the send helpers raise if used.
 twilio_account_sid = os.getenv("TWILIO_ACCOUNT_SID")
 twilio_auth_token = os.getenv("TWILIO_AUTH_TOKEN")
 twilio_client = TwilioClient(twilio_account_sid, twilio_auth_token) if (twilio_account_sid and twilio_auth_token) else None
 
-# Configure SendGrid (allow None for tests, but will fail if actually used)
 sendgrid_api_key = os.getenv("SENDGRID_API_KEY")
 sendgrid_client = SendGridAPIClient(sendgrid_api_key) if sendgrid_api_key else None
 
@@ -34,15 +33,12 @@ async def send_notification(
 ):
     """
     Send notification to doctor.
-    Matches Express: missing fields -> 404 or 500, not 422
-    Array body -> 404 (lookup fails), not 500
-    Twilio/SendGrid failures -> 500, don't mark delivered=1
+    Missing fields or an array body -> 404 (lookup fails), never 422.
+    Twilio/SendGrid failures -> 500 and delivered stays 0.
     """
     try:
-        # Get request body
         try:
             body = await request.json()
-            # If body is an array, treat as invalid (Express would fail lookup -> 404)
             if isinstance(body, list):
                 body = {}
         except:
@@ -52,7 +48,6 @@ async def send_notification(
         doctor_id = body.get("doctor_id")
         notification_type = body.get("notification_type")
         
-        # Get recording and doctor details
         recordings = query(
             'SELECT * FROM recordings WHERE id = ?',
             (recording_id,) if recording_id else (None,)
@@ -72,14 +67,12 @@ async def send_notification(
         recording_data = recordings[0]
         doctor_data = doctors[0]
         
-        # Send notifications based on type - these can fail and raise exceptions
         if notification_type == "sms" or notification_type == "both":
             await send_sms(doctor_data["phone"], recording_data, doctor_data)
         
         if notification_type == "email" or notification_type == "both":
             await send_email(doctor_data["email"], recording_data, doctor_data)
         
-        # Only mark delivered=1 if sending succeeded (no exception raised)
         run(
             'UPDATE notifications SET delivered = 1 WHERE recording_id = ? AND doctor_id = ?',
             (recording_id, doctor_id)
@@ -89,35 +82,28 @@ async def send_notification(
     
     except Exception as error:
         print(f"Send notification error: {error}")
-        # Don't mark as delivered if sending failed
         return JSONResponse(
             status_code=500,
             content={"error": "Server error sending notification"}
         )
 
 async def send_sms(phone_number: str, recording: dict, doctor: dict):
-    """Send SMS notification - matches Express template string behavior."""
+    """Send SMS notification. Missing values render literally as "undefined"/"null"."""
     if not twilio_client:
-        # Express would fail here with error, not skip silently
         raise Exception("Twilio not configured")
     
     try:
-        # Get summary - match JS template string behavior
+        # A missing summary renders as "undefined..."
         summary = recording.get("llm_summary")
-        # In JS: summary?.substring(0, 100) when summary is null/undefined -> undefined
-        # Then template `${undefined}...` -> "undefined..."
         if summary is None:
             summary_preview = "undefined"
         elif summary == "":
             summary_preview = ""
         else:
             summary_preview = summary[:100]
-        # Always append "..." like JS template after substring
         summary_preview += "..."
         
-        # Get EMT names - match JS undefined behavior
-        # In JS: `EMT: ${recording.emt_first_name} ${recording.emt_last_name}`
-        # If fields missing -> "EMT: undefined undefined"
+        # Missing EMT names render as "EMT: undefined undefined"
         emt_first_name = recording.get("emt_first_name")
         emt_last_name = recording.get("emt_last_name")
         if emt_first_name is None:
@@ -125,10 +111,9 @@ async def send_sms(phone_number: str, recording: dict, doctor: dict):
         if emt_last_name is None:
             emt_last_name = "undefined"
         
-        # Get urgency - render literal null/undefined like JS string coercion
         urgency_level = recording.get("urgency_level")
         if urgency_level is None:
-            urgency_level = "null"  # JS null coerces to string "null"
+            urgency_level = "null"
         elif urgency_level == "":
             urgency_level = ""
         
@@ -161,16 +146,14 @@ Reply STOP to unsubscribe"""
         raise error
 
 async def send_email(email: str, recording: dict, doctor: dict):
-    """Send email notification - matches Express template string behavior."""
+    """Send email notification. Missing values render literally as "undefined"/"null"."""
     if not sendgrid_client:
-        # Express would fail here with error, not skip silently
         raise Exception("SendGrid not configured")
     
     try:
-        # Get data - match JS behavior
         summary = recording.get("llm_summary")
         if summary is None:
-            summary = "null"  # JS null coerces to string "null"
+            summary = "null"
         elif summary == "":
             summary = ""
         
@@ -183,20 +166,17 @@ async def send_email(email: str, recording: dict, doctor: dict):
         
         urgency_level = recording.get("urgency_level")
         if urgency_level is None:
-            urgency_level = "undefined"  # JS undefined coerces to string "undefined" in EMAIL
+            urgency_level = "undefined"  # the email says "undefined" where the SMS says "null"
         elif urgency_level == "":
             urgency_level = ""
         
         created_at = recording.get("created_at", "")
         
-        # Format time to match JS toLocaleString() behavior WITHOUT zero-padded day
-        # JS: new Date(recording.created_at).toLocaleString()
-        # This gives "10/2/2026, 9:00:00 PM" (no leading zero on day)
+        # Format as "10/2/2026, 9:00:00 PM" (no zero-padding on month, day, or hour)
         try:
             from datetime import datetime as dt
             dt_obj = dt.fromisoformat(created_at.replace("Z", "+00:00"))
-            # Match toLocaleString format: "M/D/YYYY, H:MM:SS AM/PM"
-            # Remove leading zero from day by using %-d (Unix) or #d (Windows-compatible: lstrip)
+            # lstrip instead of %-d, which is not portable to Windows
             month = dt_obj.strftime("%m").lstrip("0") or "0"
             day = dt_obj.strftime("%d").lstrip("0") or "0"
             year = dt_obj.strftime("%Y")
@@ -208,8 +188,7 @@ async def send_email(email: str, recording: dict, doctor: dict):
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         urgency_color = get_urgency_color(urgency_level)
         
-        # Build urgency display - uppercase if not null/empty/undefined
-        # Express: null urgency renders as lowercase "undefined" in email body
+        # Uppercase real urgency values; a missing one stays lowercase "undefined"
         if urgency_level and urgency_level != "null" and urgency_level != "undefined":
             urgency_display = urgency_level.upper()
         else:
@@ -271,12 +250,11 @@ def get_urgency_color(urgency: str) -> str:
 
 @router.get("/status/{id}")
 async def get_notification_status(
-    id: str,  # Accept string to handle non-numeric IDs like Express
+    id: str,  # str so non-numeric IDs give 404, not 422
     current_user: dict = Depends(get_current_user)
 ):
     """Get notification status."""
     try:
-        # Try to convert to int
         try:
             notification_id = int(id)
         except ValueError:

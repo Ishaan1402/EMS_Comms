@@ -10,13 +10,9 @@ from dotenv import load_dotenv
 import pathlib
 import json
 
-# Load environment variables
 load_dotenv()
 
-# Import custom exception
 from middleware.auth import APIError
-
-# Import routers
 from routes import auth, recordings, doctors, notifications
 from database import init_database, insert_sample_data
 
@@ -35,7 +31,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Asclepius EMT System", lifespan=lifespan)
 
-# Custom exception handler for Express-style error responses
 @app.exception_handler(APIError)
 async def api_error_handler(request: Request, exc: APIError):
     return JSONResponse(
@@ -43,27 +38,23 @@ async def api_error_handler(request: Request, exc: APIError):
         content={"error": exc.error}
     )
 
-# Handle FastAPI validation errors like Express (map to 500)
-# BUT: missing required File(...) should map to route-specific error
+# Validation errors are reported as 500s, never 422.
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    # Check if it's a missing file field on the upload endpoint
-    # Express multer handles missing files in the route, returning "Server error during upload"
+    # A missing audio file on upload gets the upload route's own error message.
     if request.url.path == "/api/recordings/upload":
-        # Missing audio file -> route-level error, not global handler
         return JSONResponse(
             status_code=500,
             content={"error": "Server error during upload"}
         )
     
-    # All other validation errors -> global handler
     print(f"Validation error: {exc.errors()}")
     return JSONResponse(
         status_code=500,
         content={"error": "Something went wrong!"}
     )
 
-# Handle JSON decode errors (malformed JSON body) - map to 500
+# Malformed JSON bodies are 500s.
 @app.exception_handler(json.JSONDecodeError)
 async def json_decode_error_handler(request: Request, exc: json.JSONDecodeError):
     return JSONResponse(
@@ -71,24 +62,22 @@ async def json_decode_error_handler(request: Request, exc: json.JSONDecodeError)
         content={"error": "Something went wrong!"}
     )
 
-# CORS configuration - match Express cors() (NO credentials)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,  # Express cors() default is false
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Security headers - match Express helmet() defaults exactly
+# Security headers (helmet 4.x defaults)
 @app.middleware("http")
 async def add_security_headers(request, call_next):
     response = await call_next(request)
     
-    # Helmet defaults (as of helmet 4.x used by Express)
     response.headers["x-content-type-options"] = "nosniff"
-    response.headers["x-frame-options"] = "SAMEORIGIN"  # Not DENY
-    response.headers["x-xss-protection"] = "0"  # Helmet 4 disables this
+    response.headers["x-frame-options"] = "SAMEORIGIN"
+    response.headers["x-xss-protection"] = "0"
     response.headers["x-dns-prefetch-control"] = "off"
     response.headers["x-download-options"] = "noopen"
     response.headers["x-permitted-cross-domain-policies"] = "none"
@@ -97,7 +86,6 @@ async def add_security_headers(request, call_next):
     response.headers["cross-origin-resource-policy"] = "same-origin"
     response.headers["origin-agent-cluster"] = "?1"
     
-    # CSP
     response.headers["content-security-policy"] = (
         "default-src 'self';"
         "base-uri 'self';"
@@ -112,19 +100,15 @@ async def add_security_headers(request, call_next):
         "upgrade-insecure-requests"
     )
     
-    # HSTS
     response.headers["strict-transport-security"] = "max-age=15552000; includeSubDomains"
     
     return response
 
-# Create uploads directory if it doesn't exist
 uploads_dir = pathlib.Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
 
-# Static files for uploaded audio
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-# Routes
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(recordings.router, prefix="/api/recordings", tags=["recordings"])
 app.include_router(doctors.router, prefix="/api/doctors", tags=["doctors"])
@@ -143,11 +127,9 @@ if os.getenv("NODE_ENV") == "production":
                 return FileResponse(file_path)
             return FileResponse(client_build / "index.html")
 
-# 404 handler - return HTML like Express default (not JSON)
-# Express returns 404 HTML for both unknown routes AND wrong methods (not 405)
+# Unknown routes get a plain HTML 404 page, not JSON.
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
-    # Match Express default 404 response (HTML with trailing newline)
     return HTMLResponse(
         content="""<!DOCTYPE html>
 <html lang="en">
@@ -163,10 +145,9 @@ async def not_found_handler(request: Request, exc):
         status_code=404
     )
 
-# Wrong method (405) - Express also returns 404 HTML (not 405)
+# Wrong methods get the same HTML 404 instead of a 405.
 @app.exception_handler(405)
 async def method_not_allowed_handler(request: Request, exc):
-    # Express returns 404 for wrong methods too, not 405 (with trailing newline)
     return HTMLResponse(
         content="""<!DOCTYPE html>
 <html lang="en">
@@ -179,10 +160,9 @@ async def method_not_allowed_handler(request: Request, exc):
 </body>
 </html>
 """.format(method=request.method, path=request.url.path),
-        status_code=404  # 404, not 405!
+        status_code=404
     )
 
-# Error handling - Express style
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     import traceback
