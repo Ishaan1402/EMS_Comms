@@ -1,15 +1,59 @@
 import pytest
 from fastapi.testclient import TestClient
+import asyncio
 import os
+import sqlite3
+from pathlib import Path
+from types import SimpleNamespace
 
 # Set test environment BEFORE importing main
-os.environ["JWT_SECRET"] = "test-secret-key-for-testing-only"
-os.environ["OPENAI_API_KEY"] = "test"
+os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
 from main import app
-from database import query, run
+import database
+from database import query, run, get_db, init_database, insert_sample_data
+from routes import recordings, notifications
 
-client = TestClient(app)
+REAL_DB_PATH = Path(database.__file__).parent / "asclepius.db"
+
+# Global error handler responses are 500s; inspect them instead of re-raising.
+client = TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def temp_database(tmp_path_factory):
+    """Point every query at a fresh, explicitly seeded temp DB; never the real asclepius.db."""
+    database.DB_PATH = tmp_path_factory.mktemp("db") / "test.db"
+    assert database.DB_PATH.resolve() != REAL_DB_PATH.resolve()
+    init_database()
+    insert_sample_data()
+    yield database.DB_PATH
+    database.DB_PATH = REAL_DB_PATH
+
+
+@pytest.fixture(autouse=True)
+def no_external_services(monkeypatch, tmp_path):
+    """Run with no OpenAI/Twilio/SendGrid clients and write uploads to a temp dir."""
+    monkeypatch.setattr(recordings, "openai_client", None)
+    monkeypatch.setattr(notifications, "twilio_client", None)
+    monkeypatch.setattr(notifications, "sendgrid_client", None)
+    monkeypatch.setattr(recordings, "UPLOAD_DIR", tmp_path)
+
+
+def create_recording(emt_username="emt.wilson"):
+    emt_id = query('SELECT id FROM users WHERE username = ?', (emt_username,))[0]["id"]
+    return run(
+        'INSERT INTO recordings (emt_id, patient_info, audio_file_path) VALUES (?, ?, ?)',
+        (emt_id, "Test patient", "uploads/fake.wav")
+    )["id"]
+
+
+def get_recording_row(recording_id):
+    return query('SELECT * FROM recordings WHERE id = ?', (recording_id,))[0]
+
+
+def count_notifications(recording_id):
+    return query('SELECT COUNT(*) AS n FROM notifications WHERE recording_id = ?', (recording_id,))[0]["n"]
 
 # Test data
 TEST_EMT = {
@@ -228,14 +272,23 @@ class TestDataIntegrity:
     
     def test_risk_score_range(self):
         """Verify risk_score is 0-10, not 0-100."""
-        # This will be tested after we create a recording with processing
-        # For now, just verify schema allows 0-10
-        pass
+        recording_id = create_recording()
+        for ok in (0, 10):
+            run('UPDATE recordings SET risk_score = ? WHERE id = ?', (ok, recording_id))
+        for bad in (-1, 11, 85):
+            with pytest.raises(sqlite3.IntegrityError):
+                run('UPDATE recordings SET risk_score = ? WHERE id = ?', (bad, recording_id))
+        assert get_recording_row(recording_id)["risk_score"] == 10
     
     def test_priority_level_range(self):
         """Verify priority_level is 1-5."""
-        # This will be tested after we create a recording with processing
-        pass
+        recording_id = create_recording()
+        for ok in (1, 5):
+            run('UPDATE recordings SET priority_level = ? WHERE id = ?', (ok, recording_id))
+        for bad in (0, 6):
+            with pytest.raises(sqlite3.IntegrityError):
+                run('UPDATE recordings SET priority_level = ? WHERE id = ?', (bad, recording_id))
+        assert get_recording_row(recording_id)["priority_level"] == 5
 
 
 class TestErrorMessages:
@@ -361,35 +414,55 @@ class TestExpressContractParity:
     
     def test_malformed_json_returns_500(self):
         """Item 5 & 23: Malformed JSON should return 500 not 422."""
-        # FastAPI/Starlette will catch this at the request parsing level
-        # We need to send invalid JSON to trigger this
-        import requests
-        # Use direct requests to send malformed JSON
-        # (TestClient may not allow this easily, so skip or mock)
-        pass
+        response = client.post(
+            "/api/auth/login",
+            content=b'{"username": "emt.wilson",',
+            headers={"Content-Type": "application/json"}
+        )
+        assert response.status_code == 500
+        assert response.json() == {"error": "Something went wrong!"}
     
     # Recordings tests
+
+    def _upload(self, content_type, content=b"RIFF fake wav", data=None):
+        return client.post(
+            "/api/recordings/upload",
+            headers={"Authorization": f"Bearer {self.emt_token}"},
+            files={"audio": ("clip.wav", content, content_type)},
+            data=data or {}
+        )
     
-    def test_missing_patient_info_allows_null(self):
+    def test_missing_patient_info_allows_null(self, tmp_path):
         """Item 6: Missing patient_info should result in 201 with NULL."""
-        # We can't easily test file upload without a real file
-        # But we've configured it as Form(None) which should work
-        pass
+        response = self._upload("audio/wav")
+        assert response.status_code == 201
+        recording = response.json()["recording"]
+        assert list(recording.keys()) == ["id", "emt_id", "audio_file_path"]
+        assert Path(recording["audio_file_path"]).read_bytes() == b"RIFF fake wav"
+        assert Path(recording["audio_file_path"]).parent == tmp_path
+        row = get_recording_row(recording["id"])
+        assert row["patient_info"] is None
+        # Background processing ran with no OpenAI key: an outage is an error, not a review.
+        assert row["status"] == "error"
+        assert count_notifications(recording["id"]) == 0
     
     def test_audio_mpeg_rejected(self):
         """Item 7: MIME audio/mpeg should be rejected (Express multer regex has no mpeg)."""
-        # We've excluded audio/mpeg from ALLOWED_AUDIO_TYPES
-        pass
+        response = self._upload("audio/mpeg")
+        assert response.status_code == 500
+        assert response.json() == {"error": "Something went wrong!"}
     
     def test_bad_mime_returns_500(self):
         """Item 8: Bad MIME type should return 500 not 400."""
-        # Tested in upload route - wrong MIME raises exception -> 500
-        pass
+        response = self._upload("text/plain")
+        assert response.status_code == 500
+        assert response.json() == {"error": "Something went wrong!"}
     
     def test_file_too_large_returns_500(self):
         """Item 9: File >50MB should return 500 not 400."""
-        # Tested in upload route - size check raises exception -> 500
-        pass
+        response = self._upload("audio/wav", content=b"\0" * (50 * 1024 * 1024 + 1))
+        assert response.status_code == 500
+        assert response.json() == {"error": "Something went wrong!"}
     
     def test_missing_audio_file_returns_500(self):
         """Item 10: Missing audio file should return 500 not 422."""
@@ -472,9 +545,97 @@ class TestExpressContractParity:
     
     def test_validation_error_returns_500(self):
         """Item 23: RequestValidationError should return 500 not 422."""
-        # Our global handler maps RequestValidationError to 500
-        # Already tested above with missing audio file
-        pass
+        response = client.post(
+            "/api/notifications/test",
+            headers={"Authorization": f"Bearer {self.emt_token}"},
+            json=["not", "an", "object"]
+        )
+        assert response.status_code == 500
+        assert response.json() == {"error": "Something went wrong!"}
+
+
+class TestRecordingProcessing:
+    """Background processing: happy path, model failure, and atomic doctor fan-out."""
+
+    def _set_doctors_available(self):
+        run("UPDATE users SET is_available = 1 WHERE role = 'doctor'")
+        return [row["id"] for row in query("SELECT id FROM users WHERE role = 'doctor' ORDER BY id")]
+
+    def _process(self, monkeypatch, analysis=None):
+        monkeypatch.setattr(recordings, "transcribe_audio_sync", lambda path: "patient fell, broken arm")
+        if analysis is not None:
+            async def fake_analyze(transcription, patient_info=""):
+                return analysis
+            monkeypatch.setattr(recordings, "analyze_with_llm", fake_analyze)
+        recording_id = create_recording()
+        asyncio.run(recordings.process_recording(recording_id, "uploads/fake.wav"))
+        return recording_id
+
+    def test_successful_analysis_completes_and_notifies(self, monkeypatch):
+        doctor_ids = self._set_doctors_available()
+        recording_id = self._process(monkeypatch, analysis={
+            "chief_complaint": "Broken arm",
+            "risk_score": 6,
+            "priority_level": 3,
+            "urgency_level": "urgent",
+            "medical_summary": "Stable patient with a closed arm fracture",
+        })
+        row = get_recording_row(recording_id)
+        assert row["status"] == "notified"
+        assert row["transcription"] == "patient fell, broken arm"
+        assert row["llm_summary"] == "Stable patient with a closed arm fracture"
+        assert row["risk_score"] == 6
+        assert row["chief_complaint"] == "Broken arm"
+        # "urgent" is not an allowed urgency_level, so the default stays.
+        assert row["urgency_level"] == "medium"
+        assert count_notifications(recording_id) == len(doctor_ids)
+
+    def test_llm_exception_marks_error_and_does_not_notify(self, monkeypatch):
+        self._set_doctors_available()
+
+        def outage(**kwargs):
+            raise RuntimeError("model outage")
+        monkeypatch.setattr(recordings, "openai_client", SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=outage))
+        ))
+        recording_id = self._process(monkeypatch)
+        row = get_recording_row(recording_id)
+        assert row["status"] == "error"
+        assert row["llm_summary"] is None
+        assert row["chief_complaint"] is None
+        assert count_notifications(recording_id) == 0
+
+    def test_missing_openai_key_marks_error_and_does_not_notify(self, monkeypatch):
+        self._set_doctors_available()
+        recording_id = self._process(monkeypatch)
+        row = get_recording_row(recording_id)
+        assert row["status"] == "error"
+        assert row["llm_summary"] is None
+        assert count_notifications(recording_id) == 0
+
+    def test_notify_doctors_is_all_or_nothing(self):
+        doctor_ids = self._set_doctors_available()
+        assert len(doctor_ids) >= 2
+        recording_id = create_recording()
+        run("UPDATE recordings SET status = 'completed' WHERE id = ?", (recording_id,))
+        with get_db() as conn:
+            conn.execute(
+                f"""CREATE TRIGGER fail_last_fanout BEFORE INSERT ON notifications
+                    WHEN NEW.doctor_id = {doctor_ids[-1]}
+                    BEGIN SELECT RAISE(ABORT, 'fan-out failed'); END"""
+            )
+        try:
+            with pytest.raises(sqlite3.IntegrityError):
+                asyncio.run(recordings.notify_doctors(recording_id, "summary"))
+        finally:
+            with get_db() as conn:
+                conn.execute("DROP TRIGGER fail_last_fanout")
+        assert count_notifications(recording_id) == 0
+        assert get_recording_row(recording_id)["status"] == "completed"
+
+        asyncio.run(recordings.notify_doctors(recording_id, "summary"))
+        assert count_notifications(recording_id) == len(doctor_ids)
+        assert get_recording_row(recording_id)["status"] == "notified"
 
 
 if __name__ == "__main__":
