@@ -3,12 +3,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 import os
+import asyncio
 from twilio.rest import Client as TwilioClient
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from datetime import datetime
 from database import query, run
 from middleware.auth import get_current_user, require_role, APIError
+from routes.recordings import executor
 
 router = APIRouter()
 
@@ -143,10 +145,13 @@ View full details at: {frontend_url}/recording/{recording['id']}
 
 Reply STOP to unsubscribe"""
 
-        twilio_client.messages.create(
-            body=message,
-            from_=os.getenv("TWILIO_PHONE_NUMBER"),
-            to=phone_number
+        await asyncio.get_running_loop().run_in_executor(
+            executor,
+            lambda: twilio_client.messages.create(
+                body=message,
+                from_=os.getenv("TWILIO_PHONE_NUMBER"),
+                to=phone_number
+            )
         )
         
         print(f"SMS sent to {phone_number}")
@@ -247,7 +252,7 @@ async def send_email(email: str, recording: dict, doctor: dict):
             html_content=html_content
         )
         
-        sendgrid_client.send(message)
+        await asyncio.get_running_loop().run_in_executor(executor, sendgrid_client.send, message)
         print(f"Email sent to {email}")
     
     except Exception as error:

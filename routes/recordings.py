@@ -7,7 +7,7 @@ import json
 import asyncio
 import concurrent.futures
 from openai import OpenAI
-from database import query, run
+from database import query, run, get_db
 from middleware.auth import get_current_user, require_role, APIError
 
 router = APIRouter()
@@ -66,9 +66,8 @@ async def upload_recording(
         filename = f"recording-{timestamp}-{random_suffix}{file_ext}"
         audio_file_path = UPLOAD_DIR / filename
         
-        # Save file
-        with open(audio_file_path, "wb") as f:
-            f.write(content)
+        # Save file (blocking I/O in threadpool)
+        await asyncio.get_running_loop().run_in_executor(executor, audio_file_path.write_bytes, content)
         
         emt_id = current_user["id"]
         
@@ -275,20 +274,13 @@ async def transcribe_audio(audio_file_path: str) -> str:
     return transcribe_audio_sync(audio_file_path)
 
 async def analyze_with_llm(transcription: str, patient_info: str = "") -> dict:
-    """Analyze transcription with LLM - returns RAW LLM response."""
+    """
+    Analyze transcription with LLM - returns RAW LLM response.
+    Raises on a missing key or model failure so the recording is marked error
+    instead of storing a fake assessment and notifying doctors.
+    """
     if not openai_client:
-        # Return default values if OpenAI not configured
-        return {
-            "chief_complaint": "Unable to analyze - OpenAI not configured",
-            "vital_signs": "Not available",
-            "symptoms": "Not specified",
-            "risk_score": 5,
-            "priority_level": 3,
-            "urgency_level": "moderate",
-            "recommended_actions": "Manual review required",
-            "critical_info": "AI analysis not available",
-            "medical_summary": "OpenAI API key not configured"
-        }
+        raise Exception("OpenAI API key not configured")
     
     try:
         prompt = f"""You are an emergency medicine AI specialist. Analyze this EMT conversation and patient information to provide a comprehensive medical assessment.
@@ -373,41 +365,30 @@ Return ONLY the JSON object with no additional text."""
 
     except Exception as error:
         print(f"LLM analysis error: {error}")
-        # Return default values if AI analysis fails (match Express)
-        return {
-            "chief_complaint": "Unable to analyze",
-            "vital_signs": "Not available",
-            "symptoms": "Not specified",
-            "risk_score": 5,
-            "priority_level": 3,
-            "urgency_level": "moderate",
-            "recommended_actions": "Manual review required",
-            "critical_info": "AI analysis failed",
-            "medical_summary": "Unable to generate medical summary"
-        }
+        raise
 
 async def notify_doctors(recording_id: int, summary: str):
-    """Notify appropriate doctors."""
+    """Notify appropriate doctors. All inserts and the status change commit together or not at all."""
     try:
-        # Get available doctors
-        doctors = query(
-            'SELECT * FROM users WHERE role = ? AND is_available = ?',
-            ('doctor', 1)
-        )
-        
-        # For now, notify all available doctors
-        # In production, you'd implement specialty matching
-        for doctor in doctors:
-            run(
-                'INSERT INTO notifications (recording_id, doctor_id, notification_type) VALUES (?, ?, ?)',
-                (recording_id, doctor["id"], 'both')
+        with get_db() as conn:
+            cursor = conn.cursor()
+            # For now, notify all available doctors
+            # In production, you'd implement specialty matching
+            cursor.execute(
+                'SELECT id FROM users WHERE role = ? AND is_available = ?',
+                ('doctor', 1)
             )
-        
-        # Update recording status
-        run(
-            'UPDATE recordings SET status = ? WHERE id = ?',
-            ('notified', recording_id)
-        )
+            doctor_ids = [row["id"] for row in cursor.fetchall()]
+
+            cursor.executemany(
+                'INSERT INTO notifications (recording_id, doctor_id, notification_type) VALUES (?, ?, ?)',
+                [(recording_id, doctor_id, 'both') for doctor_id in doctor_ids]
+            )
+
+            cursor.execute(
+                'UPDATE recordings SET status = ? WHERE id = ?',
+                ('notified', recording_id)
+            )
     
     except Exception as error:
         print(f"Notification error: {error}")
