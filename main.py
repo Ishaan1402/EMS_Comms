@@ -129,10 +129,17 @@ if os.getenv("NODE_ENV") == "production":
                 resolved_file = file_path.resolve()
                 resolved_build = client_build.resolve()
                 
-                # Ensure the resolved path is within client_build
-                if not str(resolved_file).startswith(str(resolved_build)):
-                    # Path escapes client/build - return index.html
-                    return FileResponse(client_build / "index.html")
+                # Ensure the resolved path is the build dir itself or a real descendant
+                # Use filesystem ancestry check: resolved_build must be in resolved_file's parents
+                # or be the same path. String startswith is insufficient (allows siblings like build-backup)
+                try:
+                    # is_relative_to is Python 3.9+
+                    if not resolved_file.is_relative_to(resolved_build):
+                        return FileResponse(client_build / "index.html")
+                except AttributeError:
+                    # Fallback for Python < 3.9: check if build is in file's parents
+                    if resolved_file != resolved_build and resolved_build not in resolved_file.parents:
+                        return FileResponse(client_build / "index.html")
                 
                 # Check if it's a file that exists
                 if resolved_file.exists() and resolved_file.is_file():

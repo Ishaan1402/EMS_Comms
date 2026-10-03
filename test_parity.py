@@ -650,10 +650,63 @@ class TestSecurityFixes:
     
     def test_path_traversal_blocked(self):
         """Issue 1: Path traversal attempts must not escape client/build in production."""
-        # Test various path traversal attempts
-        # Note: In production mode this would matter, here we just verify the code handles it
-        # The actual FileResponse check happens in main.py serve_react_app
-        pass  # This is tested at the file serving level
+        import os
+        import tempfile
+        import pathlib
+        
+        # Create a temporary test directory structure
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create client/build and client/build-backup with test files
+            build_dir = pathlib.Path(tmpdir) / "client" / "build"
+            backup_dir = pathlib.Path(tmpdir) / "client" / "build-backup"
+            build_dir.mkdir(parents=True)
+            backup_dir.mkdir(parents=True)
+            
+            # Create files
+            (build_dir / "allowed.txt").write_text("allowed content")
+            (backup_dir / "secret.txt").write_text("secret content")
+            (pathlib.Path(tmpdir) / "root-secret.txt").write_text("root secret")
+            
+            # Test the path validation logic (simulating the main.py serve_react_app logic)
+            def is_path_allowed(full_path: str, client_build: pathlib.Path) -> bool:
+                """Simulate the path validation logic from main.py."""
+                file_path = client_build / full_path
+                try:
+                    resolved_file = file_path.resolve()
+                    resolved_build = client_build.resolve()
+                    
+                    # Filesystem ancestry check
+                    try:
+                        # Python 3.9+
+                        if not resolved_file.is_relative_to(resolved_build):
+                            return False
+                    except AttributeError:
+                        # Python < 3.9 fallback
+                        if resolved_file != resolved_build and resolved_build not in resolved_file.parents:
+                            return False
+                    
+                    return resolved_file.exists() and resolved_file.is_file()
+                except (ValueError, OSError):
+                    return False
+            
+            # Test cases
+            # 1. Normal file in build directory - ALLOWED
+            assert is_path_allowed("allowed.txt", build_dir) == True
+            
+            # 2. Parent directory traversal - BLOCKED
+            assert is_path_allowed("../build-backup/secret.txt", build_dir) == False
+            assert is_path_allowed("../../root-secret.txt", build_dir) == False
+            
+            # 3. Encoded parent directory traversal - BLOCKED
+            assert is_path_allowed("%2e%2e/build-backup/secret.txt", build_dir) == False
+            
+            # 4. Absolute path - BLOCKED
+            assert is_path_allowed(str(backup_dir / "secret.txt"), build_dir) == False
+            
+            # 5. Sibling directory (the key fix) - BLOCKED
+            # This would pass with startswith but must fail with proper ancestry check
+            relative_to_build = os.path.relpath(backup_dir / "secret.txt", build_dir)
+            assert is_path_allowed(relative_to_build, build_dir) == False
     
     def test_mime_with_codec_parameter(self):
         """Issue 2: Accept MIME types with parameters like audio/webm;codecs=opus."""
