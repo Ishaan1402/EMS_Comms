@@ -178,7 +178,7 @@ async def send_email(email: str, recording: dict, doctor: dict):
         
         urgency_level = recording.get("urgency_level")
         if urgency_level is None:
-            urgency_level = "null"  # JS null coerces to string "null"
+            urgency_level = "undefined"  # JS undefined coerces to string "undefined" in EMAIL
         elif urgency_level == "":
             urgency_level = ""
         

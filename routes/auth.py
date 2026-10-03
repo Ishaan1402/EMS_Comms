@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 import bcrypt
+import json
 from database import query, run
 from middleware.auth import create_access_token, get_current_user, APIError
 
@@ -97,14 +98,12 @@ async def register(request: Request):
 async def login(request: Request):
     """
     Login user.
-    Matches Express: missing fields -> error in try/catch -> 500
+    Matches Express: malformed JSON -> 500 "Something went wrong!"
+    Missing fields -> 400 "Invalid credentials"
     """
     try:
-        # Get body manually
-        try:
-            body = await request.json()
-        except:
-            body = {}
+        # Get body - let JSONDecodeError propagate to global handler
+        body = await request.json()
         
         username = body.get("username")
         password = body.get("password")
@@ -152,6 +151,9 @@ async def login(request: Request):
             "token": token
         }
     
+    except json.JSONDecodeError:
+        # Re-raise to be caught by global JSON decode error handler
+        raise
     except Exception as error:
         print(f"Login error: {error}")
         return JSONResponse(

@@ -193,8 +193,11 @@ async def process_recording(recording_id: int, audio_file_path: str):
         analysis = await analyze_with_llm(transcription, patient_info)
         
         # Step 4: Apply JavaScript || semantics at storage time (like Express)
-        # Store llm_summary as medical_summary OR full JSON stringified
-        llm_summary_value = analysis.get("medical_summary") or json.dumps(analysis)
+        # Store llm_summary as compact JSON (json.dumps with no spaces, like JSON.stringify)
+        llm_summary_value = analysis.get("medical_summary")
+        if not llm_summary_value:
+            # Store compact JSON without spaces (JSON.stringify default)
+            llm_summary_value = json.dumps(analysis, separators=(',', ':'))
         
         # Apply || defaults for column fields
         risk_score_value = analysis.get("risk_score") or 5
@@ -204,9 +207,10 @@ async def process_recording(recording_id: int, audio_file_path: str):
         symptoms_value = analysis.get("symptoms") or "Not specified"
         recommended_actions_value = analysis.get("recommended_actions") or "Standard care"
         critical_info_value = analysis.get("critical_info") or "None"
-        urgency_level_value = analysis.get("urgency_level") or "moderate"
+        # DO NOT set urgency_level - Express does not set this column in processRecording
+        # It stays at DB default "medium"
         
-        # Update recording with structured results
+        # Update recording with structured results (no urgency_level update)
         run(
             """UPDATE recordings SET 
                 transcription = ?, 
@@ -218,7 +222,6 @@ async def process_recording(recording_id: int, audio_file_path: str):
                 symptoms = ?, 
                 recommended_actions = ?, 
                 critical_info = ?,
-                urgency_level = ?,
                 status = ? 
             WHERE id = ?""",
             (
@@ -231,7 +234,6 @@ async def process_recording(recording_id: int, audio_file_path: str):
                 symptoms_value,
                 recommended_actions_value,
                 critical_info_value,
-                urgency_level_value,
                 'completed',
                 recording_id
             )

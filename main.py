@@ -14,10 +14,10 @@ import json
 load_dotenv()
 
 # Check for required environment variables at startup (like Express)
-# Express exits if OpenAI API key is missing when creating the client
+# Express exits if OpenAI API key or Twilio credentials are missing when creating clients
 # Skip check during tests
 if not os.getenv("PYTEST_CURRENT_TEST"):
-    required_env_vars = ["JWT_SECRET", "OPENAI_API_KEY"]
+    required_env_vars = ["JWT_SECRET", "OPENAI_API_KEY", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]
     missing_vars = [var for var in required_env_vars if not os.getenv(var)]
     if missing_vars:
         print(f"❌ Error: Missing required environment variables: {', '.join(missing_vars)}")
@@ -41,9 +41,19 @@ async def api_error_handler(request: Request, exc: APIError):
     )
 
 # Handle FastAPI validation errors like Express (map to 500)
+# BUT: missing required File(...) should map to route-specific error
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    # Express typically returns 500 "Something went wrong!" for validation errors
+    # Check if it's a missing file field on the upload endpoint
+    # Express multer handles missing files in the route, returning "Server error during upload"
+    if request.url.path == "/api/recordings/upload":
+        # Missing audio file -> route-level error, not global handler
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Server error during upload"}
+        )
+    
+    # All other validation errors -> global handler
     print(f"Validation error: {exc.errors()}")
     return JSONResponse(
         status_code=500,
@@ -134,7 +144,7 @@ if os.getenv("NODE_ENV") == "production":
 # Express returns 404 HTML for both unknown routes AND wrong methods (not 405)
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
-    # Match Express default 404 response (HTML, not JSON)
+    # Match Express default 404 response (HTML with trailing newline)
     return HTMLResponse(
         content="""<!DOCTYPE html>
 <html lang="en">
@@ -145,14 +155,15 @@ async def not_found_handler(request: Request, exc):
 <body>
 <pre>Cannot {method} {path}</pre>
 </body>
-</html>""".format(method=request.method, path=request.url.path),
+</html>
+""".format(method=request.method, path=request.url.path),
         status_code=404
     )
 
 # Wrong method (405) - Express also returns 404 HTML (not 405)
 @app.exception_handler(405)
 async def method_not_allowed_handler(request: Request, exc):
-    # Express returns 404 for wrong methods too, not 405
+    # Express returns 404 for wrong methods too, not 405 (with trailing newline)
     return HTMLResponse(
         content="""<!DOCTYPE html>
 <html lang="en">
@@ -163,7 +174,8 @@ async def method_not_allowed_handler(request: Request, exc):
 <body>
 <pre>Cannot {method} {path}</pre>
 </body>
-</html>""".format(method=request.method, path=request.url.path),
+</html>
+""".format(method=request.method, path=request.url.path),
         status_code=404  # 404, not 405!
     )
 
