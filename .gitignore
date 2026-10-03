@@ -1,3 +1,7 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # Dependencies
 node_modules/
 npm-debug.log*

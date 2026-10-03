@@ -2,6 +2,50 @@
 
 An AI-powered emergency triage system that enables EMTs to record patient conversations, automatically classify risk levels, prioritize cases by urgency, and instantly notify doctors for faster emergency response.
 
+## 🐍 Python/FastAPI Backend Available
+
+This repository includes a **Python/FastAPI backend** as an alternative to the Node/Express backend. It serves the same API to the React client.
+
+- **Node/Express** (original): `npm start` or `node server.js`
+- **Python/FastAPI**: `python3 main.py` or `./start-python.sh`
+
+### Running the Python backend
+
+```bash
+pip install -r requirements.txt
+python3 main.py            # http://localhost:5000 (override with PORT)
+```
+
+`./start-python.sh` does the same after installing dependencies, but it exits unless a `.env` file exists.
+
+Environment variables (read from the environment or `.env`):
+
+```env
+JWT_SECRET=...
+OPENAI_API_KEY=...
+TWILIO_ACCOUNT_SID=...
+TWILIO_AUTH_TOKEN=...
+TWILIO_PHONE_NUMBER=...
+SENDGRID_API_KEY=...
+SENDGRID_FROM_EMAIL=...
+PORT=5000                  # optional
+FRONTEND_URL=...           # optional, used in notification links
+NODE_ENV=production        # optional, serves client/build
+SEED_DEMO_USERS=1          # optional, creates the demo accounts on startup
+```
+
+If any of these keys are missing, the server still starts and logs a warning. Only the features that need a missing key fail:
+
+- No `JWT_SECRET`: login, registration, and authenticated routes fail.
+- No `OPENAI_API_KEY`: uploads succeed, but each recording is marked `error` and no doctors are notified.
+- No Twilio or SendGrid credentials: the notification send routes return 500.
+
+The SQLite schema is created in `asclepius.db` when the server starts. Demo users (password `password123`) are created only when `SEED_DEMO_USERS=1` is set, or when you run `python3 database.py --seed`.
+
+Tests use a temporary database and need no API keys: `pip install -r requirements.txt pytest && pytest test_parity.py`.
+
+---
+
 ## ✨ Features
 
 ### For EMTs/Paramedics
