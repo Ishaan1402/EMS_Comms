@@ -651,62 +651,99 @@ class TestSecurityFixes:
     def test_path_traversal_blocked(self):
         """Issue 1: Path traversal attempts must not escape client/build in production."""
         import os
-        import tempfile
         import pathlib
+        import shutil
         
-        # Create a temporary test directory structure
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create client/build and client/build-backup with test files
-            build_dir = pathlib.Path(tmpdir) / "client" / "build"
-            backup_dir = pathlib.Path(tmpdir) / "client" / "build-backup"
-            build_dir.mkdir(parents=True)
-            backup_dir.mkdir(parents=True)
+        # Save original NODE_ENV
+        original_env = os.environ.get("NODE_ENV")
+        
+        try:
+            # Create synthetic client/build and sibling directories
+            build_dir = pathlib.Path("client/build")
+            backup_dir = pathlib.Path("client/build-backup")
             
-            # Create files
-            (build_dir / "allowed.txt").write_text("allowed content")
-            (backup_dir / "secret.txt").write_text("secret content")
-            (pathlib.Path(tmpdir) / "root-secret.txt").write_text("root secret")
+            # Clean up if they exist
+            if build_dir.exists():
+                shutil.rmtree(build_dir)
+            if backup_dir.exists():
+                shutil.rmtree(backup_dir)
             
-            # Test the path validation logic (simulating the main.py serve_react_app logic)
-            def is_path_allowed(full_path: str, client_build: pathlib.Path) -> bool:
-                """Simulate the path validation logic from main.py."""
-                file_path = client_build / full_path
-                try:
-                    resolved_file = file_path.resolve()
-                    resolved_build = client_build.resolve()
-                    
-                    # Filesystem ancestry check
-                    try:
-                        # Python 3.9+
-                        if not resolved_file.is_relative_to(resolved_build):
-                            return False
-                    except AttributeError:
-                        # Python < 3.9 fallback
-                        if resolved_file != resolved_build and resolved_build not in resolved_file.parents:
-                            return False
-                    
-                    return resolved_file.exists() and resolved_file.is_file()
-                except (ValueError, OSError):
-                    return False
+            # Create directories including static subdir
+            build_dir.mkdir(parents=True, exist_ok=True)
+            (build_dir / "static").mkdir(exist_ok=True)
+            backup_dir.mkdir(parents=True, exist_ok=True)
             
-            # Test cases
-            # 1. Normal file in build directory - ALLOWED
-            assert is_path_allowed("allowed.txt", build_dir) == True
+            # Create test files
+            (build_dir / "asset.txt").write_text("public asset")
+            (build_dir / "index.html").write_text("<html>React App</html>")
+            (backup_dir / "secret.txt").write_text("PRIVATE SECRET")
             
-            # 2. Parent directory traversal - BLOCKED
-            assert is_path_allowed("../build-backup/secret.txt", build_dir) == False
-            assert is_path_allowed("../../root-secret.txt", build_dir) == False
+            # Create a symlink that escapes (if possible)
+            symlink_target = backup_dir / "secret.txt"
+            symlink_path = build_dir / "escape-link.txt"
+            try:
+                symlink_path.symlink_to(symlink_target.resolve())
+            except (OSError, NotImplementedError):
+                # Symlink creation may fail on some systems
+                pass
             
-            # 3. Encoded parent directory traversal - BLOCKED
-            assert is_path_allowed("%2e%2e/build-backup/secret.txt", build_dir) == False
+            # Set production mode and reload the app
+            os.environ["NODE_ENV"] = "production"
             
-            # 4. Absolute path - BLOCKED
-            assert is_path_allowed(str(backup_dir / "secret.txt"), build_dir) == False
+            # Force reimport to pick up production mode
+            import importlib
+            import main
+            importlib.reload(main)
+            from starlette.testclient import TestClient
+            test_client = TestClient(main.app)
             
-            # 5. Sibling directory (the key fix) - BLOCKED
-            # This would pass with startswith but must fail with proper ancestry check
-            relative_to_build = os.path.relpath(backup_dir / "secret.txt", build_dir)
-            assert is_path_allowed(relative_to_build, build_dir) == False
+            # Test 1: Valid asset inside build loads
+            response = test_client.get("/asset.txt")
+            assert response.status_code == 200
+            assert response.text == "public asset"
+            
+            # Test 2: Parent traversal blocked
+            response = test_client.get("/../build-backup/secret.txt")
+            assert response.status_code == 200  # Returns index.html, not secret
+            assert "PRIVATE SECRET" not in response.text
+            
+            # Test 3: Encoded parent traversal blocked
+            response = test_client.get("/%2e%2e/build-backup/secret.txt")
+            assert response.status_code == 200  # Returns index.html
+            assert "PRIVATE SECRET" not in response.text
+            
+            # Test 4: Sibling directory blocked (key vulnerability)
+            response = test_client.get("/../build-backup/secret.txt")
+            assert "PRIVATE SECRET" not in response.text
+            
+            # Test 5: Absolute path blocked
+            abs_secret = (backup_dir / "secret.txt").resolve()
+            response = test_client.get(f"/{abs_secret}")
+            assert "PRIVATE SECRET" not in response.text
+            
+            # Test 6: Symlink that escapes blocked (if created)
+            if symlink_path.exists():
+                response = test_client.get("/escape-link.txt")
+                # Should either return 404/index or not contain the secret
+                assert "PRIVATE SECRET" not in response.text
+            
+        finally:
+            # Clean up
+            if build_dir.exists():
+                shutil.rmtree(build_dir)
+            if backup_dir.exists():
+                shutil.rmtree(backup_dir)
+            
+            # Restore environment
+            if original_env is None:
+                os.environ.pop("NODE_ENV", None)
+            else:
+                os.environ["NODE_ENV"] = original_env
+            
+            # Reload to restore non-production mode
+            import importlib
+            import main
+            importlib.reload(main)
     
     def test_mime_with_codec_parameter(self):
         """Issue 2: Accept MIME types with parameters like audio/webm;codecs=opus."""
