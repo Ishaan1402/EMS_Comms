@@ -48,6 +48,10 @@ Tests use a temporary database and need no API keys: `pip install -r requirement
 
 ## ✨ Features
 
+### Synthetic clinician-review pilot
+
+The [simplified clinician guide and annotation notebook](docs/clinician-annotation/README.md) include live Google Doc/Sheet links, a one-page PDF guide, and an XLSX notebook. The 10 reports are fictional AI-authored fixtures; clinician answers are not prefilled. These materials support a hackathon evaluation pilot, not clinical validation.
+
 ### For EMTs/Paramedics
 - **Audio Recording**: Record patient conversations directly from mobile devices
 - **Patient Information**: Add context and details about the emergency
@@ -265,4 +269,3 @@ For support and questions:
 3. **Medium (Priority 3)**: Moderate urgency, <2 hours
 4. **Low (Priority 4)**: Routine, <24 hours
 5. **Non-urgent (Priority 5)**: Scheduled care
-

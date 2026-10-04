@@ -1,0 +1,92 @@
+[
+  [
+    "SYN001",
+    "E001",
+    1,
+    0,
+    12,
+    "No earlier report provided.",
+    "Adult with shortness of breath. Speaking in full sentences. Heart rate 96, BP 136 over 82, respiratory rate 22, oxygen saturation 95 percent on room air. Symptoms began about an hour ago. No chest pain reported. No medication given during this transport. ETA twelve minutes."
+  ],
+  [
+    "SYN002",
+    "E002",
+    2,
+    8,
+    20,
+    "Eight minutes earlier: heart rate 104, BP 118/76, respiratory rate 24, oxygen saturation 94 percent on room air. Awake and speaking normally.",
+    "Update on our adult with breathing trouble. Now only speaking a few words at a time. Heart rate 126, BP 100 over 64, respirations thirty, saturation 89 percent on room air. We have started oxygen, but do not have a repeat saturation yet. Twenty minutes out."
+  ],
+  [
+    "SYN003",
+    "E003",
+    2,
+    6,
+    9,
+    "Six minutes earlier: awake, heart rate 112, BP 124/80. Reported chest discomfort.",
+    "Chest discomfort is still present. Patient says it is about the same. Heart rate 110 and BP 122 over 78. No fainting reported. Aspirin was given before this update; the dose was not stated in our report. Nine minutes out. We have not transmitted an ECG interpretation."
+  ],
+  [
+    "SYN004",
+    "E004",
+    1,
+    0,
+    25,
+    "No earlier report provided.",
+    "Adult with new trouble speaking and right arm weakness. Family says last seen normal around forty minutes before this call, but that time is approximate. Glucose 108 milligrams per deciliter. Awake. BP 172 over 96, pulse 88. We cannot confirm anticoagulant use. Twenty-five minutes to your facility."
+  ],
+  [
+    "SYN005",
+    "E005",
+    2,
+    10,
+    18,
+    "Ten minutes earlier: awake and following commands, heart rate 108. Crew described BP as low but did not give a number.",
+    "Patient is now difficult to keep awake and answers only after repeated prompting. Pulse 124. Blood pressure was low earlier, but we do not have a repeat measurement. There is no documented oxygen saturation in this update. Eighteen minutes out."
+  ],
+  [
+    "SYN006",
+    "E006",
+    2,
+    5,
+    6,
+    "Five minutes earlier: glucose 48 mg/dL, confused, heart rate 102.",
+    "After glucose treatment, repeat glucose is 92 milligrams per deciliter. Now awake and answering questions appropriately. Heart rate 94. Treatment dose and route were not included in the radio report. Six minutes out."
+  ],
+  [
+    "SYN007",
+    "E007",
+    1,
+    0,
+    15,
+    "No earlier report provided.",
+    "Adult after a fall. Reports left ankle pain, no reported head strike or loss of consciousness. Awake and speaking normally. Heart rate 84, BP 128 over 74, oxygen saturation 98 percent on room air. No other injury identified in our report. Fifteen minutes out."
+  ],
+  [
+    "SYN008",
+    "E008",
+    2,
+    7,
+    30,
+    "Seven minutes earlier: heart rate 118, BP 110/70, respiratory rate 24. Awake, reported fever and weakness.",
+    "Still weak. Heart rate 128, BP 92 over 58, respirations 28. Temperature thirty-nine point one degrees Celsius. Still answering questions, but slower than before. IV access obtained. Fluids are planned but have not yet been started. Thirty minutes out."
+  ],
+  [
+    "SYN009",
+    "E009",
+    2,
+    4,
+    14,
+    "Four minutes earlier: heart rate 100, BP 120/80. Awake. Oxygen saturation not reported.",
+    "Monitor showed saturation 82 percent, then 96 percent after we repositioned the probe. Patient is speaking normally. We cannot tell whether the first reading was accurate. Pulse 98, BP 118 over 78. No oxygen treatment reported. Fourteen minutes out."
+  ],
+  [
+    "SYN010",
+    "E010",
+    2,
+    9,
+    11,
+    "Nine minutes earlier: after a vehicle collision, awake, heart rate 106, BP 126/84. Reported abdominal pain.",
+    "Abdominal pain is worse. Pulse 132, BP 90 over 60. Patient now appears pale and says they feel faint. External bleeding is not seen. We have not assessed internal bleeding. Eleven minutes out."
+  ]
+]
