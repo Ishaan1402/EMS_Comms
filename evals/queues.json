@@ -1,0 +1,14 @@
+[
+  {
+    "queue_id": "Q01",
+    "case_ids": ["SYN001", "SYN004", "SYN007"],
+    "form_heading": "Group 1 · One preparation bay and one available preparation team.",
+    "resource_context": "One preparation bay and one available preparation team. No competing in-hospital demand is represented."
+  },
+  {
+    "queue_id": "Q02",
+    "case_ids": ["SYN002", "SYN008", "SYN010"],
+    "form_heading": "Group 2 · Two preparation bays and one available preparation team.",
+    "resource_context": "Two preparation bays and one available preparation team. No competing in-hospital demand is represented."
+  }
+]

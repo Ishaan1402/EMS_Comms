@@ -1,0 +1,3 @@
+# Optional XLSX import. Core metrics, CLI, HTML reporting and tests use the standard library.
+openpyxl>=3.1,<4
+# Open the notebook in the Jupyter environment you already use (including JupyterHub).

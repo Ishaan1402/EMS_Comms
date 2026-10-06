@@ -102,3 +102,8 @@ Thumbs.db
 # Temporary files
 temp_*.js
 microphone_test.html
+
+# Local evaluation annotations and generated reports (not published by default)
+evals/local/
+evals/results/
+analytics/results/

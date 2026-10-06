@@ -52,6 +52,8 @@ Tests use a temporary database and need no API keys: `pip install -r requirement
 
 The [simplified clinician guide and annotation notebook](docs/clinician-annotation/README.md) include live Google Doc/Sheet links, a one-page PDF guide, and an XLSX notebook. The 10 reports are fictional AI-authored fixtures; clinician answers are not prefilled. These materials support a hackathon evaluation pilot, not clinical validation.
 
+The [evaluation pipeline](evals/README.md) and [evaluation notebook](analytics/ems_evaluation.ipynb) import that workbook, compare model outputs with approved clinician references, and export a dashboard plus CSVs for Python/SAS. Mock mode tests the pipeline while annotations are pending; it does not report clinical performance. [Model comparison](evals/MODEL_COMPARISON.md) adds opt-in OpenAI, Claude, Gemini, and local Ollama adapters; planning is offline and does not run inference.
+
 ### For EMTs/Paramedics
 - **Audio Recording**: Record patient conversations directly from mobile devices
 - **Patient Information**: Add context and details about the emergency
