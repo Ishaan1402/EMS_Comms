@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import Optional
 import asyncio
 import json
+import re
 import sqlite3
 from database import query, get_db
 from middleware.auth import get_current_user, APIError
@@ -22,6 +23,8 @@ STREAM_HEARTBEAT_SECONDS = 15.0
 MESSAGE_COLUMNS = """m.id, m.recording_id, m.sender_id, m.sender_role, m.body, m.client_id, m.created_at,
                      u.first_name AS sender_first_name, u.last_name AS sender_last_name"""
 
+_NON_NEGATIVE_INT = re.compile(r"[0-9]+")
+
 # recording_id -> events of the streams open on that case; set when a message is posted.
 _listeners = defaultdict(set)
 
@@ -31,12 +34,20 @@ def _wake_listeners(recording_id: int):
         event.set()
 
 
+def _parse_cursor(value: Optional[str]) -> Optional[int]:
+    """A message id cursor, or None if absent/malformed. ASCII digits only ("²".isdigit() is True)."""
+    if value is None or not _NON_NEGATIVE_INT.fullmatch(value):
+        return None
+    return int(value)
+
+
 def _parse_after_id(value: Optional[str]) -> int:
     if value is None or value == "":
         return 0
-    if not value.isdigit():
+    after_id = _parse_cursor(value)
+    if after_id is None:
         raise APIError(400, "after_id must be a non-negative integer")
-    return int(value)
+    return after_id
 
 
 def _parse_recording_id(id: str) -> int:
@@ -70,7 +81,10 @@ def authorize_case(user: dict, recording_id: int) -> None:
 
 
 def fetch_messages(recording_id: int, after_id: int = 0, limit: int = HISTORY_LIMIT) -> list:
-    """Messages for one case, oldest first. id is the order: it only ever increases."""
+    """
+    Messages for one case, oldest first. id is the order: it only ever increases.
+    Past `limit`, callers page on with after_id (the stream does this on its own).
+    """
     return query(
         f"""SELECT {MESSAGE_COLUMNS}
             FROM messages m
@@ -147,6 +161,9 @@ async def post_message(id: str, request: Request):
 
     try:
         with get_db() as conn:
+            # Take the write lock before the client_id lookup so two concurrent
+            # retries can't both miss it and race to insert.
+            conn.execute("BEGIN IMMEDIATE")
             existing = None
             if client_id is not None:
                 existing = conn.execute(
@@ -203,13 +220,14 @@ async def stream_messages(
     authorize_case(current_user, recording_id)
     after_id = _parse_after_id(after_id)
 
-    last_event_id = request.headers.get("last-event-id")
-    if last_event_id and last_event_id.isdigit():
-        after_id = max(after_id, int(last_event_id))
+    last_event_id = _parse_cursor(request.headers.get("last-event-id"))
+    if last_event_id is not None:
+        after_id = max(after_id, last_event_id)
 
     async def events():
         wake = asyncio.Event()
-        _listeners[recording_id].add(wake)
+        listeners = _listeners[recording_id]
+        listeners.add(wake)
         last_id = after_id
         idle = 0.0
         try:
@@ -233,9 +251,9 @@ async def stream_messages(
                         idle = 0.0
                         yield ": ping\n\n"
         finally:
-            _listeners[recording_id].discard(wake)
-            if not _listeners[recording_id]:
-                _listeners.pop(recording_id, None)
+            listeners.discard(wake)
+            if not listeners and _listeners.get(recording_id) is listeners:
+                del _listeners[recording_id]
 
     return StreamingResponse(
         events(),

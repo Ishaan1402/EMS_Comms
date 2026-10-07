@@ -4,6 +4,8 @@ import { Send, RefreshCw, AlertTriangle, MessageSquare, Wifi, WifiOff } from 'lu
 import axios from 'axios';
 
 const RECONNECT_DELAY_MS = 3000;
+// The server will keep refusing these, so retrying the stream is pointless.
+const FATAL_STREAM_STATUSES = [400, 401, 403, 404];
 const MAX_LENGTH = 2000;
 
 const newClientId = () =>
@@ -67,7 +69,7 @@ const CaseChat = ({ recordingId, className = '' }) => {
   const [messages, setMessages] = useState([]);
   const [status, setStatus] = useState('loading'); // loading | ready | error
   const [loadError, setLoadError] = useState('');
-  const [connection, setConnection] = useState('connecting'); // connecting | live | reconnecting
+  const [connection, setConnection] = useState('connecting'); // connecting | live | reconnecting | offline
   const [draft, setDraft] = useState('');
   const lastIdRef = useRef(0);
   const scrollRef = useRef(null);
@@ -80,27 +82,32 @@ const CaseChat = ({ recordingId, className = '' }) => {
     setMessages(current => mergeMessages(current, forThisCase));
   }, [recordingId]);
 
-  const loadHistory = useCallback(async () => {
-    setStatus('loading');
-    setLoadError('');
-    try {
-      const response = await axios.get(`/api/recordings/${recordingId}/messages`);
-      setMessages([]);
-      lastIdRef.current = 0;
-      applyMessages(response.data.messages);
-      setStatus('ready');
-    } catch (error) {
-      console.error('Error loading messages:', error);
-      setLoadError(error.response?.data?.error || 'Could not load messages');
-      setStatus('error');
-    }
-  }, [recordingId, applyMessages]);
+  // Bumped by the Retry button to reload history.
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
+    setStatus('loading');
+    setLoadError('');
     setMessages([]);
     lastIdRef.current = 0;
-    loadHistory();
-  }, [loadHistory]);
+
+    axios.get(`/api/recordings/${recordingId}/messages`)
+      .then(response => {
+        if (cancelled) return;
+        applyMessages(response.data.messages);
+        setConnection('connecting');
+        setStatus('ready');
+      })
+      .catch(error => {
+        if (cancelled) return;
+        console.error('Error loading messages:', error);
+        setLoadError(error.response?.data?.error || 'Could not load messages');
+        setStatus('error');
+      });
+
+    return () => { cancelled = true; };
+  }, [recordingId, applyMessages, loadAttempt]);
 
   // Live updates once history has loaded; reconnects from the last seen id after any drop.
   useEffect(() => {
@@ -122,6 +129,10 @@ const CaseChat = ({ recordingId, className = '' }) => {
       } catch (error) {
         if (stopped) return;
         console.warn('Message stream dropped:', error);
+        if (FATAL_STREAM_STATUSES.includes(error.status)) {
+          setConnection('offline');
+          return;
+        }
       }
       if (stopped) return;
       setConnection('reconnecting');
@@ -175,7 +186,7 @@ const CaseChat = ({ recordingId, className = '' }) => {
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) handleSend(e);
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) handleSend(e);
   };
 
   const counterpart = user?.role === 'doctor' ? 'the EMT crew' : 'the receiving hospital team';
@@ -195,7 +206,9 @@ const CaseChat = ({ recordingId, className = '' }) => {
           ) : (
             <span className="flex items-center space-x-1 text-xs text-amber-600">
               <WifiOff className="h-3 w-3" />
-              <span>{connection === 'reconnecting' ? 'Reconnecting…' : 'Connecting…'}</span>
+              <span>
+                {{ connecting: 'Connecting…', reconnecting: 'Reconnecting…', offline: 'Offline. Reopen to retry' }[connection]}
+              </span>
             </span>
           )
         )}
@@ -214,7 +227,7 @@ const CaseChat = ({ recordingId, className = '' }) => {
             <AlertTriangle className="h-5 w-5 mb-2" />
             <p className="mb-3">{loadError}</p>
             <button
-              onClick={loadHistory}
+              onClick={() => setLoadAttempt(n => n + 1)}
               className="flex items-center space-x-1 px-3 py-1 border border-red-300 rounded-md hover:bg-red-50"
             >
               <RefreshCw className="h-3 w-3" /><span>Retry</span>

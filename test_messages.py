@@ -276,10 +276,18 @@ class TestValidation:
         assert response.status_code == 400
         assert response.json() == {"error": "Invalid JSON"}
 
-    def test_bad_after_id_rejected(self, emt):
+    @pytest.mark.parametrize("after_id", ["-1", "abc", "1.5", "²"])
+    def test_bad_after_id_rejected(self, emt, after_id):
         case = create_case()
-        assert history(case, emt, after_id="-1").status_code == 400
-        assert history(case, emt, after_id="abc").status_code == 400
+        assert history(case, emt, after_id=after_id).status_code == 400
+
+    def test_concurrent_retries_with_same_client_id_store_one_message(self, emt):
+        case = create_case()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda _: send(case, emt, "retry storm", client_id="storm-1"), range(8)))
+        assert sorted(r.status_code for r in results) == [200] * 7 + [201]
+        assert len({r.json()["id"] for r in results}) == 1
+        assert len(history(case, emt).json()["messages"]) == 1
 
     def test_retry_with_same_client_id_is_not_duplicated(self, emt):
         case = create_case()
@@ -398,3 +406,14 @@ class TestLiveStream:
                 writer.join()
 
         assert events[0]["body"] == "from elsewhere"
+
+    def test_malformed_last_event_id_is_ignored(self, live_server, emt):
+        case = create_case()
+        send(case, emt, "still delivered")
+        with httpx.Client(base_url=live_server, timeout=10) as http:
+            # "²" passes str.isdigit() but is not a valid id.
+            headers = {**emt, "Last-Event-ID": "²".encode("latin-1")}
+            with http.stream("GET", f"/api/recordings/{case}/messages/stream", headers=headers) as response:
+                assert response.status_code == 200
+                events = read_events(response, 1)
+        assert [e["body"] for e in events] == ["still delivered"]
