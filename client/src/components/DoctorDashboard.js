@@ -7,6 +7,7 @@ import {
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import CaseChat from './CaseChat';
+import LiveCasesPanel from './LiveCasesPanel';
 
 const DoctorDashboard = () => {
   const { user } = useAuth();
@@ -211,6 +212,8 @@ const DoctorDashboard = () => {
             </div>
           </div>
         </div>
+
+        <LiveCasesPanel />
 
         {/* Patient Cases - Ranked by Risk */}
         <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden">

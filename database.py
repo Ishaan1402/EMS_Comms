@@ -102,6 +102,55 @@ def init_database():
       FOREIGN KEY (doctor_id) REFERENCES users (id)
     );
 
+    -- Live EMS cases: one per patient encounter, open while the EMT is en route
+    CREATE TABLE IF NOT EXISTS cases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      emt_id INTEGER NOT NULL,
+      patient_info TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
+      started_at TEXT NOT NULL,
+      closed_at TEXT,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (emt_id) REFERENCES users (id)
+    );
+
+    -- Transcript segments: short audio chunks transcribed independently.
+    -- seq is assigned by the EMT client and defines chronological order within a case;
+    -- client_id identifies one recorded clip so a re-upload is told apart from a seq collision.
+    -- updated_at changes on every state change so clients can keep the newest version of a row.
+    CREATE TABLE IF NOT EXISTS transcript_segments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      seq INTEGER NOT NULL,
+      client_id TEXT NOT NULL,
+      recorded_at TEXT NOT NULL,
+      duration_ms INTEGER,
+      audio_file_path TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
+      text TEXT,
+      error TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      transcribed_at TEXT,
+      updated_at TEXT NOT NULL,
+      UNIQUE (case_id, seq),
+      FOREIGN KEY (case_id) REFERENCES cases (id)
+    );
+
+    -- AI-extracted findings, each traceable to the transcript segment it came from.
+    -- Not populated yet; reserved for the findings-extraction feature.
+    CREATE TABLE IF NOT EXISTS case_findings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      segment_id INTEGER,
+      finding_type TEXT NOT NULL,
+      value TEXT NOT NULL,
+      source_text TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (case_id) REFERENCES cases (id),
+      FOREIGN KEY (segment_id) REFERENCES transcript_segments (id)
+    );
+
     -- Case messages between the EMT and the receiving hospital team.
     -- recording_id is the case; every message belongs to exactly one.
     CREATE TABLE IF NOT EXISTS messages (
@@ -117,6 +166,10 @@ def init_database():
     );
 
     -- Create indexes for better performance
+    CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_cases_one_active_per_emt ON cases(emt_id) WHERE status = 'active';
+    CREATE INDEX IF NOT EXISTS idx_cases_emt_id ON cases(emt_id);
+    CREATE INDEX IF NOT EXISTS idx_case_findings_segment_id ON case_findings(segment_id);
     CREATE INDEX IF NOT EXISTS idx_messages_recording ON messages(recording_id, id);
     -- A retried send with the same client_id returns the original message instead of a duplicate.
     CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_id ON messages(sender_id, client_id) WHERE client_id IS NOT NULL;

@@ -4,6 +4,7 @@ import { Mic, Upload, Square, List, Clock, TestTube, MessageSquare } from 'lucid
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import CaseChat from './CaseChat';
+import LiveCaseRecorder from './LiveCaseRecorder';
 
 const EMTDashboard = () => {
   const { user } = useAuth();
@@ -243,6 +244,8 @@ const EMTDashboard = () => {
           Record patient conversations and get AI-powered risk assessment for doctors
         </p>
       </div>
+
+      <LiveCaseRecorder />
 
       {/* Recording Section */}
       <div className="bg-white rounded-lg shadow-md p-6 mb-8">

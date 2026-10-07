@@ -13,7 +13,7 @@ import json
 load_dotenv()
 
 from middleware.auth import APIError
-from routes import auth, recordings, doctors, notifications, messages
+from routes import auth, recordings, doctors, notifications, messages, cases
 from database import init_database, insert_sample_data
 
 @asynccontextmanager
@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
         print(f"⚠️  Missing environment variables: {', '.join(missing_vars)}. Routes that need them will fail.")
 
     init_database()
+    cases.fail_interrupted_segments()
     if os.getenv("SEED_DEMO_USERS", "").lower() in ("1", "true", "yes"):
         insert_sample_data()
     yield
@@ -114,6 +115,7 @@ app.include_router(recordings.router, prefix="/api/recordings", tags=["recording
 app.include_router(messages.router, prefix="/api/recordings", tags=["messages"])
 app.include_router(doctors.router, prefix="/api/doctors", tags=["doctors"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
+app.include_router(cases.router, prefix="/api/cases", tags=["cases"])
 
 # Serve React app in production
 if os.getenv("NODE_ENV") == "production":

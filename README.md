@@ -42,7 +42,34 @@ If any of these keys are missing, the server still starts and logs a warning. On
 
 The SQLite schema is created in `asclepius.db` when the server starts. Demo users (password `password123`) are created only when `SEED_DEMO_USERS=1` is set, or when you run `python3 database.py --seed`.
 
-Tests use a temporary database and need no API keys: `pip install -r requirements.txt pytest && pytest test_parity.py test_messages.py`.
+Tests use a temporary database and need no API keys: `pip install -r requirements.txt pytest && pytest test_parity.py test_messages.py test_live_transcription.py`.
+
+### Live case transcription
+
+EMTs can start a **live case** from the EMT dashboard. The browser records the conversation in ~8 second segments. Each segment is a complete audio file, uploaded and transcribed by Whisper on its own. Every segment is timestamped, stored in SQLite under its case, and pushed to the Doctor Dashboard's **Live Cases** panel as soon as it is uploaded and again when its transcript is ready.
+
+- **Storage**: `cases` and `transcript_segments` tables. An EMT can have only one active case at a time.
+  - A segment's `seq` (assigned by the client, unique per case) sets the chronological order.
+  - Its `client_id` identifies the recorded clip: a re-upload of the same clip returns the stored row, while a different clip that reuses a taken `seq` gets a 409.
+  - `recorded_at` is when the EMT started recording, corrected to the server clock using the upload's `sent_at`.
+  - Every row has an `updated_at`, and clients keep the newest version of each row. That way a slow fetch never overwrites a newer pushed update.
+  - Audio is saved under `private_uploads/` with random file names and is never served over HTTP.
+  - `case_findings.segment_id` is reserved so AI-extracted findings can point back to the segment they came from.
+- **Push**: Server-Sent Events at `GET /api/cases/events`, authenticated with the normal `Authorization: Bearer` header. Doctors receive every case; EMTs receive only their own. Each (re)connect starts with a `ready` event, and clients re-fetch state at that point, because events sent while a client is disconnected are not replayed. The broker runs in-process, so run a single server worker (the default).
+- **Failures**: on startup, segments left pending by a restart are marked failed. Timeouts, network errors, rate limits and 5xx responses are retried once on the server. After that the segment is marked `failed` with a short reason, which both dashboards show, and the EMT can retry it (`POST /api/cases/:id/segments/:segmentId/retry`). Segments still pending after 20s are flagged as delayed, and an open case with no audio for 2 minutes stops showing as LIVE. The EMT client retries failed uploads with backoff and keeps the audio until it is accepted. If a page refresh leaves a case open, the EMT can resume recording or end the case.
+
+| Endpoint | Who | Purpose |
+|---|---|---|
+| `POST /api/cases` | EMT | Start a live case (`{"patient_info": "..."}` optional; 409 if one is already open) |
+| `GET /api/cases[?status=active\|closed]` | EMT (own) / Doctor (all) | List cases |
+| `GET /api/cases/:id` | EMT (own) / Doctor | Case details |
+| `POST /api/cases/:id/close` | EMT | End the case |
+| `GET /api/cases/:id/segments` | EMT (own) / Doctor | Transcript history, ordered by `seq` |
+| `POST /api/cases/:id/segments` | EMT | Upload a segment (multipart: `audio`, `seq`, `client_id`, `recorded_at`, `sent_at`, `duration_ms`) |
+| `POST /api/cases/:id/segments/:segmentId/retry` | EMT | Re-run a failed transcription |
+| `GET /api/cases/events` | EMT / Doctor | SSE stream: `ready`, `case.opened`, `case.updated`, `segment.created`, `segment.updated` |
+
+Live cases are implemented only in the Python backend.
 
 ### Case messaging (EMT ↔ hospital team)
 
