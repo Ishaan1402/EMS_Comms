@@ -226,6 +226,41 @@ class TestSegments:
         assert closed.json() == {"error": "Case is closed"}
 
 
+    def test_upload_racing_a_close_is_rejected_and_audio_removed(self, monkeypatch):
+        case = start_case()
+        stale_snapshot = dict(case)  # what the route read just before the close landed
+        client.post(f"/api/cases/{case['id']}/close", headers=auth_headers(EMT))
+        monkeypatch.setattr(cases, "get_case_for_user", lambda case_id, user: stale_snapshot)
+
+        response = upload(case["id"], 0)
+        assert response.status_code == 409
+        assert not any(cases.SEGMENT_DIR.glob("*"))
+        count = query("SELECT COUNT(*) AS n FROM transcript_segments WHERE case_id = ?", (case["id"],))[0]["n"]
+        assert count == 0
+
+    def test_unexpected_error_outside_whisper_still_marks_failed(self, monkeypatch):
+        def broken_prompt(segment):
+            raise RuntimeError("db hiccup")
+
+        monkeypatch.setattr(cases, "previous_segment_text", broken_prompt)
+        case = start_case()
+        upload(case["id"], 0)
+        segment = client.get(f"/api/cases/{case['id']}/segments", headers=auth_headers(EMT)).json()[0]
+        assert segment["status"] == "failed"
+        assert segment["error"] == "unexpected error"
+
+    def test_pending_segments_failed_on_startup(self, monkeypatch):
+        monkeypatch.setattr(cases, "transcribe_segment", lambda segment_id: None)  # simulate a crash mid-transcription
+        case = start_case()
+        upload(case["id"], 0)
+        assert client.get(f"/api/cases/{case['id']}/segments", headers=auth_headers(EMT)).json()[0]["status"] == "pending"
+
+        cases.fail_interrupted_segments()
+        segment = client.get(f"/api/cases/{case['id']}/segments", headers=auth_headers(EMT)).json()[0]
+        assert segment["status"] == "failed"
+        assert segment["error"] == "interrupted by a server restart"
+
+
 class TestBroker:
     def test_events_are_filtered_by_owner(self):
         async def scenario():

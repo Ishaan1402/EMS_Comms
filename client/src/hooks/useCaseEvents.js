@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 // The server sends a comment every 15s; silence beyond this means the connection is dead.
 const STALE_AFTER_MS = 40000;
 const MAX_BACKOFF_MS = 15000;
+const AUTH_FAILURES = [400, 401, 403];
 
 function parseFrame(frame) {
   let event = 'message';
@@ -25,7 +26,7 @@ function parseFrame(frame) {
  * Reconnects with backoff; a `ready` event arrives on every (re)connect, which is
  * the cue to re-fetch state because events sent while disconnected are not replayed.
  *
- * Returns the connection status: 'connecting' | 'live' | 'reconnecting'.
+ * Returns the connection status: 'connecting' | 'live' | 'reconnecting' | 'unauthorized'.
  */
 export default function useCaseEvents(onEvent, enabled = true) {
   const [status, setStatus] = useState('connecting');
@@ -56,6 +57,11 @@ export default function useCaseEvents(onEvent, enabled = true) {
           cache: 'no-store',
           signal: controller.signal,
         });
+        if (AUTH_FAILURES.includes(response.status)) {
+          // Retrying with the same token can't succeed; the user has to log in again.
+          setStatus('unauthorized');
+          return;
+        }
         if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
 
         const reader = response.body.getReader();

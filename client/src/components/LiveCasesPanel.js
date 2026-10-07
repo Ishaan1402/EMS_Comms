@@ -30,6 +30,12 @@ const sortCases = (cases) =>
     return new Date(b.started_at) - new Date(a.started_at);
   });
 
+const OFFLINE_LABELS = {
+  connecting: 'Connecting…',
+  reconnecting: 'Reconnecting… transcript may be behind',
+  unauthorized: 'Session expired — log in again for live updates',
+};
+
 const ConnectionBadge = ({ status }) =>
   status === 'live' ? (
     <span className="flex items-center gap-1 text-xs font-medium text-green-700">
@@ -37,7 +43,7 @@ const ConnectionBadge = ({ status }) =>
     </span>
   ) : (
     <span className="flex items-center gap-1 text-xs font-medium text-orange-600">
-      <WifiOff className="h-3 w-3" /> {status === 'connecting' ? 'Connecting…' : 'Reconnecting… transcript may be behind'}
+      <WifiOff className="h-3 w-3" /> {OFFLINE_LABELS[status]}
     </span>
   );
 
@@ -61,7 +67,6 @@ const LiveCasesPanel = () => {
   }, []);
 
   const fetchSegments = useCallback(async (caseId) => {
-    if (!caseId) return;
     try {
       const response = await axios.get(`/api/cases/${caseId}/segments`);
       if (selectedRef.current === caseId) setSegments((current) => mergeSnapshot(current, response.data));
@@ -77,6 +82,7 @@ const LiveCasesPanel = () => {
 
   useEffect(() => {
     setSegments([]);
+    if (!selectedId) return;
     fetchSegments(selectedId);
     setUnseen((u) => ({ ...u, [selectedId]: 0 }));
   }, [selectedId, fetchSegments]);
@@ -85,7 +91,7 @@ const LiveCasesPanel = () => {
     if (type === 'ready') {
       // (Re)connected: anything sent while disconnected was missed, so re-sync.
       fetchCases();
-      fetchSegments(selectedRef.current);
+      if (selectedRef.current) fetchSegments(selectedRef.current);
     } else if (type === 'case.opened' || type === 'case.updated') {
       setCases((list) => sortCases(upsertById(list, data.case)));
       if (type === 'case.opened') {

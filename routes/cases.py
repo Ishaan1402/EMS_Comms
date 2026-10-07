@@ -269,11 +269,13 @@ async def upload_segment(
     await asyncio.get_running_loop().run_in_executor(recordings.fast_executor, audio_path.write_bytes, content)
 
     try:
+        # Inserting only while the case is active makes the check atomic with a concurrent close.
         result = run(
             """INSERT INTO transcript_segments
                    (case_id, seq, recorded_at, duration_ms, audio_file_path, status, created_at)
-               VALUES (?, ?, ?, ?, ?, 'pending', ?)""",
-            (case["id"], seq_value, recorded_at_value, duration_value, str(audio_path), now),
+               SELECT ?, ?, ?, ?, ?, 'pending', ?
+               WHERE EXISTS (SELECT 1 FROM cases WHERE id = ? AND status = 'active')""",
+            (case["id"], seq_value, recorded_at_value, duration_value, str(audio_path), now, case["id"]),
         )
     except sqlite3.IntegrityError:
         # A concurrent duplicate upload won the race; keep its row.
@@ -283,6 +285,12 @@ async def upload_segment(
             (case["id"], seq_value),
         )
         return JSONResponse(status_code=200, content=existing[0])
+    except Exception:
+        audio_path.unlink(missing_ok=True)
+        raise
+    if result["changes"] == 0:
+        audio_path.unlink(missing_ok=True)
+        raise APIError(409, "Case is closed")
 
     segment = get_segment(result["id"])
     publish_segment("segment.created", segment, case["emt_id"])
@@ -302,10 +310,14 @@ async def retry_segment(
     segment = get_segment(parse_id(segment_id, "Segment not found"))
     if not segment or segment["case_id"] != case["id"]:
         raise APIError(404, "Segment not found")
-    if segment["status"] != "failed":
+    # Conditional update so a double-click can't start two transcriptions.
+    claimed = run(
+        "UPDATE transcript_segments SET status = 'pending', error = NULL WHERE id = ? AND status = 'failed'",
+        (segment["id"],),
+    )
+    if claimed["changes"] == 0:
         raise APIError(409, "Only failed segments can be retried")
 
-    run("UPDATE transcript_segments SET status = 'pending', error = NULL WHERE id = ?", (segment["id"],))
     segment = get_segment(segment["id"])
     publish_segment("segment.updated", segment, case["emt_id"])
     background_tasks.add_task(transcribe_segment, segment["id"])
@@ -358,6 +370,7 @@ def previous_segment_text(segment: dict) -> Optional[str]:
 
 
 async def transcribe_segment(segment_id: int):
+    """Transcribe one segment, store the result, and publish it. Never leaves the segment pending."""
     rows = query(
         """SELECT s.id, s.case_id, s.seq, s.audio_file_path, c.emt_id
            FROM transcript_segments s JOIN cases c ON s.case_id = c.id
@@ -367,23 +380,12 @@ async def transcribe_segment(segment_id: int):
     if not rows:
         return
     segment = rows[0]
-    prompt = previous_segment_text(segment)
-    loop = asyncio.get_running_loop()
 
-    text, error_message = None, None
-    for attempt in range(1, MAX_TRANSCRIPTION_ATTEMPTS + 1):
-        run("UPDATE transcript_segments SET attempts = attempts + 1 WHERE id = ?", (segment_id,))
-        try:
-            text = await loop.run_in_executor(
-                transcription_executor, transcribe_segment_sync, segment["audio_file_path"], prompt
-            )
-            break
-        except Exception as error:
-            print(f"❌ Transcription error for segment {segment_id} (attempt {attempt}): {error!r}")
-            error_message, transient = describe_transcription_error(error)
-            if not transient or attempt == MAX_TRANSCRIPTION_ATTEMPTS:
-                break
-            await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+    try:
+        text, error_message = await run_transcription(segment)
+    except Exception as error:
+        print(f"❌ Unexpected error transcribing segment {segment_id}: {error!r}")
+        text, error_message = None, "unexpected error"
 
     if text is not None:
         run(
@@ -396,3 +398,31 @@ async def transcribe_segment(segment_id: int):
             (error_message, segment_id),
         )
     publish_segment("segment.updated", get_segment(segment_id), segment["emt_id"])
+
+
+async def run_transcription(segment: dict):
+    """Call Whisper, retrying transient failures. Returns (text, None) or (None, error message)."""
+    prompt = previous_segment_text(segment)
+    loop = asyncio.get_running_loop()
+    for attempt in range(1, MAX_TRANSCRIPTION_ATTEMPTS + 1):
+        run("UPDATE transcript_segments SET attempts = attempts + 1 WHERE id = ?", (segment["id"],))
+        try:
+            text = await loop.run_in_executor(
+                transcription_executor, transcribe_segment_sync, segment["audio_file_path"], prompt
+            )
+            return text, None
+        except Exception as error:
+            print(f"❌ Transcription error for segment {segment['id']} (attempt {attempt}): {error!r}")
+            error_message, transient = describe_transcription_error(error)
+            if not transient or attempt == MAX_TRANSCRIPTION_ATTEMPTS:
+                return None, error_message
+            await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+
+
+def fail_interrupted_segments() -> None:
+    """Called at startup: transcriptions in flight when the server stopped will never finish on their own."""
+    result = run(
+        "UPDATE transcript_segments SET status = 'failed', error = 'interrupted by a server restart' WHERE status = 'pending'"
+    )
+    if result["changes"]:
+        print(f"⚠️  Marked {result['changes']} interrupted transcript segment(s) as failed")
