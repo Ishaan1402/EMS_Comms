@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 
 # Dependencies
+.venv/
 node_modules/
 npm-debug.log*
 yarn-debug.log*

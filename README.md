@@ -42,7 +42,7 @@ If any of these keys are missing, the server still starts and logs a warning. On
 
 The SQLite schema is created in `asclepius.db` when the server starts. Demo users (password `password123`) are created only when `SEED_DEMO_USERS=1` is set, or when you run `python3 database.py --seed`.
 
-Tests use a temporary database and need no API keys: `pip install -r requirements.txt pytest && pytest test_parity.py test_live_transcription.py`.
+Tests use a temporary database and need no API keys: `pip install -r requirements.txt pytest && pytest test_parity.py test_messages.py test_live_transcription.py`.
 
 ### Live case transcription
 
@@ -70,6 +70,16 @@ EMTs can start a **live case** from the EMT dashboard. The browser records the c
 | `GET /api/cases/events` | EMT / Doctor | SSE stream: `ready`, `case.opened`, `case.updated`, `segment.created`, `segment.updated` |
 
 Live cases are implemented only in the Python backend.
+
+### Case messaging (EMT ↔ hospital team)
+
+Each recording is a case with its own message thread. The EMT who recorded it and every doctor notified about it can read and send messages; anyone else gets a 404. Messages live in the `messages` table (SQLite in WAL mode), ordered by id.
+
+- `GET /api/recordings/:id/messages?after_id=N` returns the history, oldest first
+- `POST /api/recordings/:id/messages` with `{ "body": "...", "client_id": "optional-uuid" }` sends a message. The case comes only from the URL. A retry with the same `client_id` returns the original message instead of a duplicate.
+- `GET /api/recordings/:id/messages/stream?after_id=N` is a server-sent event stream of new messages. It honours `Last-Event-ID` and needs the usual `Authorization` header.
+
+Messaging is implemented in the Python backend only.
 
 ---
 

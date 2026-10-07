@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Mic, Upload, Square, List, Clock, TestTube } from 'lucide-react';
+import { Mic, Upload, Square, List, Clock, TestTube, MessageSquare } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import CaseChat from './CaseChat';
 import LiveCaseRecorder from './LiveCaseRecorder';
 
 const EMTDashboard = () => {
@@ -13,6 +14,7 @@ const EMTDashboard = () => {
   const [loading, setLoading] = useState(false);
   const [patientInfo, setPatientInfo] = useState('');
   const [showUploadForm, setShowUploadForm] = useState(false);
+  const [openChatId, setOpenChatId] = useState(null);
   
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -447,7 +449,19 @@ const EMTDashboard = () => {
                       </div>
                     </div>
                   </div>
+
+                  <button
+                    onClick={() => setOpenChatId(openChatId === recording.id ? null : recording.id)}
+                    className="ml-4 flex items-center space-x-1 px-3 py-2 text-sm font-medium text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors"
+                  >
+                    <MessageSquare className="h-4 w-4" />
+                    <span>{openChatId === recording.id ? 'Hide messages' : 'Hospital messages'}</span>
+                  </button>
                 </div>
+
+                {openChatId === recording.id && (
+                  <CaseChat recordingId={recording.id} className="mt-4" />
+                )}
               </div>
             ))}
           </div>
