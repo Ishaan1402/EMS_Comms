@@ -6,13 +6,13 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import CaseChat from './CaseChat';
 
 const DoctorDashboard = () => {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [selectedRecording, setSelectedRecording] = useState(null);
   const [showRecordingModal, setShowRecordingModal] = useState(false);
-  const [response, setResponse] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sortBy, setSortBy] = useState('priority'); // Default to priority sorting
 
@@ -52,24 +52,6 @@ const DoctorDashboard = () => {
     } catch (error) {
       console.error('Error fetching recording:', error);
       toast.error('Failed to fetch recording details');
-    }
-  };
-
-  const sendResponse = async (recordingId) => {
-    if (!response.trim()) {
-      toast.error('Please enter a response');
-      return;
-    }
-
-    try {
-      await axios.post(`/api/doctors/recordings/${recordingId}/respond`, { response });
-      toast.success('Response sent successfully');
-      setResponse('');
-      setShowRecordingModal(false);
-      fetchNotifications();
-    } catch (error) {
-      console.error('Error sending response:', error);
-      toast.error('Failed to send response');
     }
   };
 
@@ -380,6 +362,14 @@ const DoctorDashboard = () => {
                           <Eye className="h-4 w-4" />
                           <span>View Details</span>
                         </button>
+
+                        <button
+                          onClick={() => viewRecording(notification.recording_id)}
+                          className="flex items-center space-x-2 px-4 py-2 bg-white border border-blue-300 text-blue-700 text-sm font-medium rounded-lg hover:bg-blue-50 transition-colors shadow-md"
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          <span>Message EMT</span>
+                        </button>
                         
                         {!notification.read_at && (
                           <button
@@ -482,26 +472,15 @@ const DoctorDashboard = () => {
                   </div>
                 </div>
 
-                {/* Response Section */}
-                <div className="mt-8 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg p-6 border border-gray-200">
-                  <h4 className="font-semibold text-gray-900 mb-4">Your Medical Response</h4>
-                  <textarea
-                    value={response}
-                    onChange={(e) => setResponse(e.target.value)}
-                    placeholder="Enter your medical response, instructions, or questions for the EMT..."
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
-                    rows="4"
-                  />
+                {/* Messages with the EMT */}
+                <div className="mt-8">
+                  <h4 className="font-semibold text-gray-900 mb-3">
+                    Messages with EMT {selectedRecording.emt_first_name} {selectedRecording.emt_last_name}
+                  </h4>
+                  <CaseChat recordingId={selectedRecording.id} />
                 </div>
 
                 <div className="flex space-x-4 pt-6">
-                  <button
-                    onClick={() => sendResponse(selectedRecording.id)}
-                    className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-medium rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-md hover:shadow-lg"
-                  >
-                    <MessageSquare className="h-5 w-5" />
-                    <span>Send Response</span>
-                  </button>
                   <button
                     onClick={() => setShowRecordingModal(false)}
                     className="px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
