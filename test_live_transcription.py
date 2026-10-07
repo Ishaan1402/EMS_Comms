@@ -51,16 +51,24 @@ DOCTOR = "dr.smith"
 
 
 def start_case(username=EMT, patient_info="54M chest pain"):
+    # An EMT may only have one open case; close leftovers from earlier tests.
+    database.run(
+        "UPDATE cases SET status = 'closed' WHERE status = 'active' AND emt_id = (SELECT id FROM users WHERE username = ?)",
+        (username,),
+    )
     response = client.post("/api/cases", json={"patient_info": patient_info}, headers=auth_headers(username))
     assert response.status_code == 201, response.text
     return response.json()
 
 
-def upload(case_id, seq, username=EMT, recorded_at="2026-10-07T15:00:00.000Z", audio=b"fake-webm-bytes"):
+def upload(case_id, seq, username=EMT, recorded_at="2026-01-01T15:00:00.000Z", audio=b"fake-webm-bytes",
+           client_id=None, **fields):
+    data = {"seq": str(seq), "client_id": client_id or f"clip-{case_id}-{seq}",
+            "recorded_at": recorded_at, "duration_ms": "8000", **fields}
     return client.post(
         f"/api/cases/{case_id}/segments",
         files={"audio": (f"segment-{seq}.webm", audio, "audio/webm;codecs=opus")},
-        data={"seq": str(seq), "recorded_at": recorded_at, "duration_ms": "8000"},
+        data=data,
         headers=auth_headers(username),
     )
 
@@ -74,6 +82,13 @@ def fake_transcriber(texts):
 
 
 class TestCaseLifecycle:
+    def test_emt_cannot_have_two_active_cases(self):
+        start_case()
+        second = client.post("/api/cases", json={}, headers=auth_headers(EMT))
+        assert second.status_code == 409
+        active = client.get("/api/cases?status=active", headers=auth_headers(EMT)).json()
+        assert len(active) == 1
+
     def test_emt_starts_case_and_doctor_sees_it_as_active(self):
         case = start_case()
         assert case["status"] == "active"
@@ -110,7 +125,7 @@ class TestSegments:
 
         # Uploads arrive out of order; seq decides the order.
         for seq in (2, 0, 1):
-            response = upload(case["id"], seq, recorded_at=f"2026-10-07T15:00:{seq * 8:02d}.000Z")
+            response = upload(case["id"], seq, recorded_at=f"2026-01-01T15:00:{seq * 8:02d}.000Z")
             assert response.status_code == 201, response.text
             assert response.json()["status"] == "pending"
             assert response.json()["case_id"] == case["id"]
@@ -119,7 +134,7 @@ class TestSegments:
         assert [s["seq"] for s in segments] == [0, 1, 2]
         assert [s["text"] for s in segments] == ["first", "second", "third"]
         assert all(s["status"] == "completed" and s["transcribed_at"] for s in segments)
-        assert segments[1]["recorded_at"] == "2026-10-07T15:00:08.000Z"
+        assert segments[1]["recorded_at"] == "2026-01-01T15:00:08.000Z"
         assert "audio_file_path" not in segments[0]
 
         case_after = client.get(f"/api/cases/{case['id']}", headers=auth_headers(DOCTOR)).json()
@@ -141,8 +156,46 @@ class TestSegments:
     def test_recorded_at_timezone_normalized_to_utc(self, monkeypatch):
         monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "x"}))
         case = start_case()
-        segment = upload(case["id"], 0, recorded_at="2026-10-07T08:00:00-07:00").json()
-        assert segment["recorded_at"] == "2026-10-07T15:00:00.000Z"
+        segment = upload(case["id"], 0, recorded_at="2026-01-01T08:00:00-07:00").json()
+        assert segment["recorded_at"] == "2026-01-01T15:00:00.000Z"
+
+    def test_recorded_at_corrected_for_client_clock_offset(self, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "x"}))
+        case = start_case()
+        fast_clock = datetime.now(timezone.utc) + timedelta(hours=1)  # client clock runs an hour fast
+        recorded = fast_clock - timedelta(seconds=10)
+        segment = upload(case["id"], 0, recorded_at=recorded.isoformat(), sent_at=fast_clock.isoformat()).json()
+        lag = datetime.now(timezone.utc) - datetime.fromisoformat(segment["recorded_at"].replace("Z", "+00:00"))
+        assert timedelta(seconds=9) < lag < timedelta(seconds=12)
+
+    def test_same_seq_from_a_different_clip_is_rejected(self, monkeypatch):
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "original"}))
+        case = start_case()
+        upload(case["id"], 0, client_id="clip-a")
+        clash = upload(case["id"], 0, client_id="clip-b")
+        assert clash.status_code == 409
+        assert "already exists" in clash.json()["error"]
+
+    def test_malformed_numbers_are_400_not_500(self):
+        case = start_case()
+        assert upload(case["id"], "99999999999999999999999").status_code == 400
+        assert upload(case["id"], "1.5").status_code == 400
+        assert upload(case["id"], 0, client_id="x" * 65).status_code == 400
+        for bad in ("inf", "nan", "1e30", "-5", "abc"):
+            response = client.post(
+                f"/api/cases/{case['id']}/segments",
+                files={"audio": ("s.webm", b"x", "audio/webm")},
+                data={"seq": "0", "client_id": "c", "duration_ms": bad},
+                headers=auth_headers(EMT),
+            )
+            assert response.status_code == 400, bad
+
+    def test_extreme_timestamps_fall_back_to_server_time(self, monkeypatch):
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "x", 1: "y"}))
+        case = start_case()
+        assert upload(case["id"], 0, recorded_at="0001-01-01T00:00:00+01:00").status_code == 201
+        assert upload(case["id"], 1, recorded_at="2026-01-01T00:00:00Z", sent_at="9999-12-31T23:59:59-01:00").status_code == 201
 
     def test_duplicate_seq_is_idempotent(self, monkeypatch):
         monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "once"}))
@@ -215,7 +268,7 @@ class TestSegments:
         bad_type = client.post(
             f"/api/cases/{case['id']}/segments",
             files={"audio": ("x.txt", b"hello", "text/plain")},
-            data={"seq": "0"},
+            data={"seq": "0", "client_id": "c"},
             headers=auth_headers(EMT),
         )
         assert bad_type.status_code == 400
@@ -345,7 +398,7 @@ class TestLiveStream:
                 response = http.post(
                     f"/api/cases/{case['id']}/segments",
                     files={"audio": ("segment-0.webm", b"bytes", "audio/webm")},
-                    data={"seq": "0", "recorded_at": "2026-10-07T15:00:00Z"},
+                    data={"seq": "0", "client_id": "clip-live", "recorded_at": "2026-01-01T15:00:00Z"},
                     headers=auth_headers(EMT),
                 )
                 assert response.status_code == 201
@@ -353,6 +406,7 @@ class TestLiveStream:
                 events = reader.read_until(lambda e: any(t == "segment.updated" for t, _ in e))
 
         by_type = {t: d for t, d in events}
+        assert by_type["case.updated"]["case"]["segment_count"] == 1
         assert by_type["segment.created"]["case_id"] == case["id"]
         assert by_type["segment.created"]["segment"]["status"] == "pending"
         assert by_type["segment.updated"]["segment"]["status"] == "completed"

@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import useCaseEvents from '../hooks/useCaseEvents';
 import useSegmentRecorder, { getMicrophone } from '../hooks/useSegmentRecorder';
 import useSegmentUploads from '../hooks/useSegmentUploads';
+import { mergeNewer, upsertNewer } from '../utils/liveRows';
 import LiveTranscript from './LiveTranscript';
 
 const SEGMENT_MS = 8000;
@@ -20,18 +21,19 @@ const microphoneErrorMessage = (error) => (error.name === 'NotAllowedError'
   ? 'Microphone access denied. Allow microphone permissions to start a live case.'
   : `Could not access microphone: ${error.message}`);
 
-const upsertById = (list, item) => [...list.filter((x) => x.id !== item.id), item];
+const nextSeqAfter = (segments) => segments.reduce((max, s) => Math.max(max, s.seq + 1), 0);
 
 const LiveCaseRecorder = () => {
   const [patientInfo, setPatientInfo] = useState('');
   const [activeCase, setActiveCase] = useState(null);
   const [segments, setSegments] = useState([]);
-  const [busy, setBusy] = useState(false);
+  const [openCaseCheck, setOpenCaseCheck] = useState('checking'); // checking | done | failed
+  const [busyMessage, setBusyMessage] = useState(null);
   const caseRef = useRef(null);
   const nextSeqRef = useRef(0);
   caseRef.current = activeCase;
 
-  const addSegment = useCallback((segment) => setSegments((list) => upsertById(list, segment)), []);
+  const addSegment = useCallback((segment) => setSegments((list) => upsertNewer(list, segment)), []);
   const uploads = useSegmentUploads(addSegment);
   const recorder = useSegmentRecorder({
     segmentMs: SEGMENT_MS,
@@ -45,38 +47,53 @@ const LiveCaseRecorder = () => {
     onError: (message) => toast.error(message),
   });
 
-  const fetchSegments = useCallback(async (caseId) => {
-    const response = await axios.get(`/api/cases/${caseId}/segments`);
-    setSegments(response.data);
-    return response.data;
+  const runBusy = async (message, action) => {
+    setBusyMessage(message);
+    try {
+      await action();
+    } finally {
+      setBusyMessage(null);
+    }
+  };
+
+  // Pick up a case left open by a page refresh or closed tab. It is shown only once its
+  // transcript is loaded, so resumed audio continues after the last seq the server has.
+  const loadOpenCase = useCallback(async () => {
+    setOpenCaseCheck('checking');
+    try {
+      const open = (await axios.get('/api/cases?status=active')).data[0];
+      if (open) {
+        const existing = (await axios.get(`/api/cases/${open.id}/segments`)).data;
+        nextSeqRef.current = nextSeqAfter(existing);
+        setSegments(existing);
+        setActiveCase(open);
+      }
+      setOpenCaseCheck('done');
+    } catch (error) {
+      console.error('Error checking for an open case:', error);
+      setOpenCaseCheck('failed');
+    }
   }, []);
 
-  // A case left open by a page refresh can be resumed or ended.
   useEffect(() => {
-    axios.get('/api/cases?status=active')
-      .then(async (response) => {
-        const open = response.data[0];
-        if (!open || caseRef.current) return;
-        setActiveCase(open);
-        const existing = await fetchSegments(open.id);
-        nextSeqRef.current = existing.reduce((max, s) => Math.max(max, s.seq + 1), 0);
-      })
-      .catch((error) => console.error('Error checking for an open case:', error));
-  }, [fetchSegments]);
+    loadOpenCase();
+  }, [loadOpenCase]);
 
   const handleEvent = useCallback((type, data) => {
     const current = caseRef.current;
     if (!current) return;
     if (type === 'ready') {
-      fetchSegments(current.id).catch((error) => console.error('Error re-syncing transcript:', error));
+      axios.get(`/api/cases/${current.id}/segments`)
+        .then((response) => setSegments((list) => mergeNewer(list, response.data)))
+        .catch((error) => console.error('Error re-syncing transcript:', error));
     } else if ((type === 'segment.created' || type === 'segment.updated') && data.case_id === current.id) {
       addSegment(data.segment);
     }
-  }, [fetchSegments, addSegment]);
+  }, [addSegment]);
 
   const connection = useCaseEvents(handleEvent, !!activeCase);
 
-  const startLiveCase = async () => {
+  const startLiveCase = () => runBusy('Starting live case…', async () => {
     let stream;
     try {
       stream = await getMicrophone();
@@ -94,19 +111,24 @@ const LiveCaseRecorder = () => {
       recorder.start(stream);
       toast.success(`Live case #${response.data.id} started — doctors can follow along`);
     } catch (error) {
-      console.error('Error starting case:', error);
       stream.getTracks().forEach((track) => track.stop());
-      toast.error('Failed to start live case');
+      if (error.response?.status === 409) {
+        toast.error('You already have an open case — resume or end it first.');
+        await loadOpenCase();
+      } else {
+        console.error('Error starting case:', error);
+        toast.error('Failed to start live case');
+      }
     }
-  };
+  });
 
-  const resumeRecording = async () => {
+  const resumeRecording = () => runBusy('Connecting microphone…', async () => {
     try {
       recorder.start(await getMicrophone());
     } catch (error) {
       toast.error(microphoneErrorMessage(error));
     }
-  };
+  });
 
   const closeCase = async () => {
     try {
@@ -121,8 +143,7 @@ const LiveCaseRecorder = () => {
     }
   };
 
-  const stopAndEndCase = async () => {
-    setBusy(true);
+  const stopAndEndCase = () => runBusy('Uploading remaining audio…', async () => {
     await recorder.stop();
     await uploads.waitForIdle();
     if (uploads.failedCount() > 0) {
@@ -130,18 +151,17 @@ const LiveCaseRecorder = () => {
     } else {
       await closeCase();
     }
-    setBusy(false);
-  };
+  });
 
-  const endCaseAnyway = async () => {
+  const endCaseAnyway = () => {
     const lost = uploads.failedCount();
     if (lost > 0 && !window.confirm(`${lost} audio segment(s) were never uploaded and will be lost. End the case anyway?`)) {
       return;
     }
-    setBusy(true);
-    await uploads.waitForIdle();
-    await closeCase();
-    setBusy(false);
+    runBusy('Ending case…', async () => {
+      await uploads.waitForIdle();
+      await closeCase();
+    });
   };
 
   const retry = async (segment) => {
@@ -186,21 +206,31 @@ const LiveCaseRecorder = () => {
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
             rows="2"
           />
-          <button
-            onClick={startLiveCase}
-            className="flex items-center space-x-2 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-          >
-            <Radio className="h-5 w-5" />
-            <span>Start Live Case</span>
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={startLiveCase}
+              disabled={openCaseCheck !== 'done' || !!busyMessage}
+              className="flex items-center space-x-2 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Radio className="h-5 w-5" />
+              <span>{busyMessage || 'Start Live Case'}</span>
+            </button>
+            {openCaseCheck === 'checking' && <span className="text-sm text-gray-500">Checking for an open case…</span>}
+            {openCaseCheck === 'failed' && (
+              <span className="text-sm text-red-700">
+                Couldn't check for an open case.{' '}
+                <button onClick={loadOpenCase} className="underline">Try again</button>
+              </span>
+            )}
+          </div>
         </div>
       )}
 
       {isOpen && (
         <div className="flex flex-wrap items-center gap-4 mb-4">
           <span className="font-medium text-gray-900">Case #{activeCase.id}</span>
-          {busy && <span className="text-gray-600">Uploading remaining audio…</span>}
-          {!busy && recorder.isRecording && (
+          {busyMessage && <span className="text-gray-600">{busyMessage}</span>}
+          {!busyMessage && recorder.isRecording && (
             <>
               <span className="flex items-center gap-2 text-red-600 animate-pulse">
                 <span className="h-2 w-2 rounded-full bg-red-600" /> Live — transcript updates every ~{SEGMENT_MS / 1000}s
@@ -214,7 +244,7 @@ const LiveCaseRecorder = () => {
               </button>
             </>
           )}
-          {!busy && !recorder.isRecording && (
+          {!busyMessage && !recorder.isRecording && (
             <>
               <span className="text-orange-700 text-sm">Case is open but not recording.</span>
               <button

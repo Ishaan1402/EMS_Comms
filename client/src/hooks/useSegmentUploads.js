@@ -9,6 +9,11 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Network errors, timeouts and 5xx may succeed later; other 4xx responses won't.
 const isRetryable = (error) => !error.response || error.response.status >= 500 || error.response.status === 408;
 
+// randomUUID needs a secure context (https or localhost); the fallback is unique enough per device.
+const newClientId = () => (window.crypto?.randomUUID
+  ? window.crypto.randomUUID()
+  : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
+
 const extensionFor = (mimeType) => {
   if (mimeType.includes('mp4')) return 'mp4';
   if (mimeType.includes('ogg')) return 'ogg';
@@ -19,7 +24,8 @@ const extensionFor = (mimeType) => {
  * Upload queue for live-case audio segments. Retries with backoff and keeps the
  * audio of segments that still fail so the EMT can retry them by hand.
  *
- * Items: { caseId, seq, recorded_at, duration_ms, blob }.
+ * Items: { caseId, seq, recorded_at, duration_ms, blob }. Each gets a client_id so the
+ * server can tell a retried upload of this clip from a different clip with the same seq.
  * `pending` lists items not yet accepted by the server, with status
  * 'uploading' | 'upload_failed' (shape-compatible with server segments for display).
  * onUploaded(segment) receives the server's segment for each accepted upload.
@@ -44,7 +50,9 @@ export default function useSegmentUploads(onUploaded) {
         const form = new FormData();
         form.append('audio', item.blob, `segment-${item.seq}.${extensionFor(item.blob.type)}`);
         form.append('seq', String(item.seq));
+        form.append('client_id', item.client_id);
         form.append('recorded_at', item.recorded_at);
+        form.append('sent_at', new Date().toISOString());
         form.append('duration_ms', String(item.duration_ms));
         const response = await axios.post(`/api/cases/${item.caseId}/segments`, form, { timeout: UPLOAD_TIMEOUT_MS });
         setEntry(item.seq, null);
@@ -60,7 +68,7 @@ export default function useSegmentUploads(onUploaded) {
   };
 
   const enqueue = (item) => {
-    const promise = upload(item).finally(() => inFlight.current.delete(promise));
+    const promise = upload({ client_id: newClientId(), ...item }).finally(() => inFlight.current.delete(promise));
     inFlight.current.add(promise);
   };
 

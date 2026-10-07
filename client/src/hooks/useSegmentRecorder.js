@@ -49,7 +49,15 @@ export default function useSegmentRecorder({ segmentMs, onSegment, onError }) {
     }
 
     const mimeType = pickMimeType();
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    let recorder;
+    try {
+      recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    } catch (error) {
+      console.error('Could not create MediaRecorder:', error);
+      callbacks.current.onError('Audio recording is not supported here — recording stopped');
+      finish();
+      return;
+    }
     const chunks = [];
     const startedAt = new Date();
 
@@ -76,18 +84,33 @@ export default function useSegmentRecorder({ segmentMs, onSegment, onError }) {
     };
 
     recorderRef.current = recorder;
-    recorder.start();
+    try {
+      recorder.start();
+    } catch (error) {
+      console.error('Could not start MediaRecorder:', error);
+      callbacks.current.onError('Recording failed to start — recording stopped');
+      finish();
+      return;
+    }
     timerRef.current = setTimeout(() => {
       if (recorder.state === 'recording') recorder.stop();
     }, segmentMs);
   };
 
-  /** Begin recording from a stream obtained with getMicrophone(); this hook takes ownership of it. */
+  /**
+   * Begin recording from a stream obtained with getMicrophone(); this hook takes ownership of it.
+   * Returns false (and releases the stream) if a recording is already running.
+   */
   const start = (stream) => {
+    if (streamRef.current) {
+      stream.getTracks().forEach((track) => track.stop());
+      return false;
+    }
     streamRef.current = stream;
     activeRef.current = true;
     setIsRecording(true);
     recordNextSegment();
+    return true;
   };
 
   /** Stop recording. Resolves after the final partial segment has been passed to onSegment. */
@@ -95,9 +118,11 @@ export default function useSegmentRecorder({ segmentMs, onSegment, onError }) {
     activeRef.current = false;
     clearTimeout(timerRef.current);
     const recorder = recorderRef.current;
-    if (recorder && recorder.state === 'recording') {
+    // recorderRef is cleared or replaced only inside onstop, so a recorder here still has a
+    // segment to hand off, even if the segment timer already called stop() on it.
+    if (recorder) {
       onStoppedRef.current = resolve;
-      recorder.stop();
+      if (recorder.state === 'recording') recorder.stop();
     } else {
       finish();
       resolve();

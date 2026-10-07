@@ -102,3 +102,6 @@ Thumbs.db
 # Temporary files
 temp_*.js
 microphone_test.html
+
+# Live case audio (PHI), never served statically
+private_uploads/

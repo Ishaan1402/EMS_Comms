@@ -1,40 +1,25 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Radio, Clock, WifiOff } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import useCaseEvents from '../hooks/useCaseEvents';
+import { mergeNewer, upsertNewer } from '../utils/liveRows';
 import LiveTranscript from './LiveTranscript';
 
-const upsertById = (list, item) => {
-  const index = list.findIndex((x) => x.id === item.id);
-  if (index === -1) return [...list, item];
-  const next = [...list];
-  next[index] = { ...next[index], ...item };
-  return next;
-};
-
-// A fetched snapshot can be older than events that arrived while it was in flight.
-const mergeSnapshot = (current, fetched) => {
-  const byId = new Map(current.map((s) => [s.id, s]));
-  fetched.forEach((row) => {
-    const live = byId.get(row.id);
-    const liveIsNewer = live && live.attempts >= row.attempts && live.status !== 'pending' && row.status === 'pending';
-    if (!liveIsNewer) byId.set(row.id, row);
-  });
-  return [...byId.values()];
-};
-
-const sortCases = (cases) =>
-  [...cases].sort((a, b) => {
-    if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
-    return new Date(b.started_at) - new Date(a.started_at);
-  });
+// An open case with no new audio for this long is shown as idle instead of LIVE.
+const IDLE_AFTER_MS = 2 * 60 * 1000;
 
 const OFFLINE_LABELS = {
   connecting: 'Connecting…',
   reconnecting: 'Reconnecting… transcript may be behind',
   unauthorized: 'Session expired — log in again for live updates',
 };
+
+const sortCases = (cases) =>
+  [...cases].sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
+    return b.started_at.localeCompare(a.started_at);
+  });
 
 const ConnectionBadge = ({ status }) =>
   status === 'live' ? (
@@ -47,20 +32,42 @@ const ConnectionBadge = ({ status }) =>
     </span>
   );
 
+const CaseStatusBadge = ({ liveCase, serverNow }) => {
+  if (liveCase.status !== 'active') {
+    return <span className="px-2 py-0.5 text-xs text-gray-600 bg-gray-200 rounded-full">Closed</span>;
+  }
+  const idleMs = serverNow - Date.parse(liveCase.last_segment_at || liveCase.started_at);
+  if (idleMs > IDLE_AFTER_MS) {
+    return (
+      <span className="px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-100 rounded-full">
+        Open · no audio for {Math.floor(idleMs / 60000)}m
+      </span>
+    );
+  }
+  return <span className="px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full animate-pulse">LIVE</span>;
+};
+
 const LiveCasesPanel = () => {
   const [cases, setCases] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [segments, setSegments] = useState([]);
   const [unseen, setUnseen] = useState({});
+  // Server clock minus local clock, so idle times aren't skewed by a wrong local clock.
+  const [clockOffsetMs, setClockOffsetMs] = useState(0);
+  const [now, setNow] = useState(Date.now());
   const selectedRef = useRef(null);
   selectedRef.current = selectedId;
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   const fetchCases = useCallback(async () => {
     try {
       const response = await axios.get('/api/cases');
-      const sorted = sortCases(response.data);
-      setCases(sorted);
-      setSelectedId((current) => current ?? sorted[0]?.id ?? null);
+      setCases((current) => mergeNewer(current, response.data));
+      setSelectedId((current) => current ?? sortCases(response.data)[0]?.id ?? null);
     } catch (error) {
       console.error('Error fetching cases:', error);
     }
@@ -69,13 +76,14 @@ const LiveCasesPanel = () => {
   const fetchSegments = useCallback(async (caseId) => {
     try {
       const response = await axios.get(`/api/cases/${caseId}/segments`);
-      if (selectedRef.current === caseId) setSegments((current) => mergeSnapshot(current, response.data));
+      if (selectedRef.current === caseId) setSegments((current) => mergeNewer(current, response.data));
     } catch (error) {
       console.error('Error fetching transcript:', error);
       toast.error('Failed to load transcript');
     }
   }, []);
 
+  // Load even if the event stream can't connect; merging makes the overlap with `ready` harmless.
   useEffect(() => {
     fetchCases();
   }, [fetchCases]);
@@ -87,34 +95,31 @@ const LiveCasesPanel = () => {
     setUnseen((u) => ({ ...u, [selectedId]: 0 }));
   }, [selectedId, fetchSegments]);
 
+  // The stream sends `ready` on every (re)connect; events missed while disconnected are re-fetched.
   const handleEvent = useCallback((type, data) => {
     if (type === 'ready') {
-      // (Re)connected: anything sent while disconnected was missed, so re-sync.
+      setClockOffsetMs(Date.parse(data.server_time) - Date.now());
       fetchCases();
       if (selectedRef.current) fetchSegments(selectedRef.current);
     } else if (type === 'case.opened' || type === 'case.updated') {
-      setCases((list) => sortCases(upsertById(list, data.case)));
+      setCases((list) => upsertNewer(list, data.case));
       if (type === 'case.opened') {
         toast(`New live case from ${data.case.emt_first_name} ${data.case.emt_last_name}`, { icon: '🚑' });
         setSelectedId((current) => current ?? data.case.id);
       }
     } else if (type === 'segment.created' || type === 'segment.updated') {
-      const { case_id: caseId, segment } = data;
-      if (caseId === selectedRef.current) {
-        setSegments((list) => upsertById(list, segment));
+      if (data.case_id === selectedRef.current) {
+        setSegments((list) => upsertNewer(list, data.segment));
       } else if (type === 'segment.created') {
-        setUnseen((u) => ({ ...u, [caseId]: (u[caseId] || 0) + 1 }));
-      }
-      if (type === 'segment.created') {
-        setCases((list) => list.map((c) => (c.id === caseId
-          ? { ...c, segment_count: (c.segment_count || 0) + 1, last_segment_at: segment.recorded_at }
-          : c)));
+        setUnseen((u) => ({ ...u, [data.case_id]: (u[data.case_id] || 0) + 1 }));
       }
     }
   }, [fetchCases, fetchSegments]);
 
   const connection = useCaseEvents(handleEvent);
+  const sortedCases = useMemo(() => sortCases(cases), [cases]);
   const selected = cases.find((c) => c.id === selectedId);
+  const serverNow = now + clockOffsetMs;
 
   return (
     <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden mb-8">
@@ -133,7 +138,7 @@ const LiveCasesPanel = () => {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3">
           <ul className="border-r border-gray-200 max-h-[28rem] overflow-y-auto">
-            {cases.map((c) => (
+            {sortedCases.map((c) => (
               <li key={c.id}>
                 <button
                   onClick={() => setSelectedId(c.id)}
@@ -145,11 +150,7 @@ const LiveCasesPanel = () => {
                       {unseen[c.id] > 0 && (
                         <span className="px-2 text-xs font-bold text-white bg-blue-600 rounded-full">{unseen[c.id]} new</span>
                       )}
-                      {c.status === 'active' ? (
-                        <span className="px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full animate-pulse">LIVE</span>
-                      ) : (
-                        <span className="px-2 py-0.5 text-xs text-gray-600 bg-gray-200 rounded-full">Closed</span>
-                      )}
+                      <CaseStatusBadge liveCase={c} serverNow={serverNow} />
                     </div>
                   </div>
                   <p className="text-sm text-gray-700 truncate">{c.patient_info || 'No patient info'}</p>

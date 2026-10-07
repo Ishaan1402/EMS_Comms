@@ -106,15 +106,19 @@ def init_database():
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
       started_at TEXT NOT NULL,
       closed_at TEXT,
+      updated_at TEXT NOT NULL,
       FOREIGN KEY (emt_id) REFERENCES users (id)
     );
 
     -- Transcript segments: short audio chunks transcribed independently.
-    -- seq is assigned by the EMT client and defines chronological order within a case.
+    -- seq is assigned by the EMT client and defines chronological order within a case;
+    -- client_id identifies one recorded clip so a re-upload is told apart from a seq collision.
+    -- updated_at changes on every state change so clients can keep the newest version of a row.
     CREATE TABLE IF NOT EXISTS transcript_segments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       case_id INTEGER NOT NULL,
       seq INTEGER NOT NULL,
+      client_id TEXT NOT NULL,
       recorded_at TEXT NOT NULL,
       duration_ms INTEGER,
       audio_file_path TEXT NOT NULL,
@@ -124,6 +128,7 @@ def init_database():
       attempts INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       transcribed_at TEXT,
+      updated_at TEXT NOT NULL,
       UNIQUE (case_id, seq),
       FOREIGN KEY (case_id) REFERENCES cases (id)
     );
@@ -144,6 +149,7 @@ def init_database():
 
     -- Create indexes for better performance
     CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_cases_one_active_per_emt ON cases(emt_id) WHERE status = 'active';
     CREATE INDEX IF NOT EXISTS idx_cases_emt_id ON cases(emt_id);
     CREATE INDEX IF NOT EXISTS idx_case_findings_segment_id ON case_findings(segment_id);
     CREATE INDEX IF NOT EXISTS idx_recordings_emt_id ON recordings(emt_id);

@@ -23,6 +23,9 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, emptyText = 'No tran
   const scrollRef = useRef(null);
   const stickToBottom = useRef(true);
   const [now, setNow] = useState(Date.now());
+  // When this screen first saw each pending state; comparing against server timestamps
+  // would make every segment look delayed on a device whose clock runs fast.
+  const pendingSince = useRef(new Map());
 
   const ordered = [...segments].sort((a, b) => a.seq - b.seq);
   const hasInFlight = ordered.some((s) => s.status === 'pending' || s.status === 'uploading');
@@ -51,7 +54,12 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, emptyText = 'No tran
     <div ref={scrollRef} onScroll={handleScroll} className="max-h-96 overflow-y-auto space-y-2 pr-1">
       {ordered.map((segment) => {
         const key = segment.id ? `s-${segment.id}` : `local-${segment.seq}`;
-        const waitedMs = now - new Date(segment.created_at || segment.recorded_at).getTime();
+        let waitedMs = 0;
+        if (segment.status === 'pending') {
+          const pendingKey = `${segment.id}:${segment.updated_at}`;
+          if (!pendingSince.current.has(pendingKey)) pendingSince.current.set(pendingKey, Date.now());
+          waitedMs = now - pendingSince.current.get(pendingKey);
+        }
         return (
           <div key={key} className="flex gap-3 text-sm">
             <div className="w-28 shrink-0 text-right whitespace-nowrap">
