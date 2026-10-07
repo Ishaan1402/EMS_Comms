@@ -8,8 +8,12 @@ DB_PATH = Path(__file__).parent / "asclepius.db"
 
 def get_db_connection():
     """Create and return a database connection."""
-    conn = sqlite3.connect(str(DB_PATH))
+    # timeout makes writers wait on a held lock instead of failing with "database is locked".
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    # Safe with WAL: a crash can lose the last commit but never corrupts the database.
+    conn.execute("PRAGMA synchronous = NORMAL")
     return conn
 
 @contextmanager
@@ -98,7 +102,24 @@ def init_database():
       FOREIGN KEY (doctor_id) REFERENCES users (id)
     );
 
+    -- Case messages between the EMT and the receiving hospital team.
+    -- recording_id is the case; every message belongs to exactly one.
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      recording_id INTEGER NOT NULL,
+      sender_id INTEGER NOT NULL,
+      sender_role TEXT NOT NULL CHECK (sender_role IN ('emt', 'doctor')),
+      body TEXT NOT NULL CHECK (length(trim(body)) > 0),
+      client_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      FOREIGN KEY (recording_id) REFERENCES recordings (id) ON DELETE CASCADE,
+      FOREIGN KEY (sender_id) REFERENCES users (id)
+    );
+
     -- Create indexes for better performance
+    CREATE INDEX IF NOT EXISTS idx_messages_recording ON messages(recording_id, id);
+    -- A retried send with the same client_id returns the original message instead of a duplicate.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_id ON messages(sender_id, client_id) WHERE client_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_recordings_emt_id ON recordings(emt_id);
     CREATE INDEX IF NOT EXISTS idx_recordings_status ON recordings(status);
     CREATE INDEX IF NOT EXISTS idx_notifications_doctor_id ON notifications(doctor_id);
@@ -107,6 +128,9 @@ def init_database():
     """
     
     with get_db() as conn:
+        # WAL lets the SSE readers poll while a message is being written; the mode persists in the file.
+        journal_mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+        print(f"✅ SQLite journal mode: {journal_mode}")
         conn.executescript(schema)
         print("✅ Database schema created successfully")
 

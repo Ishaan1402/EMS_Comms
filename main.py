@@ -13,7 +13,7 @@ import json
 load_dotenv()
 
 from middleware.auth import APIError
-from routes import auth, recordings, doctors, notifications
+from routes import auth, recordings, doctors, notifications, messages
 from database import init_database, insert_sample_data
 
 @asynccontextmanager
@@ -111,6 +111,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(recordings.router, prefix="/api/recordings", tags=["recordings"])
+app.include_router(messages.router, prefix="/api/recordings", tags=["messages"])
 app.include_router(doctors.router, prefix="/api/doctors", tags=["doctors"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 
