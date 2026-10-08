@@ -96,15 +96,16 @@ def authorize_case(user: dict, recording_id: int) -> None:
 
 
 def authorize_live_case(user: dict, case_id: int) -> None:
-    """
-    Same visibility as the case itself: the EMT who owns it and hospital users.
-    TODO(KAN-15): limit hospital users to cases routed to their hospital.
-    """
+    """Same visibility as the case itself: the EMT who owns it and users of the destination hospital."""
     role = user.get("role")
     if role == "emt":
         rows = query('SELECT 1 FROM cases WHERE id = ? AND emt_id = ?', (case_id, user.get("id")))
     elif role == "doctor":
-        rows = query('SELECT 1 FROM cases WHERE id = ?', (case_id,))
+        rows = query(
+            """SELECT 1 FROM cases c JOIN users u ON u.id = ?
+               WHERE c.id = ? AND u.hospital_id IS NOT NULL AND c.destination_hospital_id = u.hospital_id""",
+            (user.get("id"), case_id)
+        )
     else:
         rows = []
 

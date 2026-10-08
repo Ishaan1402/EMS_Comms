@@ -39,20 +39,21 @@ export const ProcessingBadge = ({ processing }) => {
   );
 };
 
-// Unknown risk is shown as unavailable, never as a number.
-export const RiskBadge = ({ liveCase }) => {
-  if (liveCase.risk_score == null) {
-    return (
-      <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-purple-50 text-purple-700 border border-purple-200">
-        Risk unavailable
-      </span>
-    );
-  }
-  const high = liveCase.risk_score >= 8;
+// The AI's preparation category (the evaluation contract's draft labels). No assessment yet
+// shows as unavailable, never as a guess.
+const CATEGORY_STYLES = {
+  'Prepare now': 'bg-red-50 text-red-700 border-red-200',
+  'Can wait': 'bg-orange-50 text-orange-700 border-orange-200',
+  Routine: 'bg-gray-50 text-gray-700 border-gray-200',
+  'Cannot assess': 'bg-purple-50 text-purple-700 border-purple-200',
+};
+
+export const CategoryBadge = ({ liveCase }) => {
+  const category = liveCase.preparation_category;
   return (
-    <span className={`px-2 py-0.5 text-xs font-bold rounded-full border ${high ? 'bg-red-50 text-red-700 border-red-200' : 'bg-orange-50 text-orange-700 border-orange-200'}`}>
-      Risk {liveCase.risk_score}/10 · P{liveCase.priority_level}
-      {liveCase.assessment_is_outdated && ' · earlier info'}
+    <span className={`px-2 py-0.5 text-xs font-bold rounded-full border ${CATEGORY_STYLES[category] || CATEGORY_STYLES['Cannot assess']}`}>
+      {category || 'Assessment unavailable'}
+      {category && liveCase.assessment_is_outdated && ' · earlier info'}
     </span>
   );
 };
@@ -119,7 +120,7 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], onRetryAssessment }
       <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
         <OperationalBadge status={liveCase.operational_status} />
         <ProcessingBadge processing={processing} />
-        <RiskBadge liveCase={liveCase} />
+        <CategoryBadge liveCase={liveCase} />
         <span className="flex items-center gap-1"><MapPin className="h-4 w-4" />{liveCase.destination_hospital_name || 'No destination set'}</span>
         {liveCase.ems_unit && <span className="flex items-center gap-1"><Truck className="h-4 w-4" />{liveCase.ems_unit}</span>}
         {liveCase.eta_at && !liveCase.arrived_at && (
@@ -150,13 +151,25 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], onRetryAssessment }
         </div>
       )}
 
-      {assessment && (assessment.summary || assessment.chief_complaint) && (
-        <div className="text-sm">
+      {assessment?.summary && (
+        <div className="text-sm space-y-1">
           <p className="font-medium text-gray-700">
-            AI summary {liveCase.assessment_is_outdated && <span className="text-orange-700 font-normal">(based on earlier information)</span>}
+            AI handoff {liveCase.assessment_is_outdated && <span className="text-orange-700 font-normal">(based on earlier information)</span>}
           </p>
-          {assessment.chief_complaint && <p className="text-gray-900">Chief complaint: {assessment.chief_complaint}</p>}
-          {assessment.summary && <p className="text-gray-700">{assessment.summary}</p>}
+          <p className="text-gray-900">{assessment.summary}</p>
+          {assessment.meaningful_change && assessment.meaningful_change !== 'No earlier report' && (
+            <p className="text-gray-700">
+              <span className="font-medium">
+                {assessment.meaningful_change === 'Yes' ? 'Changed since the earlier acknowledged report'
+                  : assessment.meaningful_change === 'No' ? 'No meaningful change since the earlier acknowledged report'
+                    : 'Change unclear'}:
+              </span>{' '}
+              {assessment.change_explanation}
+            </p>
+          )}
+          {assessment.missing_information && assessment.missing_information !== 'None identified' && (
+            <p className="text-gray-700"><span className="font-medium">Missing:</span> {assessment.missing_information}</p>
+          )}
         </div>
       )}
 

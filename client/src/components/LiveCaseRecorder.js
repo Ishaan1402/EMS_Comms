@@ -94,23 +94,28 @@ const LiveCaseRecorder = () => {
   }, []);
 
   const details = useCaseDetails(activeCase?.id);
-  const addCaseUpdate = details.addUpdate;
+  const { addUpdate: addCaseUpdate, reload: reloadCaseUpdates } = details;
 
   const handleEvent = useCallback((type, data) => {
     const current = caseRef.current;
     if (!current) return;
     if (type === 'ready') {
+      // Events sent while disconnected aren't replayed: re-fetch everything this view shows.
       axios.get(`/api/cases/${current.id}/segments`)
         .then((response) => setSegments((list) => mergeNewer(list, response.data)))
         .catch((error) => console.error('Error re-syncing transcript:', error));
+      axios.get(`/api/cases/${current.id}`)
+        .then((response) => setActiveCase((c) => (c && c.updated_at >= response.data.updated_at ? c : response.data)))
+        .catch((error) => console.error('Error re-syncing case:', error));
+      reloadCaseUpdates();
     } else if ((type === 'segment.created' || type === 'segment.updated') && data.case_id === current.id) {
       addSegment(data.segment);
     } else if (type === 'case.updated' && data.case.id === current.id) {
-      setActiveCase((c) => (c && c.updated_at > data.case.updated_at ? c : data.case));
+      setActiveCase((c) => (c && c.updated_at >= data.case.updated_at ? c : data.case));
     } else if (type === 'update.created') {
       addCaseUpdate(data.update);
     }
-  }, [addSegment, addCaseUpdate]);
+  }, [addSegment, addCaseUpdate, reloadCaseUpdates]);
 
   const connection = useCaseEvents(handleEvent, !!activeCase);
 
@@ -209,6 +214,14 @@ const LiveCaseRecorder = () => {
     } catch (error) {
       console.error('Retry failed:', error);
       toast.error('Could not retry transcription');
+    }
+  };
+
+  const dismissSegment = async (segment) => {
+    try {
+      addSegment((await axios.post(`/api/cases/${segment.case_id}/segments/${segment.id}/dismiss`)).data);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Could not mark the clip as handled');
     }
   };
 
@@ -382,6 +395,7 @@ const LiveCaseRecorder = () => {
             segments={transcriptItems}
             caseStartedAt={activeCase.started_at}
             onRetry={isOpen ? retry : undefined}
+            onDismiss={dismissSegment}
             emptyText={recorder.isRecording ? 'Listening… first transcript arrives in a few seconds.' : 'No transcript yet.'}
           />
         </div>

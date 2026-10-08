@@ -28,6 +28,8 @@ async def lifespan(app: FastAPI):
     init_database()
     cases.fail_interrupted_segments()
     case_assessment.fail_interrupted_assessments()
+    for case_id in case_assessment.unassessed_open_cases():
+        case_assessment.runner.start(case_id, force=True)
     if os.getenv("SEED_DEMO_USERS", "").lower() in ("1", "true", "yes"):
         insert_sample_data()
     yield
@@ -107,10 +109,7 @@ async def add_security_headers(request, call_next):
     
     return response
 
-uploads_dir = pathlib.Path("uploads")
-uploads_dir.mkdir(exist_ok=True)
-
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# Recording audio in uploads/ is patient data and is not served over HTTP (no screen uses it).
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(recordings.router, prefix="/api/recordings", tags=["recordings"])

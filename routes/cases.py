@@ -49,7 +49,11 @@ CASE_SELECT = """
            (SELECT COUNT(*) FROM transcript_segments s WHERE s.case_id = c.id) AS segment_count,
            (SELECT MAX(s.recorded_at) FROM transcript_segments s WHERE s.case_id = c.id) AS last_segment_at,
            (SELECT COUNT(*) FROM transcript_segments s WHERE s.case_id = c.id AND s.status = 'pending') AS pending_segment_count,
-           (SELECT COUNT(*) FROM transcript_segments s WHERE s.case_id = c.id AND s.status = 'failed') AS failed_segment_count
+           (SELECT COUNT(*) FROM transcript_segments s
+            WHERE s.case_id = c.id AND s.status = 'failed' AND s.dismissed_at IS NULL) AS failed_segment_count,
+           -- What the AI compares against: the latest acknowledgment of earlier information.
+           (SELECT MAX(a.info_version) FROM case_acknowledgments a
+            WHERE a.case_id = c.id AND a.info_version < c.info_version) AS baseline_version
     FROM cases c
     JOIN users u ON c.emt_id = u.id
     LEFT JOIN hospitals h ON h.id = c.destination_hospital_id
@@ -57,7 +61,8 @@ CASE_SELECT = """
 
 SEGMENT_COLUMNS = (
     "id, case_id, seq, client_id, recorded_at, duration_ms, status, text, error, attempts, "
-    "created_at, transcribed_at, updated_at"
+    "created_at, transcribed_at, updated_at, info_version, dismissed_at, dismissed_by, "
+    "(SELECT first_name || ' ' || last_name FROM users WHERE users.id = dismissed_by) AS dismissed_by_name"
 )
 
 UPDATE_SELECT = """
@@ -149,8 +154,11 @@ def processing_summary(case: dict, latest: Optional[dict]) -> dict:
     else:
         transcription = "completed" if case["segment_count"] else "none"
 
-    # New information that no attempt has covered yet is waiting to be assessed.
-    if latest is None or (latest["based_on_version"] < case["info_version"] and latest["status"] != "processing"):
+    # Information no attempt has covered yet, or an acknowledgment that changed what the latest
+    # attempt compared against, is waiting to be assessed.
+    if latest is None or (latest["status"] != "processing" and (
+            latest["based_on_version"] < case["info_version"]
+            or latest["baseline_version"] != case["baseline_version"])):
         assessment = "pending"
     else:
         assessment = latest["status"]
@@ -159,7 +167,7 @@ def processing_summary(case: dict, latest: Optional[dict]) -> dict:
     if failed:
         reasons.append(f"{failed} transcript segment(s) failed to transcribe")
     if assessment == "failed":
-        reasons.append(f"Risk assessment failed: {latest['error'] or 'unknown error'}")
+        reasons.append(f"Assessment failed: {latest['error'] or 'unknown error'}")
     if assessment == "needs_review":
         reasons.append(latest["review_reason"])
 
@@ -235,10 +243,8 @@ def describe_cases(rows: list) -> list:
 
         assessment = current.get(case["id"])
         case["current_assessment"] = assessment
-        # Only a completed assessment supplies a score. Unknown stays None, never a default.
-        usable = assessment if assessment and assessment["status"] == "completed" else None
-        case["risk_score"] = usable["risk_score"] if usable else None
-        case["priority_level"] = usable["priority_level"] if usable else None
+        # None until an assessment says otherwise; "Cannot assess" when it couldn't decide.
+        case["preparation_category"] = assessment["preparation_category"] if assessment else None
         case["assessment_is_outdated"] = bool(assessment) and assessment["based_on_version"] < case["info_version"]
         case["processing"] = processing_summary(case, latest.get(case["id"]))
         described.append(case)
@@ -265,10 +271,26 @@ def publish_case_changed(case_id: int) -> None:
 case_assessment.runner.on_change = publish_case_changed
 
 
+def user_hospital_id(user: dict) -> Optional[int]:
+    """The hospital a doctor works at (users.hospital_id); None for EMTs and unassigned doctors."""
+    rows = query("SELECT hospital_id FROM users WHERE id = ?", (user["id"],))
+    return rows[0]["hospital_id"] if rows else None
+
+
+def can_see_case(user: dict, case: dict) -> bool:
+    """EMTs see their own cases; hospital users see cases routed to their hospital."""
+    if user["role"] == "emt":
+        return case["emt_id"] == user["id"]
+    if user["role"] == "doctor":
+        hospital_id = user_hospital_id(user)
+        return hospital_id is not None and case["destination_hospital_id"] == hospital_id
+    return False
+
+
 def get_case_for_user(case_id_param: str, user: dict) -> dict:
-    """Doctors can see every case; EMTs only their own. Other EMTs' cases look like they don't exist."""
+    """A case the user may see. Anyone else's looks like it doesn't exist, so ids can't be probed."""
     case = get_case(parse_id(case_id_param, "Case not found"))
-    if not case or (user["role"] == "emt" and case["emt_id"] != user["id"]):
+    if not case or not can_see_case(user, case):
         raise APIError(404, "Case not found")
     return case
 
@@ -284,26 +306,32 @@ def get_segment_by_seq(case_id: int, seq: int) -> Optional[dict]:
 
 
 def publish_case(event_type: str, case: dict) -> None:
-    broker.publish(event_type, {"case": case}, owner_id=case["emt_id"])
+    broker.publish(event_type, {"case": case}, owner_id=case["emt_id"], hospital_id=case["destination_hospital_id"])
 
 
-def publish_segment(event_type: str, segment: dict, emt_id: int) -> None:
-    broker.publish(event_type, {"case_id": segment["case_id"], "segment": segment}, owner_id=emt_id)
+def publish_segment(event_type: str, segment: dict, case: dict) -> None:
+    broker.publish(event_type, {"case_id": segment["case_id"], "segment": segment},
+                   owner_id=case["emt_id"], hospital_id=case["destination_hospital_id"])
+
+
+def event_filter(user: dict):
+    """accepts(owner_id, hospital_id) for the live stream: the same visibility as can_see_case."""
+    if user["role"] == "doctor":
+        hospital_id = user_hospital_id(user)
+        return lambda owner_id, case_hospital_id: hospital_id is not None and case_hospital_id == hospital_id
+    user_id = user["id"]
+    return lambda owner_id, case_hospital_id: owner_id == user_id
 
 
 @router.get("/events")
 async def case_events(current_user: dict = Depends(require_role(["emt", "doctor"]))):
     """
-    Server-Sent Events stream of case and transcript changes.
-    Doctors receive events for every case; EMTs only for their own.
+    Server-Sent Events stream of case and transcript changes, for the cases the user can see:
+    hospital users get cases routed to their hospital, EMTs their own.
     Every (re)connect starts with a `ready` event, after which clients should
     re-fetch state, since events sent while disconnected are not replayed.
     """
-    if current_user["role"] == "doctor":
-        accepts = lambda owner_id: True
-    else:
-        user_id = current_user["id"]
-        accepts = lambda owner_id: owner_id == user_id
+    accepts = event_filter(current_user)
 
     async def stream():
         sub = broker.subscribe(accepts)
@@ -400,11 +428,17 @@ async def list_cases(
     hospital_id: Optional[str] = None,
     current_user: dict = Depends(require_role(["emt", "doctor"])),
 ):
-    """Active cases first, then most recent. Doctors see all cases; EMTs see their own."""
+    """Active cases first, then most recent. Hospital users see cases routed to their hospital; EMTs their own."""
     conditions, params = [], []
     if current_user["role"] == "emt":
         conditions.append("c.emt_id = ?")
         params.append(current_user["id"])
+    else:
+        own_hospital = user_hospital_id(current_user)
+        if own_hospital is None:
+            return []
+        conditions.append("c.destination_hospital_id = ?")
+        params.append(own_hospital)
     if status in ("active", "closed"):
         conditions.append("c.status = ?")
         params.append(status)
@@ -447,7 +481,12 @@ async def mark_arrived(case_id: str, current_user: dict = Depends(require_role([
 
 
 @router.post("/{case_id}/acknowledge")
-async def acknowledge_case(case_id: str, request: Request, current_user: dict = Depends(require_role(["doctor"]))):
+async def acknowledge_case(
+    case_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(require_role(["doctor"])),
+):
     """
     A hospital user confirms they have seen the case. Body (optional): {"info_version": n}, the
     version their screen showed, so information that arrived after they looked stays unacknowledged.
@@ -468,6 +507,9 @@ async def acknowledge_case(case_id: str, request: Request, current_user: dict = 
     )
     case = touch_case(case["id"])
     publish_case("case.updated", case)
+    if version < case["info_version"]:
+        # The AI compares newer information against this acknowledgment now; re-assess.
+        background_tasks.add_task(case_assessment.runner.request, case["id"])
     return case
 
 
@@ -578,7 +620,8 @@ async def add_update(
         )
 
     update = get_updates(case["id"], update_id)[0]
-    broker.publish("update.created", {"case_id": case["id"], "update": update}, owner_id=case["emt_id"])
+    broker.publish("update.created", {"case_id": case["id"], "update": update},
+                   owner_id=case["emt_id"], hospital_id=case["destination_hospital_id"])
     publish_case("case.updated", get_case(case["id"]))
     if kind != "eta":
         background_tasks.add_task(case_assessment.runner.request, case["id"])
@@ -627,8 +670,17 @@ async def retry_assessment(
 
 
 @hospitals_router.get("")
-async def list_hospitals(current_user: dict = Depends(require_role(["emt", "doctor"]))):
+async def list_hospitals():
+    """Public, like /api/doctors/available: the sign-up form needs it, and names aren't sensitive."""
     return query("SELECT id, code, name FROM hospitals ORDER BY name")
+
+
+@hospitals_router.get("/mine")
+async def my_hospital(current_user: dict = Depends(require_role(["emt", "doctor"]))):
+    """The hospital whose cases this user sees; null for EMTs and unassigned hospital users."""
+    hospital_id = user_hospital_id(current_user)
+    rows = query("SELECT id, code, name FROM hospitals WHERE id = ?", (hospital_id,)) if hospital_id else []
+    return rows[0] if rows else None
 
 
 @router.get("/{case_id}/segments")
@@ -706,7 +758,7 @@ async def upload_segment(
     if len(content) > MAX_SEGMENT_BYTES:
         raise APIError(413, "Audio segment too large")
 
-    # Whisper infers the audio format from the file extension.
+    # The transcription model infers the audio format from the file extension.
     extension = Path(audio.filename or "").suffix.lower()
     if extension not in ALLOWED_SEGMENT_EXTENSIONS:
         extension = ".webm"
@@ -739,7 +791,7 @@ async def upload_segment(
     # Bumping the case lets clients see its new segment_count / last_segment_at as a newer version.
     run("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case["id"]))
     segment = get_segment(result["id"])
-    publish_segment("segment.created", segment, case["emt_id"])
+    publish_segment("segment.created", segment, case)
     publish_case("case.updated", get_case(case["id"]))
     background_tasks.add_task(transcribe_segment, segment["id"])
     return segment
@@ -759,17 +811,44 @@ async def retry_segment(
         raise APIError(404, "Segment not found")
     # Conditional update so a double-click can't start two transcriptions.
     claimed = run(
-        "UPDATE transcript_segments SET status = 'pending', error = NULL, updated_at = ? WHERE id = ? AND status = 'failed'",
+        """UPDATE transcript_segments SET status = 'pending', error = NULL, dismissed_at = NULL, dismissed_by = NULL,
+               updated_at = ? WHERE id = ? AND status = 'failed'""",
         (utc_now_iso(), segment["id"]),
     )
     if claimed["changes"] == 0:
         raise APIError(409, "Only failed segments can be retried")
 
     segment = get_segment(segment["id"])
-    publish_segment("segment.updated", segment, case["emt_id"])
+    publish_segment("segment.updated", segment, case)
     # The case's failed/pending counts changed.
     publish_case_changed(case["id"])
     background_tasks.add_task(transcribe_segment, segment["id"])
+    return segment
+
+
+@router.post("/{case_id}/segments/{segment_id}/dismiss")
+async def dismiss_segment(case_id: str, segment_id: str, current_user: dict = Depends(require_role(["emt", "doctor"]))):
+    """
+    Mark a failed segment as handled (e.g. its content was re-sent as text), so it no longer
+    flags the case for review. The failure stays on record with who dismissed it and when;
+    a later retry clears the dismissal.
+    """
+    case = get_case_for_user(case_id, current_user)
+    segment = get_segment(parse_id(segment_id, "Segment not found"))
+    if not segment or segment["case_id"] != case["id"]:
+        raise APIError(404, "Segment not found")
+    now = utc_now_iso()
+    dismissed = run(
+        """UPDATE transcript_segments SET dismissed_at = ?, dismissed_by = ?, updated_at = ?
+           WHERE id = ? AND status = 'failed' AND dismissed_at IS NULL""",
+        (now, current_user["id"], now, segment["id"]),
+    )
+    if dismissed["changes"] == 0 and not segment["dismissed_at"]:
+        raise APIError(409, "Only failed segments can be dismissed")
+
+    segment = get_segment(segment["id"])
+    publish_segment("segment.updated", segment, case)
+    publish_case_changed(case["id"])
     return segment
 
 
@@ -781,7 +860,7 @@ def transcribe_segment_sync(audio_path: str, prompt: Optional[str]) -> str:
     with open(audio_path, "rb") as audio_file:
         return client.audio.transcriptions.create(
             file=audio_file,
-            model="whisper-1",
+            model=recordings.TRANSCRIPTION_MODEL,
             response_format="text",
             timeout=TRANSCRIPTION_TIMEOUT_SECONDS,
             **kwargs,
@@ -808,7 +887,7 @@ def describe_transcription_error(error: Exception):
 
 
 def previous_segment_text(segment: dict) -> Optional[str]:
-    """Tail of the preceding segment's transcript, passed to Whisper for continuity across cuts."""
+    """Tail of the preceding segment's transcript, passed to the transcription model for continuity across cuts."""
     rows = query(
         """SELECT text FROM transcript_segments
            WHERE case_id = ? AND seq < ? AND status = 'completed' AND text != ''
@@ -821,7 +900,7 @@ def previous_segment_text(segment: dict) -> Optional[str]:
 async def transcribe_segment(segment_id: int):
     """Transcribe one segment, store the result, and publish it. Never leaves the segment pending."""
     rows = query(
-        """SELECT s.id, s.case_id, s.seq, s.audio_file_path, c.emt_id
+        """SELECT s.id, s.case_id, s.seq, s.audio_file_path, c.emt_id, c.destination_hospital_id
            FROM transcript_segments s JOIN cases c ON s.case_id = c.id
            WHERE s.id = ?""",
         (segment_id,),
@@ -857,16 +936,20 @@ async def transcribe_segment(segment_id: int):
                 "UPDATE cases SET info_version = info_version + 1, last_update_at = ?, updated_at = ? WHERE id = ?",
                 (now, now, segment["case_id"]),
             )
+            conn.execute(
+                "UPDATE transcript_segments SET info_version = (SELECT info_version FROM cases WHERE id = ?) WHERE id = ?",
+                (segment["case_id"], segment_id),
+            )
         else:
             conn.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, segment["case_id"]))
-    publish_segment("segment.updated", get_segment(segment_id), segment["emt_id"])
+    publish_segment("segment.updated", get_segment(segment_id), segment)
     publish_case("case.updated", get_case(segment["case_id"]))
     if text:
         await case_assessment.runner.request(segment["case_id"])
 
 
 async def run_transcription(segment: dict):
-    """Call Whisper, retrying transient failures. Returns (text, None) or (None, error message)."""
+    """Call the transcription model, retrying transient failures. Returns (text, None) or (None, error message)."""
     prompt = previous_segment_text(segment)
     loop = asyncio.get_running_loop()
     for attempt in range(1, MAX_TRANSCRIPTION_ATTEMPTS + 1):

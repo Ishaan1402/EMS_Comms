@@ -23,6 +23,9 @@ Environment variables (read from the environment or `.env`):
 ```env
 JWT_SECRET=...
 OPENAI_API_KEY=...
+OPENAI_SCORING_MODEL=gpt-6-luna   # optional; risk scoring model
+OPENAI_REASONING_EFFORT=none      # optional; leave blank for models without reasoning
+OPENAI_TRANSCRIPTION_MODEL=gpt-transcribe   # optional; speech-to-text model
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=...
@@ -48,7 +51,7 @@ To replay the three-patient demo scenario against a running server, see [demo/RE
 
 ### Live case transcription
 
-EMTs can start a **live case** from the EMT dashboard. The browser records the conversation in ~8 second segments. Each segment is a complete audio file, uploaded and transcribed by Whisper on its own. Every segment is timestamped, stored in SQLite under its case, and pushed to the Doctor Dashboard's **Live Cases** panel as soon as it is uploaded and again when its transcript is ready.
+EMTs can start a **live case** from the EMT dashboard. The browser records the conversation in ~8 second segments. Each segment is a complete audio file, uploaded and transcribed on its own (`OPENAI_TRANSCRIPTION_MODEL`, default `gpt-transcribe`). Every segment is timestamped, stored in SQLite under its case, and pushed to the Doctor Dashboard's **Live Cases** panel as soon as it is uploaded and again when its transcript is ready.
 
 - **Storage**: `cases` and `transcript_segments` tables. An EMT can have only one active case at a time.
   - A segment's `seq` (assigned by the client, unique per case) sets the chronological order.
@@ -75,18 +78,25 @@ Live cases are implemented only in the Python backend.
 
 ### Cases: one per patient transport
 
-The case is the main object. One transport is one case, and everything about the patient belongs to it: transcript segments, typed updates, vital signs, risk assessments, messages and hospital acknowledgments. Nothing is overwritten, so history such as SpO2 96 → 91 → 86 is kept.
+The case is the main object. One transport is one case, and everything about the patient belongs to it: transcript segments, typed updates, vital signs, AI assessments, messages and hospital acknowledgments. Nothing is overwritten, so history such as SpO2 96 → 91 → 86 is kept.
 
-- **Creating**: `POST /api/cases` takes `patient_info`, `destination_hospital_id` (from `GET /api/hospitals`), `ems_unit`, and `eta_minutes`. All are optional for the API; the EMT form requires a destination. On an empty database three demo hospitals are created.
+- **Creating**: `POST /api/cases` takes `patient_info`, `destination_hospital_id` (from the public `GET /api/hospitals`), `ems_unit`, and `eta_minutes`. All are optional for the API; the EMT form requires a destination. On an empty database three demo hospitals are created.
+- **Who sees what**: EMTs see their own cases. Hospital users see only cases routed to their hospital (`users.hospital_id`, chosen at sign-up; `GET /api/hospitals/mine`), across case details, the live event stream and case messages. Anyone else gets a 404. A hospital user with no hospital sees no cases.
 - **Updates**: `POST /api/cases/:id/updates` (EMT, open case only) adds `{"kind": "note"|"correction", "body"}`, `{"kind": "vitals", "vitals": {"spo2": 91, "hr": 110}, "body"?}` or `{"kind": "eta", "eta_minutes"}`. A correction is a new row; the original stays. An optional `client_id` makes retries idempotent. `GET /api/cases/:id/updates` and `GET /api/cases/:id/vitals` return the history.
 - **`info_version`**: goes up by one whenever new patient information arrives (creation, a note, vitals, a correction, or a transcribed segment with text). ETA changes are logistics and don't change it.
 - **Two kinds of status, kept apart** (KAN-11):
-  - `operational_status`: `inbound` → `acknowledged` (a hospital user has seen the latest `info_version`) → `arrived` → `closed`. `POST /api/cases/:id/acknowledge` (doctor, optional `{"info_version": n}` for the version their screen showed) and `POST /api/cases/:id/arrive` (EMT or doctor). New information makes an acknowledged case `inbound` again.
-  - `processing`: `pending` | `processing` | `completed` | `failed` | `needs_review`, with `needs_review: true` and plain-language `reasons` whenever a person should look (a failed transcription, a failed assessment, or an assessment that couldn't produce a score).
-- **Risk assessments** (`case_assessment.py`): every attempt is a row in `risk_assessments` with the `info_version` it read. The case's `current_assessment` is the usable one with the highest version, so a slow result for older information never replaces a newer one. `risk_score` and `priority_level` are `null` unless the scorer returned valid values; they are never filled with defaults. A failure keeps the previous assessment (`assessment_is_outdated: true`) and can be retried with `POST /api/cases/:id/assessments/retry`. `GET /api/cases/:id/assessments` lists every attempt. While one assessment runs, newer information is queued and assessed once, at least 15s after the previous run, so a live case doesn't call the model every 8 seconds. The scorer currently reuses the recordings GPT-4 prompt and its scales until KAN-14 defines risk and priority; `preparation_category: "Cannot assess"` maps to Needs Review.
+  - `operational_status`: `inbound` → `acknowledged` (a hospital user has seen the latest `info_version`) → `arrived` → `closed`. `POST /api/cases/:id/acknowledge` (hospital user, optional `{"info_version": n}` for the version their screen showed) and `POST /api/cases/:id/arrive` (EMT or hospital user). New information makes an acknowledged case `inbound` again.
+  - `processing`: `pending` | `processing` | `completed` | `failed` | `needs_review`, with `needs_review: true` and plain-language `reasons` whenever a person should look: a failed transcription, a failed assessment, or an assessment that couldn't decide.
+- **Failed audio**: a segment that can't be transcribed flags the case until it's retried (`POST /api/cases/:id/segments/:segmentId/retry`) or marked handled (`.../dismiss`, EMT or hospital user), for example after the crew re-sent it as text. A dismissed failure stays on record with who dismissed it and when.
+- **AI assessments** (`case_assessment.py`): the model gets the evaluation harness's prompt (`evals/prompts/awareness_v2.txt`) and input fields, and must answer in the evaluation contract's five fields: `summary`, `meaningful_change`, `change_explanation`, `missing_information` and `preparation_category` (Prepare now / Can wait / Routine / Cannot assess). So what `evals/` measures is what the app runs.
+  - "Earlier" information is what the hospital had acknowledged, so `meaningful_change` answers "what changed since the earlier acknowledged report". Before any acknowledgment everything is current, as in a first report. Acknowledging an earlier version while newer information exists re-assesses the case against it. Information is put in the order it was spoken or typed; text with no recorded version (from before upgrading) counts as not yet seen.
+  - `Cannot assess` (the prompt's "Unsure") marks the case Needs Review. An answer that doesn't follow the format is a retryable failure, and the last usable assessment stays current. Nothing is filled with a default.
+  - Every attempt is a row in `risk_assessments` with the `info_version` it read, its `baseline_version`, `input_tokens`, `output_tokens`, `latency_ms` and a list-price `cost_usd`. The case's `current_assessment` is the usable one with the highest version, so a slow result for older information never replaces a newer one. A failure keeps the previous assessment (`assessment_is_outdated: true`) and can be retried (`POST /api/cases/:id/assessments/retry`). `GET /api/cases/:id/assessments` lists every attempt.
+  - Assessment waits 2 s first, so a report arriving as several segments is assessed once, whole; information arriving during a run is assessed once more afterwards. On startup, open cases whose current information has no usable assessment are re-assessed.
+  - Models: `OPENAI_SCORING_MODEL` (default `gpt-6-luna`; `gpt-4` shuts down 2026-10-23) and `OPENAI_TRANSCRIPTION_MODEL` (default `gpt-transcribe`). The older single-recording flow still uses its own prompt and 0–10 risk scale.
 - **Messages**: each case has its own thread at `/api/cases/:id/messages` (same API as below).
 
-Existing databases are migrated on startup: the new `cases` columns are added, and `messages` is rebuilt so a message can belong to a case or a recording.
+Existing databases are migrated on startup: new columns are added, and `messages` is rebuilt so a message can belong to a case or a recording.
 
 ### Case messaging (EMT ↔ hospital team)
 
@@ -116,7 +126,7 @@ Messaging is implemented in the Python backend only.
 
 ### Technical Features
 - **Secure Authentication**: JWT-based user management with role-based access
-- **Real-time Processing**: OpenAI Whisper for transcription + GPT-4 for analysis
+- **Real-time Processing**: OpenAI speech-to-text for transcription + an OpenAI model for assessment
 - **Multi-channel Notifications**: SMS (Twilio) + Email (SendGrid) integration
 - **Responsive Design**: Mobile-first interface for field use
 - **HIPAA Compliant**: Secure data handling and storage
@@ -125,7 +135,7 @@ Messaging is implemented in the Python backend only.
 ## 🏗️ Architecture
 
 ```
-EMT Phone → Audio Recording → Backend API → OpenAI Whisper → GPT-4 Analysis → Doctor Notification
+EMT Phone → Audio Recording → Backend API → Transcription → AI Assessment → Hospital Dashboard
     ↓              ↓              ↓              ↓              ↓              ↓
 Web Interface → File Upload → SQLite Database → Transcription → Medical Summary → SMS/Email
 ```
@@ -213,7 +223,7 @@ SENDGRID_FROM_EMAIL=noreply@shealthcare.com
 ### Recordings
 - `POST /api/recordings/upload` - Upload audio recording
 - `GET /api/recordings/my-recordings` - Get EMT's recordings
-- `GET /api/recordings/:id` - Get specific recording
+- `GET /api/recordings/:id` - Get specific recording (its EMT and the doctors notified about it; others get 404). Recording audio is not served over HTTP.
 
 ### Doctors
 - `GET /api/doctors/notifications` - Get doctor notifications

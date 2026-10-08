@@ -17,7 +17,8 @@ Open the Doctor dashboard as `dr.smith` and an EMT dashboard as `emt.wilson`, `e
 - `--typed` sends every report as a typed note: no audio files and no Whisper needed.
 - `--finish` marks every patient arrived and closes the cases afterwards.
 - Each run first closes whatever the scenario's EMTs left open, so it can be repeated.
-- Without `OPENAI_API_KEY`, transcription and scoring fail. The dashboards show this as Needs Review with the reason, which is the intended behavior, but you won't see risk scores.
+- Without `OPENAI_API_KEY`, transcription and scoring fail. The dashboards show this as Needs Review with the reason, which is the intended behavior, but you won't see AI assessments.
+- The summary ends with the run's model usage: assessments, tokens and list-price cost. Transcription isn't included (about $0.0045 a minute of audio).
 
 ## The story (`three_patients.json`)
 
@@ -28,8 +29,8 @@ The three patients are the clinician's **Queue exercise group Q02** (`SYN002`, `
 | 0–2 | Three crews start cases and radio their first report |
 | 3 | The doctor acknowledges all three |
 | 4 | Doctor and the SYN010 crew exchange messages |
-| 7 | SYN008's radio drops out: an unreadable clip fails transcription **visibly**, and the crew re-sends the update as text |
-| 9, 11 | SYN002 and SYN010 radio their deteriorating updates. They're re-assessed, and the cases need acknowledging again |
+| 7–8 | SYN008's radio drops out: an unreadable clip fails transcription **visibly**, the crew re-sends the update as text, then marks the lost clip handled (it stays on record) |
+| 9, 11 | SYN002 and SYN010 radio their deteriorating updates. The AI compares them with what the doctor acknowledged, and the cases need acknowledging again |
 | 12 | The doctor acknowledges the new information; the EMTs see it |
 
 Edit the `events` list to change the story; `replay.validate()` checks it.
@@ -50,5 +51,7 @@ Every case stores its `source_case_id` (the evaluation datasets' `case_id`) and 
 ## Limits
 
 - The pilot cases are for **development only**. Don't tune prompts on replay results and then report held-out accuracy (see `evals/README.md`).
-- These are text-to-speech voices. For the jury video, teammates reading the same scripts (with some background noise) tests Whisper on real speech.
+- These are text-to-speech voices. `--engine openai` sounds more natural for the video; both transcribe about equally well. For the jury video, teammates reading the same scripts (with some background noise) tests transcription on real speech.
+- Reports are cut into roughly equal clips of at most 8 s, at pauses. Short fragments and words cut in half are what transcription gets wrong.
+- The replay compresses time, so the `elapsed_minutes` the model sees is compressed too. Use `--seconds-per-minute 60` when a run must match the dataset's timing.
 - Each case has one earlier report and one update, not a full transport.

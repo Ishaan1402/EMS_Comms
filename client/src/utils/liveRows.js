@@ -6,7 +6,8 @@
 export const upsertNewer = (rows, row) => {
   const index = rows.findIndex((r) => r.id === row.id);
   if (index === -1) return [...rows, row];
-  if (rows[index].updated_at > row.updated_at) return rows;
+  // The server never gives two changes the same updated_at, so an equal one is the same version.
+  if (rows[index].updated_at >= row.updated_at) return rows;
   const next = [...rows];
   next[index] = row;
   return next;

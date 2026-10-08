@@ -8,14 +8,44 @@ import asyncio
 import concurrent.futures
 from openai import OpenAI
 from database import query, run, get_db
-import case_assessment
 from middleware.auth import get_current_user, require_role, APIError
 
 router = APIRouter()
 
 # None when OPENAI_API_KEY is unset; processing then marks recordings as error.
 openai_api_key = os.getenv("OPENAI_API_KEY")
-openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+# One SDK retry at most: with the default two, a call could outlast the caller's own timeout
+# and keep a worker thread busy after the caller gave up. Transcription retries on its own.
+OPENAI_MAX_RETRIES = 1
+openai_client = OpenAI(api_key=openai_api_key, max_retries=OPENAI_MAX_RETRIES) if openai_api_key else None
+# gpt-4 shuts down 2026-10-23. gpt-6-luna is the cheapest current model and the one evals/ uses.
+SCORING_MODEL = os.getenv("OPENAI_SCORING_MODEL", "gpt-6-luna")
+# whisper-1 is deprecated and misheard short live segments ("awake and" -> "Awaken");
+# gpt-transcribe got them right in a side-by-side test and costs less per minute.
+TRANSCRIPTION_MODEL = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "gpt-transcribe")
+# Sent only when set: models without reasoning reject the parameter. Blank it for those.
+SCORING_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "none")
+# A hung call would otherwise hold a worker for the client's 10-minute default.
+SCORING_REQUEST_TIMEOUT_SECONDS = 40
+
+
+def scoring_extra_body() -> dict:
+    """Newer models take max_completion_tokens and a reasoning effort, not temperature/max_tokens."""
+    body = {"max_completion_tokens": 1000}
+    if SCORING_REASONING_EFFORT:
+        body["reasoning_effort"] = SCORING_REASONING_EFFORT
+    return body
+
+
+def bounded_int(value, low: int, high: int):
+    """An integer in [low, high] from model output, else None: never a made-up default."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return value if isinstance(value, int) and low <= value <= high else None
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -37,6 +67,11 @@ def is_audio_type_allowed(content_type: str) -> bool:
 # Separate pools: fast ops (auth, file writes) vs slow external calls (OpenAI, notifications)
 fast_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="fast")
 slow_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="slow")
+
+# The recording's EMT and the doctors notified about it; anyone else gets the same 404 as a missing one.
+VISIBLE_RECORDING = """ AND (r.emt_id = ? OR EXISTS (
+    SELECT 1 FROM notifications n WHERE n.recording_id = r.id AND n.doctor_id = ?))"""
+
 
 @router.post("/upload", status_code=201)
 async def upload_recording(
@@ -137,8 +172,9 @@ async def get_recording(id: str, request: Request):
             )
         
         recordings = query(
-            'SELECT r.*, u.first_name as emt_first_name, u.last_name as emt_last_name FROM recordings r JOIN users u ON r.emt_id = u.id WHERE r.id = ?',
-            (recording_id,)
+            'SELECT r.*, u.first_name as emt_first_name, u.last_name as emt_last_name FROM recordings r JOIN users u ON r.emt_id = u.id WHERE r.id = ?'
+            + VISIBLE_RECORDING,
+            (recording_id, current_user.get("id"), current_user.get("id"))
         )
         
         if len(recordings) == 0:
@@ -185,9 +221,8 @@ async def process_recording(recording_id: int, audio_file_path: str):
             llm_summary_value = json.dumps(analysis, separators=(',', ':'))
         
         # A missing or invalid score stays NULL (shown as "unavailable"), never a normal-looking default.
-        scored = case_assessment.interpret(analysis)
-        risk_score_value = scored.get("risk_score")
-        priority_level_value = scored.get("priority_level")
+        risk_score_value = bounded_int(analysis.get("risk_score"), 0, 10)
+        priority_level_value = bounded_int(analysis.get("priority_level"), 1, 5)
         chief_complaint_value = analysis.get("chief_complaint") or "Not specified"
         vital_signs_value = analysis.get("vital_signs") or "Not recorded"
         symptoms_value = analysis.get("symptoms") or "Not specified"
@@ -243,7 +278,7 @@ def transcribe_audio_sync(audio_file_path: str) -> str:
         with open(audio_file_path, "rb") as audio_file:
             transcription = openai_client.audio.transcriptions.create(
                 file=audio_file,
-                model="whisper-1",
+                model=TRANSCRIPTION_MODEL,
                 response_format="text"
             )
         return transcription
@@ -321,10 +356,11 @@ Return ONLY the JSON object with no additional text."""
         response = await loop.run_in_executor(
             slow_executor,
             lambda: openai_client.chat.completions.create(
-                model="gpt-4",
+                model=SCORING_MODEL,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=1000
+                response_format={"type": "json_object"},
+                extra_body=scoring_extra_body(),
+                timeout=SCORING_REQUEST_TIMEOUT_SECONDS,
             )
         )
 

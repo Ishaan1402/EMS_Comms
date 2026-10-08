@@ -1,19 +1,28 @@
-"""Risk/priority assessment for EMS cases.
+"""AI assessment of EMS cases, on the evaluation contract (evals/contracts.py).
+
+The model gets the same system prompt (evals/prompts/awareness_v2.txt) and the same input
+fields as the evaluation harness, and must answer with the same five fields, so what the
+evaluation measures is what the app runs:
+    summary, meaningful_change, change_explanation, missing_information, preparation_category
+
+"Earlier" information is what the hospital had acknowledged before this assessment, so
+meaningful_change answers "what changed since the hospital last looked". Before any
+acknowledgment everything is current, as in a first report.
 
 Every attempt is stored in risk_assessments with the case info_version it read, so:
 - a failure never overwrites earlier information or the last usable assessment;
 - a slow result for older information can't replace a newer one (the current
   assessment is the usable one with the highest based_on_version);
-- a missing or invalid score is stored as NULL and marked needs_review, never
-  replaced by a normal-looking default.
-
-The scorer reuses the existing GPT-4 prompt (routes/recordings.analyze_with_llm). The
-risk/priority scales are the app's current ones until KAN-14 settles the definitions;
-KAN-8 is expected to replace score() with the extraction -> scoring pipeline.
+- unusable output is marked needs_review with a reason, never replaced by a default.
 
 Runs in-process (like realtime.py), so use a single server worker.
 """
 import asyncio
+import concurrent.futures
+import json
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable, Optional
 
 import openai
@@ -21,26 +30,54 @@ import openai
 from database import get_db, query, run, utc_now_iso
 from routes import recordings
 
-SCORER_VERSION = "gpt-4/legacy-recording-prompt"
-SCORING_TIMEOUT_SECONDS = 90
-# A live case gets new transcript every ~8s. While one assessment runs, newer information is
-# queued and assessed once, at least this long after the previous run started.
-MIN_SECONDS_BETWEEN_RUNS = 15.0
+PROMPT_VERSION = "awareness_v2"
+PROMPT = (Path(__file__).parent / "evals" / "prompts" / f"{PROMPT_VERSION}.txt").read_text(encoding="utf-8")
 
-# "Unsure" is the older wording still used by evals/ prompts; both mean Cannot assess.
-CANNOT_ASSESS = ("Cannot assess", "Unsure")
+# The evaluation contract, kept identical to evals/contracts.py (test_case_model checks this).
+CHANGE = ("Yes", "No", "Unclear", "No earlier report")
+PREPARATION = ("Prepare now", "Can wait", "Routine", "Unsure")
+OUTPUT_FIELDS = ("summary", "meaningful_change", "change_explanation", "missing_information", "preparation_category")
+OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        **{field: {"type": "string"} for field in OUTPUT_FIELDS},
+        "meaningful_change": {"type": "string", "enum": list(CHANGE)},
+        "preparation_category": {"type": "string", "enum": list(PREPARATION)},
+    },
+    "required": list(OUTPUT_FIELDS),
+    "additionalProperties": False,
+}
+# Wording of pilot_cases.json for a case with no earlier report.
+NO_EARLIER_REPORT = "No earlier report provided."
+
+# The prompt's "Unsure" is the older wording; the app stores and shows "Cannot assess".
+CANNOT_ASSESS = "Cannot assess"
 CANNOT_ASSESS_REASON = "Insufficient information to assess preparation needs."
-INSUFFICIENT_INFO_REASON = "Insufficient information to assess risk."
-INVALID_SCORE_REASON = "The scorer did not return a valid risk score and priority."
+UNREADABLE_ERROR = "the AI's answer didn't follow the expected format"
+
+# List prices in USD per million tokens (input, output), checked 2026-10-07. A model missing
+# here gets no cost estimate rather than a wrong one.
+PRICES_PER_MILLION = {"gpt-6-luna": (0.10, 0.50)}
+
+# Longer than the request timeout times its attempts (recordings.SCORING_REQUEST_TIMEOUT_SECONDS,
+# OPENAI_MAX_RETRIES), so the worker thread is free again by the time a call is given up on.
+SCORING_TIMEOUT_SECONDS = 90
+# Own pool, so assessments never queue behind the older recording flow's calls.
+assessment_executor = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="assess")
+# Wait this long before assessing, and again before re-assessing information that arrived
+# during a run, so a report that arrives as several segments is assessed once, whole.
+SETTLE_SECONDS = 2.0
 
 ASSESSMENT_COLUMNS = (
-    "id, case_id, based_on_version, status, risk_score, priority_level, chief_complaint, summary, "
-    "critical_info, review_reason, error, scorer_version, started_at, completed_at, updated_at"
+    "id, case_id, based_on_version, baseline_version, status, preparation_category, meaningful_change, "
+    "summary, change_explanation, missing_information, review_reason, error, scorer_version, "
+    "input_tokens, output_tokens, latency_ms, cost_usd, started_at, completed_at, updated_at"
 )
 
-# Same ranges as the recordings table until KAN-14 defines the scales.
-RISK_RANGE = (0, 10)
-PRIORITY_RANGE = (1, 5)
+
+def scorer_version() -> str:
+    """Model and prompt that produced an assessment, stored with it."""
+    return f"{recordings.SCORING_MODEL}/{PROMPT_VERSION}"
 
 
 # Vital signs an EMT can enter: name -> (label, unit, min, max).
@@ -72,22 +109,56 @@ class ScoringUnavailable(Exception):
     pass
 
 
+class ScoringRefused(Exception):
+    pass
+
+
+def _parse_time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _format(items: list) -> str:
+    """Radio transcript segments run together as speech (they're cut mid-sentence); typed entries get a line each."""
+    paragraphs, speech = [], []
+    for _, _, _, text, typed in items:
+        if typed:
+            if speech:
+                paragraphs.append(" ".join(speech))
+                speech = []
+            paragraphs.append(text)
+        else:
+            speech.append(text)
+    if speech:
+        paragraphs.append(" ".join(speech))
+    return "\n".join(paragraphs)
+
+
 def read_inputs(case_id: int) -> Optional[dict]:
-    """Everything the scorer may use, read in one transaction so it matches info_version exactly."""
+    """
+    The model input for the case's current information, in the evaluation harness's fields.
+    Read in one transaction so it matches info_version exactly.
+    """
     with get_db() as conn:
         conn.execute("BEGIN")
         case = conn.execute(
-            "SELECT id, patient_info, info_version FROM cases WHERE id = ?", (case_id,)
+            "SELECT id, patient_info, info_version, started_at, eta_at, source_case_id FROM cases WHERE id = ?",
+            (case_id,),
         ).fetchone()
         if case is None:
             return None
+        version = case["info_version"]
+        baseline = conn.execute(
+            "SELECT MAX(info_version) FROM case_acknowledgments WHERE case_id = ? AND info_version < ?",
+            (case_id, version),
+        ).fetchone()[0]
         segments = conn.execute(
-            """SELECT text FROM transcript_segments
+            """SELECT seq, text, info_version, recorded_at FROM transcript_segments
                WHERE case_id = ? AND status = 'completed' AND text != '' ORDER BY seq""",
             (case_id,),
         ).fetchall()
         updates = conn.execute(
-            "SELECT id, kind, body, created_at FROM case_updates WHERE case_id = ? AND kind != 'eta' ORDER BY id",
+            """SELECT id, info_version, kind, body, created_at FROM case_updates
+               WHERE case_id = ? AND kind != 'eta' ORDER BY id""",
             (case_id,),
         ).fetchall()
         vitals = conn.execute(
@@ -99,81 +170,141 @@ def read_inputs(case_id: int) -> Optional[dict]:
     for reading in vitals:
         vitals_by_update.setdefault(reading["update_id"], []).append(dict(reading))
 
-    lines = []
+    # (version, time, sort key, text, typed) for every piece of information. Ordered by when it was
+    # spoken or typed: segments finish transcribing out of order, so their versions are not speech order.
+    # The summary typed when the case was opened always comes first.
+    # A version of None (text transcribed before versions were recorded) is treated as not yet seen.
+    items = []
     if case["patient_info"]:
-        lines.append(f"Initial report: {case['patient_info']}")
+        items.append((1, case["started_at"], ("", -1), f"Typed by the crew: {case['patient_info']}", True))
     for update in updates:
-        label = {"note": "Update", "vitals": "Vitals", "correction": "Correction (replaces earlier information)"}[update["kind"]]
+        label = {"note": "Typed by the crew", "vitals": "Vitals typed by the crew",
+                 "correction": "Correction typed by the crew (replaces earlier information)"}[update["kind"]]
         parts = []
         if update["id"] in vitals_by_update:
             parts.append(format_vitals(vitals_by_update[update["id"]]))
         if update["body"]:
             parts.append(update["body"])
-        lines.append(f"[{update['created_at']}] {label}: {' — '.join(parts)}")
+        items.append((update["info_version"], update["created_at"], (update["created_at"], update["id"]),
+                      f"{label}: {' — '.join(parts)}", True))
+    for segment in segments:
+        items.append((segment["info_version"], segment["recorded_at"], (segment["recorded_at"], segment["seq"]),
+                      segment["text"], False))
+    items.sort(key=lambda item: item[2])
 
-    transcript = "\n".join(row["text"] for row in segments)
+    def acknowledged(item):
+        return baseline is not None and item[0] is not None and item[0] <= baseline
+
+    prior = [item for item in items if acknowledged(item)]
+    current = [item for item in items if not acknowledged(item)]
+    if not current:  # nothing newer than what was acknowledged: assess it all as current
+        prior, current = [], items
+
+    now = datetime.now(timezone.utc)
+    elapsed = 0
+    if prior and current and prior[-1][1] and current[-1][1]:
+        elapsed = max(0, round((_parse_time(current[-1][1]) - _parse_time(prior[-1][1])).total_seconds() / 60))
+    eta = max(0, round((_parse_time(case["eta_at"]) - now).total_seconds() / 60)) if case["eta_at"] else None
+    label = case["source_case_id"] or f"case-{case_id}"
     return {
         "case_id": case_id,
-        "version": case["info_version"],
-        "transcript": transcript,
-        "patient_info": "\n".join(lines),
-        "has_information": bool(transcript or lines),
+        "version": version,
+        "baseline_version": baseline,
+        "has_information": bool(items),
+        "input": {
+            "case_id": label,
+            "encounter_id": label,
+            "update_number": 2 if prior else 1,
+            "elapsed_minutes": elapsed,
+            "eta_minutes": eta,
+            "prior_information": _format(prior) or NO_EARLIER_REPORT,
+            "current_transcript": _format(current),
+        },
     }
 
 
-async def score(inputs: dict) -> dict:
-    """The raw scorer output. Raises on any failure; never fills in defaults."""
-    if not recordings.openai_client:
+async def score(inputs: dict):
+    """
+    Call the model with the evaluation prompt and schema. Returns (parsed output or None if
+    unreadable, usage). Raises on any failure; never fills in defaults.
+    """
+    client = recordings.openai_client
+    if not client:
         raise ScoringUnavailable()
-    return await recordings.analyze_with_llm(inputs["transcript"], inputs["patient_info"])
-
-
-def _bounded_int(value, bounds) -> Optional[int]:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, str) and value.strip().isdigit():
-        value = int(value.strip())
-    if isinstance(value, float) and value.is_integer():
-        value = int(value)
-    if isinstance(value, int) and bounds[0] <= value <= bounds[1]:
-        return value
-    return None
-
-
-def _text(value) -> Optional[str]:
-    return value.strip() if isinstance(value, str) and value.strip() else None
-
-
-def interpret(result) -> dict:
-    """Turn scorer output into the stored fields. Anything unusable becomes needs_review with a reason."""
-    if not isinstance(result, dict):
-        return {"status": "needs_review", "review_reason": "The scorer returned an unreadable result."}
-
-    fields = {
-        "chief_complaint": _text(result.get("chief_complaint")),
-        "summary": _text(result.get("medical_summary")),
-        "critical_info": _text(result.get("critical_info")),
-        "risk_score": None,
-        "priority_level": None,
+    started = time.monotonic()
+    response = await asyncio.get_running_loop().run_in_executor(
+        assessment_executor,
+        lambda: client.chat.completions.create(
+            model=recordings.SCORING_MODEL,
+            messages=[
+                {"role": "system", "content": PROMPT},
+                {"role": "user", "content": json.dumps(inputs["input"], ensure_ascii=False)},
+            ],
+            response_format={"type": "json_schema",
+                             "json_schema": {"name": "ems_output", "strict": True, "schema": OUTPUT_SCHEMA}},
+            extra_body=recordings.scoring_extra_body(),
+            timeout=recordings.SCORING_REQUEST_TIMEOUT_SECONDS,
+        ),
+    )
+    usage = {
+        "input_tokens": getattr(response.usage, "prompt_tokens", None),
+        "output_tokens": getattr(response.usage, "completion_tokens", None),
+        "latency_ms": round((time.monotonic() - started) * 1000),
     }
-    # preparation_category comes from the clinician-annotation contract (Cannot assess -> Needs Review).
-    if result.get("preparation_category") in CANNOT_ASSESS:
-        return {**fields, "status": "needs_review", "review_reason": CANNOT_ASSESS_REASON}
-    if result.get("insufficient_information") is True:
-        return {**fields, "status": "needs_review", "review_reason": INSUFFICIENT_INFO_REASON}
+    message = response.choices[0].message
+    if getattr(message, "refusal", None):
+        raise ScoringRefused()
+    try:
+        return json.loads(message.content or ""), usage
+    except ValueError:
+        return None, usage
 
-    risk = _bounded_int(result.get("risk_score"), RISK_RANGE)
-    priority = _bounded_int(result.get("priority_level"), PRIORITY_RANGE)
-    if risk is None or priority is None:
-        return {**fields, "status": "needs_review", "review_reason": INVALID_SCORE_REASON}
-    return {**fields, "status": "completed", "risk_score": risk, "priority_level": priority, "review_reason": None}
+
+def output_errors(output) -> list:
+    """Same checks as evals/contracts.output_errors."""
+    if not isinstance(output, dict):
+        return ["output must be an object"]
+    errors = []
+    if set(output) != set(OUTPUT_FIELDS):
+        errors.append("output fields do not match the contract")
+    for key in ("summary", "change_explanation", "missing_information"):
+        if not isinstance(output.get(key), str) or not output[key].strip():
+            errors.append(f"missing/invalid {key}")
+    if output.get("meaningful_change") not in CHANGE:
+        errors.append("invalid meaningful_change")
+    if output.get("preparation_category") not in PREPARATION:
+        errors.append("invalid preparation_category")
+    return errors
+
+
+def interpret(output) -> dict:
+    """
+    Turn model output into the stored fields. An unreadable answer is a processing failure
+    (retryable, and the last usable assessment stays current), not a clinical Needs Review.
+    """
+    if output_errors(output):
+        return {"status": "failed", "error": UNREADABLE_ERROR}
+    fields = {field: output[field].strip() for field in OUTPUT_FIELDS}
+    if fields["preparation_category"] == "Unsure":
+        fields["preparation_category"] = CANNOT_ASSESS
+        return {**fields, "status": "needs_review", "review_reason": CANNOT_ASSESS_REASON}
+    return {**fields, "status": "completed", "review_reason": None}
+
+
+def estimate_cost(model: str, usage: dict) -> Optional[float]:
+    prices = PRICES_PER_MILLION.get(model)
+    if not prices or usage.get("input_tokens") is None or usage.get("output_tokens") is None:
+        return None
+    return (usage["input_tokens"] * prices[0] + usage["output_tokens"] * prices[1]) / 1_000_000
 
 
 def describe_error(error: BaseException) -> str:
-    """Short reason shown to clinicians after "Risk assessment failed: "."""
+    """Short reason shown to clinicians after "Assessment failed: "."""
     if isinstance(error, ScoringUnavailable):
         return "AI scoring is not configured"
-    if isinstance(error, asyncio.TimeoutError):
+    if isinstance(error, ScoringRefused):
+        return "the AI declined to assess this case"
+    if isinstance(error, (asyncio.TimeoutError, openai.APITimeoutError)):
         return "timed out"
     if isinstance(error, openai.APIConnectionError):
         return "could not reach the AI service"
@@ -181,8 +312,6 @@ def describe_error(error: BaseException) -> str:
         return "AI service is busy (rate limited)"
     if isinstance(error, openai.APIError):
         return "AI service error"
-    if isinstance(error, ValueError):  # includes json.JSONDecodeError from an unparseable reply
-        return "AI returned a response that could not be read"
     return "unexpected error"
 
 
@@ -205,6 +334,7 @@ class AssessmentRunner:
     def __init__(self):
         self._active = set()
         self._queued = {}  # case_id -> force
+        self._tasks = set()  # started by start(); referenced so they aren't garbage-collected
         # Called with the case id after every stored change; routes/cases.py publishes the case.
         self.on_change: Callable[[int], None] = lambda case_id: None
 
@@ -218,49 +348,66 @@ class AssessmentRunner:
             return
         self._active.add(case_id)
         try:
+            await asyncio.sleep(SETTLE_SECONDS)
+            # Anything that arrived while settling is read now; keep a retry's force flag.
+            force = self._queued.pop(case_id, False) or force
             await self._assess(case_id, force)
             while case_id in self._queued:
-                force = self._queued.pop(case_id)
-                await asyncio.sleep(MIN_SECONDS_BETWEEN_RUNS)
+                force = self._queued.pop(case_id) or force
+                await asyncio.sleep(SETTLE_SECONDS)
                 await self._assess(case_id, force)
         finally:
             self._active.discard(case_id)
             self._queued.pop(case_id, None)
+
+    def start(self, case_id: int, force: bool = False) -> None:
+        """request() as a background task, for callers that aren't awaiting it (startup)."""
+        task = asyncio.get_running_loop().create_task(self.request(case_id, force))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def _assess(self, case_id: int, force: bool) -> None:
         inputs = read_inputs(case_id)
         if inputs is None or not inputs["has_information"]:
             return
         latest = latest_attempt(case_id)
-        if latest and latest["based_on_version"] >= inputs["version"]:
+        # An attempt covers the case if it read this information against the same acknowledged
+        # baseline; an acknowledgment of an intermediate version changes the baseline.
+        if latest and latest["based_on_version"] >= inputs["version"] \
+                and latest["baseline_version"] == inputs["baseline_version"]:
             if not (force and latest["status"] == "failed"):
                 return
 
         now = utc_now_iso()
         assessment_id = run(
-            """INSERT INTO risk_assessments (case_id, based_on_version, status, scorer_version, started_at, updated_at)
-               VALUES (?, ?, 'processing', ?, ?, ?)""",
-            (case_id, inputs["version"], SCORER_VERSION, now, now),
+            """INSERT INTO risk_assessments
+                   (case_id, based_on_version, baseline_version, status, scorer_version, started_at, updated_at)
+               VALUES (?, ?, ?, 'processing', ?, ?, ?)""",
+            (case_id, inputs["version"], inputs["baseline_version"], scorer_version(), now, now),
         )["id"]
         self.on_change(case_id)
 
+        usage = {}
         try:
-            result = await asyncio.wait_for(score(inputs), timeout=SCORING_TIMEOUT_SECONDS)
-            fields = interpret(result)
-            error = None
+            output, usage = await asyncio.wait_for(score(inputs), timeout=SCORING_TIMEOUT_SECONDS)
+            fields = interpret(output)
+            error = fields.pop("error", None)
         except Exception as exc:
-            print(f"❌ Risk assessment failed for case {case_id}: {exc!r}")
+            print(f"❌ Assessment failed for case {case_id}: {exc!r}")
             fields, error = {"status": "failed"}, describe_error(exc)
 
         now = utc_now_iso()
         run(
             """UPDATE risk_assessments
-               SET status = ?, risk_score = ?, priority_level = ?, chief_complaint = ?, summary = ?,
-                   critical_info = ?, review_reason = ?, error = ?, completed_at = ?, updated_at = ?
+               SET status = ?, preparation_category = ?, meaningful_change = ?, summary = ?,
+                   change_explanation = ?, missing_information = ?, review_reason = ?, error = ?,
+                   input_tokens = ?, output_tokens = ?, latency_ms = ?, cost_usd = ?,
+                   completed_at = ?, updated_at = ?
                WHERE id = ?""",
-            (fields["status"], fields.get("risk_score"), fields.get("priority_level"), fields.get("chief_complaint"),
-             fields.get("summary"), fields.get("critical_info"), fields.get("review_reason"), error, now, now,
-             assessment_id),
+            (fields["status"], fields.get("preparation_category"), fields.get("meaningful_change"),
+             fields.get("summary"), fields.get("change_explanation"), fields.get("missing_information"),
+             fields.get("review_reason"), error, usage.get("input_tokens"), usage.get("output_tokens"),
+             usage.get("latency_ms"), estimate_cost(recordings.SCORING_MODEL, usage), now, now, assessment_id),
         )
         self.on_change(case_id)
 
@@ -279,3 +426,18 @@ def fail_interrupted_assessments() -> None:
     )
     if result["changes"]:
         print(f"⚠️  Marked {result['changes']} interrupted risk assessment(s) as failed")
+
+
+def unassessed_open_cases() -> list:
+    """
+    Open cases whose current information has no usable assessment: never assessed, queued when
+    the server stopped, interrupted, or failed. Nothing else would re-trigger them after a restart.
+    """
+    rows = query(
+        """SELECT c.id FROM cases c
+           WHERE c.status = 'active' AND c.info_version > COALESCE(
+               (SELECT MAX(a.based_on_version) FROM risk_assessments a
+                WHERE a.case_id = c.id AND a.status IN ('completed', 'needs_review')), 0)
+           ORDER BY c.id"""
+    )
+    return [row["id"] for row in rows]

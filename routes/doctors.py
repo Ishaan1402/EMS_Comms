@@ -5,6 +5,7 @@ from typing import Optional, Any
 import json
 from database import query, run, get_db
 from middleware.auth import get_current_user, require_role, APIError
+from routes.recordings import VISIBLE_RECORDING
 
 router = APIRouter()
 
@@ -94,8 +95,8 @@ async def get_recording_details(
             """SELECT r.*, u.first_name as emt_first_name, u.last_name as emt_last_name
                FROM recordings r
                JOIN users u ON r.emt_id = u.id
-               WHERE r.id = ?""",
-            (recording_id,)
+               WHERE r.id = ?""" + VISIBLE_RECORDING,
+            (recording_id, current_user["id"], current_user["id"])
         )
         
         if len(recordings) == 0:
