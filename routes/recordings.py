@@ -16,6 +16,12 @@ router = APIRouter()
 # None when OPENAI_API_KEY is unset; processing then marks recordings as error.
 openai_api_key = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+# gpt-4 shuts down 2026-10-23. gpt-6-luna is the cheapest current model and the one evals/ uses.
+SCORING_MODEL = os.getenv("OPENAI_SCORING_MODEL", "gpt-6-luna")
+# Sent only when set: models without reasoning reject the parameter. Blank it for those.
+SCORING_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "none")
+# A hung call would otherwise hold a worker for the client's 10-minute default.
+SCORING_REQUEST_TIMEOUT_SECONDS = 60
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -321,10 +327,13 @@ Return ONLY the JSON object with no additional text."""
         response = await loop.run_in_executor(
             slow_executor,
             lambda: openai_client.chat.completions.create(
-                model="gpt-4",
+                model=SCORING_MODEL,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=1000
+                response_format={"type": "json_object"},
+                # Newer models take max_completion_tokens and a reasoning effort, not temperature/max_tokens.
+                extra_body={"max_completion_tokens": 1000,
+                            **({"reasoning_effort": SCORING_REASONING_EFFORT} if SCORING_REASONING_EFFORT else {})},
+                timeout=SCORING_REQUEST_TIMEOUT_SECONDS,
             )
         )
 

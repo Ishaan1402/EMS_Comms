@@ -228,8 +228,12 @@ class Replay:
         self.log(f"[{event['minute']:>4}] {event['patient']}: {event['from']} says {event['body']!r}")
 
     def acknowledge_all(self, event) -> None:
-        """The doctor acknowledges exactly the version on their screen, like the dashboard button."""
+        """
+        The doctor acknowledges exactly the version on their screen, like the dashboard button,
+        after reading any transcript still arriving (otherwise the ack covers an older version).
+        """
         doctor = self.scenario["doctor"]
+        self._wait_for(lambda c: c["processing"]["transcription"]["pending"] == 0, timeout=30)
         for source_case_id, case_id in self.cases.items():
             case = self.call("GET", f"/api/cases/{case_id}", doctor)
             self.call("POST", f"/api/cases/{case_id}/acknowledge", doctor, json={"info_version": case["info_version"]})
@@ -237,16 +241,26 @@ class Replay:
 
     # --- Results --------------------------------------------------------------
 
-    def wait_until_settled(self, timeout: float = 90.0) -> None:
-        """Real transcription and scoring run after the requests return; wait for them."""
+    def _wait_for(self, done, timeout: float) -> bool:
+        """Poll the scenario's cases until done(case) holds for all of them, or the timeout passes."""
         deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+        while True:
             cases = [self.call("GET", f"/api/cases/{case_id}", self.scenario["doctor"]) for case_id in self.cases.values()]
-            if all(c["processing"]["status"] != "processing" and c["processing"]["transcription"]["pending"] == 0
-                   for c in cases):
-                return
+            if all(done(c) for c in cases):
+                return True
+            if time.monotonic() >= deadline:
+                return False
             self.sleep(1)
-        self.log("still processing after the timeout; showing the current state")
+
+    def wait_until_settled(self, timeout: float = 120.0) -> None:
+        """Real transcription and scoring run after the requests return, including queued re-assessments."""
+        settled = self._wait_for(
+            lambda c: c["processing"]["transcription"]["pending"] == 0
+            and c["processing"]["assessment"]["status"] not in ("processing", "pending"),
+            timeout,
+        )
+        if not settled:
+            self.log("still processing after the timeout; showing the current state")
 
     def manifest(self) -> dict:
         """What analysis needs to line this run up with the scenario: which cases, and the time scale."""

@@ -21,11 +21,14 @@ import openai
 from database import get_db, query, run, utc_now_iso
 from routes import recordings
 
-SCORER_VERSION = "gpt-4/legacy-recording-prompt"
+def scorer_version() -> str:
+    """Model and prompt that produced an assessment, stored with it."""
+    return f"{recordings.SCORING_MODEL}/legacy-recording-prompt"
+
 SCORING_TIMEOUT_SECONDS = 90
-# A live case gets new transcript every ~8s. While one assessment runs, newer information is
-# queued and assessed once, at least this long after the previous run started.
-MIN_SECONDS_BETWEEN_RUNS = 15.0
+# While one assessment runs, newer information is queued and assessed once, this long after
+# the previous run finishes, so the rest of a multi-segment report can land first.
+MIN_SECONDS_BETWEEN_RUNS = 2.0
 
 # "Unsure" is the older wording still used by evals/ prompts; both mean Cannot assess.
 CANNOT_ASSESS = ("Cannot assess", "Unsure")
@@ -205,6 +208,7 @@ class AssessmentRunner:
     def __init__(self):
         self._active = set()
         self._queued = {}  # case_id -> force
+        self._tasks = set()  # started by start(); referenced so they aren't garbage-collected
         # Called with the case id after every stored change; routes/cases.py publishes the case.
         self.on_change: Callable[[int], None] = lambda case_id: None
 
@@ -227,6 +231,12 @@ class AssessmentRunner:
             self._active.discard(case_id)
             self._queued.pop(case_id, None)
 
+    def start(self, case_id: int, force: bool = False) -> None:
+        """request() as a background task, for callers that aren't awaiting it (startup)."""
+        task = asyncio.get_running_loop().create_task(self.request(case_id, force))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
     async def _assess(self, case_id: int, force: bool) -> None:
         inputs = read_inputs(case_id)
         if inputs is None or not inputs["has_information"]:
@@ -240,7 +250,7 @@ class AssessmentRunner:
         assessment_id = run(
             """INSERT INTO risk_assessments (case_id, based_on_version, status, scorer_version, started_at, updated_at)
                VALUES (?, ?, 'processing', ?, ?, ?)""",
-            (case_id, inputs["version"], SCORER_VERSION, now, now),
+            (case_id, inputs["version"], scorer_version(), now, now),
         )["id"]
         self.on_change(case_id)
 
@@ -279,3 +289,18 @@ def fail_interrupted_assessments() -> None:
     )
     if result["changes"]:
         print(f"⚠️  Marked {result['changes']} interrupted risk assessment(s) as failed")
+
+
+def unassessed_open_cases() -> list:
+    """
+    Open cases whose current information has no usable assessment: never assessed, queued when
+    the server stopped, interrupted, or failed. Nothing else would re-trigger them after a restart.
+    """
+    rows = query(
+        """SELECT c.id FROM cases c
+           WHERE c.status = 'active' AND c.info_version > COALESCE(
+               (SELECT MAX(a.based_on_version) FROM risk_assessments a
+                WHERE a.case_id = c.id AND a.status IN ('completed', 'needs_review')), 0)
+           ORDER BY c.id"""
+    )
+    return [row["id"] for row in rows]

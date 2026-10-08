@@ -231,7 +231,7 @@ class TestAssessments:
         after = get_case(case["id"])
         assert after["risk_score"] == 7 and after["priority_level"] == 2
         assert after["current_assessment"]["based_on_version"] == 1
-        assert after["current_assessment"]["scorer_version"] == case_assessment.SCORER_VERSION
+        assert after["current_assessment"]["scorer_version"] == case_assessment.scorer_version()
         assert after["processing"]["status"] == "completed"
         assert after["processing"]["needs_review"] is False
         assert "67F short of breath" in calls[0]["patient_info"]
@@ -350,6 +350,56 @@ class TestAssessments:
         after = get_case(case["id"])
         assert after["processing"]["assessment"]["status"] == "failed"
         assert "server restart" in after["processing"]["reasons"][0]
+
+
+class TestStartupRecovery:
+    def test_open_cases_without_a_usable_assessment_are_found(self, monkeypatch):
+        use_scorer(monkeypatch, SCORED)
+        assessed = start_case()
+        use_scorer(monkeypatch, RuntimeError("outage"))
+        failed = start_case(username=OTHER_EMT)
+        run("UPDATE cases SET info_version = info_version + 1 WHERE id = ?", (assessed["id"],))  # new info, not yet scored
+        found = case_assessment.unassessed_open_cases()
+        assert assessed["id"] in found and failed["id"] in found
+        client.post(f"/api/cases/{failed['id']}/close", headers=auth(OTHER_EMT))
+        assert failed["id"] not in case_assessment.unassessed_open_cases()
+
+    def test_started_assessment_runs_in_the_background(self, monkeypatch):
+        case = start_case()
+        use_scorer(monkeypatch, SCORED)
+
+        async def scenario():
+            case_assessment.runner.start(case["id"], force=True)
+            while case_assessment.runner._tasks:
+                await asyncio.sleep(0.01)
+
+        asyncio.run(scenario())
+        assert get_case(case["id"])["risk_score"] == 7
+
+
+class TestScoringRequest:
+    def capture(self, monkeypatch):
+        sent = {}
+
+        def create(**kwargs):
+            sent.update(kwargs)
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"risk_score": 3}'))])
+        monkeypatch.setattr(recordings, "openai_client",
+                            SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
+        return sent
+
+    def test_request_has_a_timeout_and_reasoning_effort(self, monkeypatch):
+        sent = self.capture(monkeypatch)
+        asyncio.run(recordings.analyze_with_llm("transcript", "info"))
+        assert sent["model"] == recordings.SCORING_MODEL
+        assert sent["timeout"] == recordings.SCORING_REQUEST_TIMEOUT_SECONDS
+        assert sent["extra_body"]["reasoning_effort"] == "none"
+
+    def test_blank_reasoning_effort_is_not_sent(self, monkeypatch):
+        sent = self.capture(monkeypatch)
+        monkeypatch.setattr(recordings, "SCORING_REASONING_EFFORT", "")
+        asyncio.run(recordings.analyze_with_llm("transcript", "info"))
+        assert "reasoning_effort" not in sent["extra_body"]
 
 
 class TestAssessmentRunner:

@@ -23,6 +23,8 @@ Environment variables (read from the environment or `.env`):
 ```env
 JWT_SECRET=...
 OPENAI_API_KEY=...
+OPENAI_SCORING_MODEL=gpt-6-luna   # optional; risk scoring model
+OPENAI_REASONING_EFFORT=none      # optional; leave blank for models without reasoning
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=...
@@ -83,7 +85,7 @@ The case is the main object. One transport is one case, and everything about the
 - **Two kinds of status, kept apart** (KAN-11):
   - `operational_status`: `inbound` → `acknowledged` (a hospital user has seen the latest `info_version`) → `arrived` → `closed`. `POST /api/cases/:id/acknowledge` (doctor, optional `{"info_version": n}` for the version their screen showed) and `POST /api/cases/:id/arrive` (EMT or doctor). New information makes an acknowledged case `inbound` again.
   - `processing`: `pending` | `processing` | `completed` | `failed` | `needs_review`, with `needs_review: true` and plain-language `reasons` whenever a person should look (a failed transcription, a failed assessment, or an assessment that couldn't produce a score).
-- **Risk assessments** (`case_assessment.py`): every attempt is a row in `risk_assessments` with the `info_version` it read. The case's `current_assessment` is the usable one with the highest version, so a slow result for older information never replaces a newer one. `risk_score` and `priority_level` are `null` unless the scorer returned valid values; they are never filled with defaults. A failure keeps the previous assessment (`assessment_is_outdated: true`) and can be retried with `POST /api/cases/:id/assessments/retry`. `GET /api/cases/:id/assessments` lists every attempt. While one assessment runs, newer information is queued and assessed once, at least 15s after the previous run, so a live case doesn't call the model every 8 seconds. The scorer currently reuses the recordings GPT-4 prompt and its scales until KAN-14 defines risk and priority; `preparation_category: "Cannot assess"` maps to Needs Review.
+- **Risk assessments** (`case_assessment.py`): every attempt is a row in `risk_assessments` with the `info_version` it read. The case's `current_assessment` is the usable one with the highest version, so a slow result for older information never replaces a newer one. `risk_score` and `priority_level` are `null` unless the scorer returned valid values; they are never filled with defaults. A failure keeps the previous assessment (`assessment_is_outdated: true`) and can be retried with `POST /api/cases/:id/assessments/retry`. `GET /api/cases/:id/assessments` lists every attempt. While one assessment runs, newer information is queued and assessed once, 2s after it finishes. On startup, open cases whose current information has no usable assessment are re-assessed. The scorer reuses the recordings prompt and its scales on `OPENAI_SCORING_MODEL` (default `gpt-6-luna`; `gpt-4` shuts down 2026-10-23) until KAN-14 defines risk and priority; `preparation_category: "Cannot assess"` maps to Needs Review.
 - **Messages**: each case has its own thread at `/api/cases/:id/messages` (same API as below).
 
 Existing databases are migrated on startup: the new `cases` columns are added, and `messages` is rebuilt so a message can belong to a case or a recording.

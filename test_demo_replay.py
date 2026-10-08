@@ -157,6 +157,23 @@ class TestThreePatientReplay:
         with pytest.raises(replay.ReplayError, match="make_audio.py"):
             run_replay(scenario, tmp_path)
 
+    def test_doctor_acknowledges_after_the_transcript_arrives(self, scenario, audio_dir):
+        run, _ = run_replay(scenario, audio_dir)
+        case_id = run.cases["SYN002"]
+        now = database.utc_now_iso()
+        database.run("""INSERT INTO transcript_segments (case_id, seq, client_id, recorded_at, audio_file_path, status,
+                            created_at, updated_at) VALUES (?, 99, 'late', ?, 'x', 'pending', ?, ?)""",
+                     (case_id, now, now, now))
+
+        def transcript_arrives(seconds):  # Whisper finishing while the doctor waits
+            database.run("UPDATE transcript_segments SET status = 'completed', text = 'late' WHERE client_id = 'late'")
+            database.run("UPDATE cases SET info_version = info_version + 1 WHERE id = ?", (case_id,))
+
+        run.sleep = transcript_arrives
+        run.acknowledge_all({"minute": 12})
+        case = client.get(f"/api/cases/{case_id}", headers=self.doctor()).json()
+        assert case["latest_update_acknowledged"] is True
+
     @staticmethod
     def doctor():
         token = client.post("/api/auth/login", json={"username": "dr.smith", "password": "password123"}).json()["token"]

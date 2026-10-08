@@ -28,6 +28,8 @@ async def lifespan(app: FastAPI):
     init_database()
     cases.fail_interrupted_segments()
     case_assessment.fail_interrupted_assessments()
+    for case_id in case_assessment.unassessed_open_cases():
+        case_assessment.runner.start(case_id, force=True)
     if os.getenv("SEED_DEMO_USERS", "").lower() in ("1", "true", "yes"):
         insert_sample_data()
     yield
