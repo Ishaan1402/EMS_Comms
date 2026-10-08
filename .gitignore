@@ -106,3 +106,7 @@ microphone_test.html
 
 # Live case audio (PHI), never served statically
 private_uploads/
+
+# Demo audio and run records from demo/make_audio.py and demo/replay.py
+demo/audio/
+demo/runs/

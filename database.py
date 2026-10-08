@@ -91,7 +91,9 @@ def init_database():
       specialty TEXT,
       is_available BOOLEAN DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      -- The hospital a doctor/nurse works at; NULL for EMTs.
+      hospital_id INTEGER REFERENCES hospitals (id)
     );
 
     -- Recordings table
@@ -157,6 +159,10 @@ def init_database():
       info_version INTEGER NOT NULL DEFAULT 0,
       last_update_at TEXT,
       arrived_at TEXT,
+      -- Set only for cases replayed from a test scenario (demo/replay.py): the fictional source
+      -- case (e.g. SYN002, the evaluation datasets' case_id) and the replay run. NULL in real use.
+      source_case_id TEXT,
+      source_run_id TEXT,
       FOREIGN KEY (emt_id) REFERENCES users (id)
     );
 
@@ -314,6 +320,8 @@ ADDED_CASE_COLUMNS = [
     ("info_version", "INTEGER NOT NULL DEFAULT 0"),
     ("last_update_at", "TEXT"),
     ("arrived_at", "TEXT"),
+    ("source_case_id", "TEXT"),
+    ("source_run_id", "TEXT"),
 ]
 
 
@@ -323,6 +331,10 @@ def table_columns(conn, table: str) -> set:
 
 def migrate_existing_tables(conn):
     """Bring tables created by an earlier version of the schema up to date. No-op on a new database."""
+    user_columns = table_columns(conn, "users")
+    if user_columns and "hospital_id" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN hospital_id INTEGER REFERENCES hospitals (id)")
+
     existing = table_columns(conn, "cases")
     if existing:
         for name, definition in ADDED_CASE_COLUMNS:
@@ -359,8 +371,12 @@ def insert_sample_data():
             ('dr.smith', 'dr.smith@hospital.com', password_hash, 'doctor', 'John', 'Smith', '+1234567890', 'Emergency Medicine'),
             ('dr.jones', 'dr.jones@hospital.com', password_hash, 'doctor', 'Sarah', 'Jones', '+1234567891', 'Cardiology'),
             ('emt.wilson', 'emt.wilson@ems.com', password_hash, 'emt', 'Mike', 'Wilson', '+1234567892', None),
-            ('emt.garcia', 'emt.garcia@ems.com', password_hash, 'emt', 'Maria', 'Garcia', '+1234567893', None)
+            ('emt.garcia', 'emt.garcia@ems.com', password_hash, 'emt', 'Maria', 'Garcia', '+1234567893', None),
+            # A third crew, so the demo can run three inbound cases at once (one open case per EMT).
+            ('emt.lee', 'emt.lee@ems.com', password_hash, 'emt', 'Jordan', 'Lee', '+1234567894', None)
         ]
+        # Two hospitals, so "another hospital's doctor" can be tested.
+        doctor_hospitals = [('dr.smith', 'GEN'), ('dr.jones', 'NORTH')]
         
         with get_db() as conn:
             cursor = conn.cursor()
@@ -368,6 +384,11 @@ def insert_sample_data():
                 cursor.execute(
                     'INSERT OR IGNORE INTO users (username, email, password_hash, role, first_name, last_name, phone, specialty) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                     user
+                )
+            for username, code in doctor_hospitals:
+                cursor.execute(
+                    'UPDATE users SET hospital_id = (SELECT id FROM hospitals WHERE code = ?) WHERE username = ? AND hospital_id IS NULL',
+                    (code, username)
                 )
         
         print("✅ Sample data inserted successfully with proper passwords")

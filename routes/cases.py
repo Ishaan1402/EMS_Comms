@@ -39,6 +39,7 @@ transcription_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, th
 
 MAX_UPDATE_LENGTH = 2000
 MAX_EMS_UNIT_LENGTH = 40
+MAX_SOURCE_ID_LENGTH = 64
 MAX_CLIENT_ID_LENGTH = 64
 MAX_ETA_MINUTES = 24 * 60
 
@@ -357,7 +358,8 @@ async def start_case(
     """
     EMT opens a case for one patient transport. 409 if the EMT already has one open.
     Body (all optional): {"patient_info": "...", "destination_hospital_id": 1, "ems_unit": "Medic 12",
-    "eta_minutes": 15}. The case starts at info_version 1: what the EMT entered here.
+    "eta_minutes": 15}. demo/replay.py also sends source_case_id and source_run_id.
+    The case starts at info_version 1: what the EMT entered here.
     """
     body = await read_json_body(request)
     patient_info = body.get("patient_info")
@@ -365,6 +367,8 @@ async def start_case(
         raise APIError(400, "patient_info must be a string")
     ems_unit = optional_text(body, "ems_unit", MAX_EMS_UNIT_LENGTH)
     eta_at = parse_eta_minutes(body["eta_minutes"]) if body.get("eta_minutes") is not None else None
+    source_case_id = optional_text(body, "source_case_id", MAX_SOURCE_ID_LENGTH)
+    source_run_id = optional_text(body, "source_run_id", MAX_SOURCE_ID_LENGTH)
     hospital_id = body.get("destination_hospital_id")
     if hospital_id is not None:
         if isinstance(hospital_id, bool) or not isinstance(hospital_id, int) \
@@ -375,9 +379,11 @@ async def start_case(
     try:
         result = run(
             """INSERT INTO cases (emt_id, patient_info, status, started_at, updated_at,
-                                  destination_hospital_id, ems_unit, eta_at, info_version, last_update_at)
-               VALUES (?, ?, 'active', ?, ?, ?, ?, ?, 1, ?)""",
-            (current_user["id"], patient_info, now, now, hospital_id, ems_unit, eta_at, now),
+                                  destination_hospital_id, ems_unit, eta_at, info_version, last_update_at,
+                                  source_case_id, source_run_id)
+               VALUES (?, ?, 'active', ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
+            (current_user["id"], patient_info, now, now, hospital_id, ems_unit, eta_at, now,
+             source_case_id, source_run_id),
         )
     except sqlite3.IntegrityError:
         # idx_cases_one_active_per_emt: an EMT has at most one open case at a time.

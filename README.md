@@ -42,7 +42,9 @@ If any of these keys are missing, the server still starts and logs a warning. On
 
 The SQLite schema is created in `asclepius.db` when the server starts. Demo users (password `password123`) are created only when `SEED_DEMO_USERS=1` is set, or when you run `python3 database.py --seed`.
 
-Tests use a temporary database and need no API keys: `pip install -r requirements.txt pytest && pytest test_parity.py test_messages.py test_live_transcription.py test_case_model.py`.
+Tests use a temporary database and need no API keys: `pip install -r requirements.txt pytest && pytest test_parity.py test_messages.py test_live_transcription.py test_case_model.py test_demo_replay.py`.
+
+To replay the three-patient demo scenario against a running server, see [demo/README.md](demo/README.md). Demo accounts: `dr.smith` (General Hospital), `dr.jones` (Northside), `emt.wilson`, `emt.garcia`, `emt.lee`.
 
 ### Live case transcription
 
