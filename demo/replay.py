@@ -38,6 +38,10 @@ DEFAULT_AUDIO_DIR = DEMO_DIR / "audio"
 DEFAULT_RUNS_DIR = DEMO_DIR / "runs"
 # Same length as the browser recorder (SEGMENT_MS in LiveCaseRecorder.js).
 SEGMENT_SECONDS = 8
+# Under the server's 10 MiB per-segment limit (routes/cases.py MAX_SEGMENT_BYTES), with room for the header.
+MAX_CLIP_BYTES = 9 * 1024 * 1024
+# Longer than one segment's worst-case transcription (two 45 s attempts plus the retry delay).
+TRANSCRIPT_WAIT_SECONDS = 120
 # Password of the seeded demo accounts (database.insert_sample_data).
 DEMO_PASSWORD = "password123"
 ACTIONS = {"start_case", "audio_report", "typed_report", "garbled_audio", "dismiss_failed", "eta", "message",
@@ -75,7 +79,7 @@ def split_wav(data: bytes, seconds: float = SEGMENT_SECONDS) -> list:
     rate, width, channels = params.framerate, params.sampwidth, params.nchannels
     frame_bytes = width * channels
     total = len(frames) // frame_bytes
-    limit = int(rate * seconds)
+    limit = max(1, min(int(rate * seconds), MAX_CLIP_BYTES // frame_bytes))
     pieces = max(1, math.ceil(total / limit))
     samples = None
     if width == 2 and channels == 1:
@@ -257,7 +261,10 @@ class Replay:
     def dismiss_failed(self, event) -> None:
         """The crew marks failed clips as handled once their content was re-sent; the failure stays on record."""
         case_id = self._case(event)
-        self._wait_for(lambda c: c["id"] != case_id or c["processing"]["transcription"]["pending"] == 0, timeout=30)
+        if not self._wait_for(lambda c: c["id"] != case_id or c["processing"]["transcription"]["pending"] == 0,
+                              timeout=TRANSCRIPT_WAIT_SECONDS):
+            raise ReplayError(f"{event['patient']} still transcribing after {TRANSCRIPT_WAIT_SECONDS} s; "
+                              "can't tell which clips failed")
         for segment in self.call("GET", f"/api/cases/{case_id}/segments", self._emt(event)):
             if segment["status"] == "failed" and not segment["dismissed_at"]:
                 self.call("POST", f"/api/cases/{case_id}/segments/{segment['id']}/dismiss", self._emt(event))
@@ -279,7 +286,10 @@ class Replay:
         after reading any transcript still arriving (otherwise the ack covers an older version).
         """
         doctor = self.scenario["doctor"]
-        self._wait_for(lambda c: c["processing"]["transcription"]["pending"] == 0, timeout=30)
+        if not self._wait_for(lambda c: c["processing"]["transcription"]["pending"] == 0,
+                              timeout=TRANSCRIPT_WAIT_SECONDS):
+            raise ReplayError(f"Transcripts still pending after {TRANSCRIPT_WAIT_SECONDS} s; "
+                              "not acknowledging information the doctor hasn't seen")
         for source_case_id, case_id in self.cases.items():
             case = self.call("GET", f"/api/cases/{case_id}", doctor)
             self.call("POST", f"/api/cases/{case_id}/acknowledge", doctor, json={"info_version": case["info_version"]})

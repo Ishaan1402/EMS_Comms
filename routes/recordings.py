@@ -14,7 +14,10 @@ router = APIRouter()
 
 # None when OPENAI_API_KEY is unset; processing then marks recordings as error.
 openai_api_key = os.getenv("OPENAI_API_KEY")
-openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+# One SDK retry at most: with the default two, a call could outlast the caller's own timeout
+# and keep a worker thread busy after the caller gave up. Transcription retries on its own.
+OPENAI_MAX_RETRIES = 1
+openai_client = OpenAI(api_key=openai_api_key, max_retries=OPENAI_MAX_RETRIES) if openai_api_key else None
 # gpt-4 shuts down 2026-10-23. gpt-6-luna is the cheapest current model and the one evals/ uses.
 SCORING_MODEL = os.getenv("OPENAI_SCORING_MODEL", "gpt-6-luna")
 # whisper-1 is deprecated and misheard short live segments ("awake and" -> "Awaken");
@@ -23,7 +26,7 @@ TRANSCRIPTION_MODEL = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "gpt-transcribe")
 # Sent only when set: models without reasoning reject the parameter. Blank it for those.
 SCORING_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "none")
 # A hung call would otherwise hold a worker for the client's 10-minute default.
-SCORING_REQUEST_TIMEOUT_SECONDS = 60
+SCORING_REQUEST_TIMEOUT_SECONDS = 40
 
 
 def scoring_extra_body() -> dict:
@@ -64,6 +67,11 @@ def is_audio_type_allowed(content_type: str) -> bool:
 # Separate pools: fast ops (auth, file writes) vs slow external calls (OpenAI, notifications)
 fast_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="fast")
 slow_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="slow")
+
+# The recording's EMT and the doctors notified about it; anyone else gets the same 404 as a missing one.
+VISIBLE_RECORDING = """ AND (r.emt_id = ? OR EXISTS (
+    SELECT 1 FROM notifications n WHERE n.recording_id = r.id AND n.doctor_id = ?))"""
+
 
 @router.post("/upload", status_code=201)
 async def upload_recording(
@@ -164,8 +172,9 @@ async def get_recording(id: str, request: Request):
             )
         
         recordings = query(
-            'SELECT r.*, u.first_name as emt_first_name, u.last_name as emt_last_name FROM recordings r JOIN users u ON r.emt_id = u.id WHERE r.id = ?',
-            (recording_id,)
+            'SELECT r.*, u.first_name as emt_first_name, u.last_name as emt_last_name FROM recordings r JOIN users u ON r.emt_id = u.id WHERE r.id = ?'
+            + VISIBLE_RECORDING,
+            (recording_id, current_user.get("id"), current_user.get("id"))
         )
         
         if len(recordings) == 0:

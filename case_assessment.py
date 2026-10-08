@@ -18,6 +18,7 @@ Every attempt is stored in risk_assessments with the case info_version it read, 
 Runs in-process (like realtime.py), so use a single server worker.
 """
 import asyncio
+import concurrent.futures
 import json
 import time
 from datetime import datetime, timezone
@@ -52,13 +53,17 @@ NO_EARLIER_REPORT = "No earlier report provided."
 # The prompt's "Unsure" is the older wording; the app stores and shows "Cannot assess".
 CANNOT_ASSESS = "Cannot assess"
 CANNOT_ASSESS_REASON = "Insufficient information to assess preparation needs."
-UNREADABLE_REASON = "The AI returned an answer that doesn't follow the expected format."
+UNREADABLE_ERROR = "the AI's answer didn't follow the expected format"
 
 # List prices in USD per million tokens (input, output), checked 2026-10-07. A model missing
 # here gets no cost estimate rather than a wrong one.
 PRICES_PER_MILLION = {"gpt-6-luna": (0.10, 0.50)}
 
+# Longer than the request timeout times its attempts (recordings.SCORING_REQUEST_TIMEOUT_SECONDS,
+# OPENAI_MAX_RETRIES), so the worker thread is free again by the time a call is given up on.
 SCORING_TIMEOUT_SECONDS = 90
+# Own pool, so assessments never queue behind the older recording flow's calls.
+assessment_executor = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="assess")
 # Wait this long before assessing, and again before re-assessing information that arrived
 # during a run, so a report that arrives as several segments is assessed once, whole.
 SETTLE_SECONDS = 2.0
@@ -115,7 +120,7 @@ def _parse_time(value: str) -> datetime:
 def _format(items: list) -> str:
     """Radio transcript segments run together as speech (they're cut mid-sentence); typed entries get a line each."""
     paragraphs, speech = [], []
-    for _, _, text, typed in items:
+    for _, _, _, text, typed in items:
         if typed:
             if speech:
                 paragraphs.append(" ".join(speech))
@@ -147,7 +152,7 @@ def read_inputs(case_id: int) -> Optional[dict]:
             (case_id, version),
         ).fetchone()[0]
         segments = conn.execute(
-            """SELECT text, info_version, transcribed_at FROM transcript_segments
+            """SELECT seq, text, info_version, recorded_at FROM transcript_segments
                WHERE case_id = ? AND status = 'completed' AND text != '' ORDER BY seq""",
             (case_id,),
         ).fetchall()
@@ -165,10 +170,13 @@ def read_inputs(case_id: int) -> Optional[dict]:
     for reading in vitals:
         vitals_by_update.setdefault(reading["update_id"], []).append(dict(reading))
 
-    # (version, time, text, typed) for every piece of information, in arrival order.
+    # (version, time, sort key, text, typed) for every piece of information. Ordered by when it was
+    # spoken or typed: segments finish transcribing out of order, so their versions are not speech order.
+    # The summary typed when the case was opened always comes first.
+    # A version of None (text transcribed before versions were recorded) is treated as not yet seen.
     items = []
     if case["patient_info"]:
-        items.append((1, case["started_at"], f"Typed by the crew: {case['patient_info']}", True))
+        items.append((1, case["started_at"], ("", -1), f"Typed by the crew: {case['patient_info']}", True))
     for update in updates:
         label = {"note": "Typed by the crew", "vitals": "Vitals typed by the crew",
                  "correction": "Correction typed by the crew (replaces earlier information)"}[update["kind"]]
@@ -177,16 +185,20 @@ def read_inputs(case_id: int) -> Optional[dict]:
             parts.append(format_vitals(vitals_by_update[update["id"]]))
         if update["body"]:
             parts.append(update["body"])
-        items.append((update["info_version"], update["created_at"], f"{label}: {' — '.join(parts)}", True))
+        items.append((update["info_version"], update["created_at"], (update["created_at"], update["id"]),
+                      f"{label}: {' — '.join(parts)}", True))
     for segment in segments:
-        # Segments transcribed before info_version was recorded count as the first report.
-        items.append((segment["info_version"] or 1, segment["transcribed_at"], segment["text"], False))
-    items.sort(key=lambda item: (item[0], item[1] or ""))
+        items.append((segment["info_version"], segment["recorded_at"], (segment["recorded_at"], segment["seq"]),
+                      segment["text"], False))
+    items.sort(key=lambda item: item[2])
 
-    prior = [item for item in items if baseline is not None and item[0] <= baseline]
-    current = [item for item in items if baseline is None or item[0] > baseline]
+    def acknowledged(item):
+        return baseline is not None and item[0] is not None and item[0] <= baseline
+
+    prior = [item for item in items if acknowledged(item)]
+    current = [item for item in items if not acknowledged(item)]
     if not current:  # nothing newer than what was acknowledged: assess it all as current
-        prior, current, baseline = [], items, None
+        prior, current = [], items
 
     now = datetime.now(timezone.utc)
     elapsed = 0
@@ -221,7 +233,7 @@ async def score(inputs: dict):
         raise ScoringUnavailable()
     started = time.monotonic()
     response = await asyncio.get_running_loop().run_in_executor(
-        recordings.slow_executor,
+        assessment_executor,
         lambda: client.chat.completions.create(
             model=recordings.SCORING_MODEL,
             messages=[
@@ -266,9 +278,12 @@ def output_errors(output) -> list:
 
 
 def interpret(output) -> dict:
-    """Turn model output into the stored fields. Anything unusable becomes needs_review with a reason."""
+    """
+    Turn model output into the stored fields. An unreadable answer is a processing failure
+    (retryable, and the last usable assessment stays current), not a clinical Needs Review.
+    """
     if output_errors(output):
-        return {"status": "needs_review", "review_reason": UNREADABLE_REASON}
+        return {"status": "failed", "error": UNREADABLE_ERROR}
     fields = {field: output[field].strip() for field in OUTPUT_FIELDS}
     if fields["preparation_category"] == "Unsure":
         fields["preparation_category"] = CANNOT_ASSESS
@@ -334,7 +349,8 @@ class AssessmentRunner:
         self._active.add(case_id)
         try:
             await asyncio.sleep(SETTLE_SECONDS)
-            self._queued.pop(case_id, None)  # anything that arrived while settling is read now
+            # Anything that arrived while settling is read now; keep a retry's force flag.
+            force = self._queued.pop(case_id, False) or force
             await self._assess(case_id, force)
             while case_id in self._queued:
                 force = self._queued.pop(case_id) or force
@@ -355,7 +371,10 @@ class AssessmentRunner:
         if inputs is None or not inputs["has_information"]:
             return
         latest = latest_attempt(case_id)
-        if latest and latest["based_on_version"] >= inputs["version"]:
+        # An attempt covers the case if it read this information against the same acknowledged
+        # baseline; an acknowledgment of an intermediate version changes the baseline.
+        if latest and latest["based_on_version"] >= inputs["version"] \
+                and latest["baseline_version"] == inputs["baseline_version"]:
             if not (force and latest["status"] == "failed"):
                 return
 
@@ -372,7 +391,7 @@ class AssessmentRunner:
         try:
             output, usage = await asyncio.wait_for(score(inputs), timeout=SCORING_TIMEOUT_SECONDS)
             fields = interpret(output)
-            error = None
+            error = fields.pop("error", None)
         except Exception as exc:
             print(f"❌ Assessment failed for case {case_id}: {exc!r}")
             fields, error = {"status": "failed"}, describe_error(exc)

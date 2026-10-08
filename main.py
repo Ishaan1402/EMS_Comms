@@ -109,10 +109,7 @@ async def add_security_headers(request, call_next):
     
     return response
 
-uploads_dir = pathlib.Path("uploads")
-uploads_dir.mkdir(exist_ok=True)
-
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# Recording audio in uploads/ is patient data and is not served over HTTP (no screen uses it).
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(recordings.router, prefix="/api/recordings", tags=["recordings"])

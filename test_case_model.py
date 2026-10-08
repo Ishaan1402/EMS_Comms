@@ -318,12 +318,24 @@ class TestAssessments:
         output(summary="   "),
         output(extra="field"),
     ])
-    def test_unreadable_answers_need_review_without_a_category(self, monkeypatch, result):
+    def test_unreadable_answers_are_retryable_failures(self, monkeypatch, result):
         use_scorer(monkeypatch, result)
         after = get_case(start_case()["id"])
-        assert after["preparation_category"] is None
-        assert after["current_assessment"]["status"] == "needs_review"
-        assert after["processing"]["reasons"] == [case_assessment.UNREADABLE_REASON]
+        assert after["preparation_category"] is None and after["current_assessment"] is None
+        assert after["processing"]["reasons"] == [f"Assessment failed: {case_assessment.UNREADABLE_ERROR}"]
+        assert after["processing"]["assessment"]["can_retry"] is True
+
+    def test_unreadable_answer_keeps_the_last_usable_assessment(self, monkeypatch):
+        use_scorer(monkeypatch, SCORED, {"bad": "output"}, SCORED)
+        case = start_case()
+        add_update(case["id"], kind="note", body="New finding")
+        after = get_case(case["id"])
+        assert after["preparation_category"] == "Prepare now"
+        assert after["current_assessment"]["based_on_version"] == 1 and after["assessment_is_outdated"] is True
+        assert after["processing"]["status"] == "failed"
+        assert case["id"] in case_assessment.unassessed_open_cases()
+        assert client.post(f"/api/cases/{case['id']}/assessments/retry", headers=auth(DOCTOR)).status_code == 202
+        assert get_case(case["id"])["current_assessment"]["based_on_version"] == 2
 
     def test_unsure_is_stored_as_cannot_assess_and_needs_review(self, monkeypatch):
         use_scorer(monkeypatch, output(category="Unsure"))
@@ -385,7 +397,8 @@ class TestAssessments:
         after = get_case(case["id"])
         assert after["info_version"] == 2
         assert after["current_assessment"]["based_on_version"] == 2
-        assert calls[-1]["input"]["current_transcript"].endswith("SpO2 dropping to 86 on room air")
+        assert calls[-1]["input"]["current_transcript"] == (
+            "Typed by the crew: 67F short of breath\nSpO2 dropping to 86 on room air")  # opening summary first
         segment = client.get(f"/api/cases/{case['id']}/segments", headers=auth(DOCTOR)).json()[0]
         assert segment["info_version"] == 2
 
@@ -465,6 +478,143 @@ class TestModelInput:
     def test_prompt_is_the_evaluation_prompt(self):
         assert case_assessment.PROMPT.startswith("You organize fictional EMS reports")
         assert case_assessment.PROMPT_VERSION == "awareness_v2"
+
+
+class TestAuditFixes:
+    """Findings from the PR #5 review."""
+
+    def test_speech_keeps_its_spoken_order_when_transcription_finishes_out_of_order(self, monkeypatch):
+        calls = use_scorer(monkeypatch, SCORED)
+        case = start_case(patient_info=None)
+        now = database.utc_now_iso()
+        for seq in (0, 1):
+            run("""INSERT INTO transcript_segments (case_id, seq, client_id, recorded_at, audio_file_path, status,
+                       created_at, updated_at) VALUES (?, ?, ?, ?, 'x', 'pending', ?, ?)""",
+                (case["id"], seq, f"c{seq}", f"2099-01-01T00:00:0{seq * 8}.000Z", now, now))
+        segment_ids = [r["id"] for r in query("SELECT id FROM transcript_segments WHERE case_id = ? ORDER BY seq",
+                                              (case["id"],))]
+        texts = {0: "Heart rate 126, BP 100", 1: "over 64, saturation 89 percent."}
+
+        async def scenario():
+            release = asyncio.Event()
+
+            async def transcription(segment):
+                if segment["seq"] == 0:
+                    await release.wait()
+                return texts[segment["seq"]], None
+            monkeypatch.setattr(cases, "run_transcription", transcription)
+            first = asyncio.create_task(cases.transcribe_segment(segment_ids[0]))
+            await cases.transcribe_segment(segment_ids[1])  # seq 1 finishes first
+            release.set()
+            await first
+
+        asyncio.run(scenario())
+        versions = [r["info_version"] for r in query(
+            "SELECT info_version FROM transcript_segments WHERE case_id = ? ORDER BY seq", (case["id"],))]
+        assert versions == [3, 2]
+        assert calls[-1]["input"]["current_transcript"] == "Heart rate 126, BP 100 over 64, saturation 89 percent."
+
+    def test_acknowledging_an_earlier_version_triggers_reassessment_against_it(self, monkeypatch):
+        calls = use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        add_update(case["id"], kind="note", body="SpO2 86%")  # v2, assessed with no acknowledgment
+        assert get_case(case["id"])["current_assessment"]["baseline_version"] is None
+        client.post(f"/api/cases/{case['id']}/acknowledge", json={"info_version": 1}, headers=auth(DOCTOR))
+        after = get_case(case["id"])
+        assert after["current_assessment"]["baseline_version"] == 1
+        assert calls[-1]["input"]["prior_information"] == "Typed by the crew: 67F short of breath"
+        assert after["processing"]["status"] == "completed"
+
+    def test_acknowledging_the_current_version_does_not_reassess(self, monkeypatch):
+        calls = use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        before = len(calls)
+        client.post(f"/api/cases/{case['id']}/acknowledge", headers=auth(DOCTOR))
+        assert len(calls) == before
+
+    def test_text_with_unknown_version_counts_as_not_yet_seen(self, monkeypatch):
+        calls = use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        client.post(f"/api/cases/{case['id']}/acknowledge", headers=auth(DOCTOR))
+        now = database.utc_now_iso()
+        run("""INSERT INTO transcript_segments (case_id, seq, client_id, recorded_at, audio_file_path, status, text,
+                   created_at, updated_at) VALUES (?, 0, 'old', ?, 'x', 'completed', 'SpO2 dropped to 80%', ?, ?)""",
+            (case["id"], now, now, now))  # transcribed before versions were recorded
+        add_update(case["id"], kind="note", body="CPAP started")
+        model_input = calls[-1]["input"]
+        assert "SpO2 dropped to 80%" in model_input["current_transcript"]
+        assert "SpO2 dropped to 80%" not in model_input["prior_information"]
+
+    def test_upgrade_retires_old_format_assessments_for_reassessment(self, tmp_path, monkeypatch):
+        old_db = tmp_path / "old.db"
+        conn = sqlite3.connect(old_db)
+        conn.executescript("""
+            CREATE TABLE risk_assessments (id INTEGER PRIMARY KEY AUTOINCREMENT, case_id INTEGER NOT NULL,
+                based_on_version INTEGER NOT NULL, status TEXT NOT NULL, risk_score INTEGER, priority_level INTEGER,
+                summary TEXT, review_reason TEXT, error TEXT, scorer_version TEXT NOT NULL, started_at TEXT NOT NULL,
+                completed_at TEXT, updated_at TEXT NOT NULL);
+            INSERT INTO risk_assessments (case_id, based_on_version, status, risk_score, priority_level, summary,
+                scorer_version, started_at, updated_at) VALUES (1, 1, 'completed', 8, 1, 'old', 'gpt-4', 'x', 'x');
+        """)
+        conn.commit()
+        conn.close()
+        previous = database.DB_PATH
+        database.DB_PATH = old_db
+        try:
+            init_database()
+            init_database()
+            row = query("SELECT status, error, summary FROM risk_assessments")[0]
+        finally:
+            database.DB_PATH = previous
+        assert row == {"status": "failed", "error": "assessed in an earlier format; re-assessing", "summary": "old"}
+
+    def test_old_recording_routes_are_limited_to_their_emt_and_notified_doctors(self):
+        emt_id = query("SELECT id FROM users WHERE username = ?", (EMT,))[0]["id"]
+        recording_id = run("INSERT INTO recordings (emt_id, patient_info, audio_file_path) VALUES (?, 'private', 'x')",
+                           (emt_id,))["id"]
+        assert client.get(f"/api/recordings/{recording_id}", headers=auth(EMT)).status_code == 200
+        assert client.get(f"/api/recordings/{recording_id}", headers=auth(OTHER_EMT)).status_code == 404
+        assert client.get(f"/api/doctors/recording/{recording_id}", headers=auth(DOCTOR)).status_code == 404
+        doctor_id = query("SELECT id FROM users WHERE username = ?", (DOCTOR,))[0]["id"]
+        run("INSERT INTO notifications (recording_id, doctor_id, notification_type) VALUES (?, ?, 'both')",
+            (recording_id, doctor_id))
+        assert client.get(f"/api/doctors/recording/{recording_id}", headers=auth(DOCTOR)).status_code == 200
+        assert client.get(f"/api/recordings/{recording_id}", headers=auth(OTHER_DOCTOR)).status_code == 404
+
+    def test_recording_audio_is_not_served(self):
+        audio = Path("uploads") / "audit-private-recording.wav"  # where the old flow saves audio
+        audio.parent.mkdir(exist_ok=True)
+        audio.write_bytes(b"private audio")
+        try:
+            response = client.get(f"/uploads/{audio.name}")
+            assert response.status_code == 404 and response.content != b"private audio"
+        finally:
+            audio.unlink()
+
+    def test_scoring_calls_finish_before_they_are_given_up_on(self):
+        attempts = recordings.OPENAI_MAX_RETRIES + 1
+        assert attempts * recordings.SCORING_REQUEST_TIMEOUT_SECONDS < case_assessment.SCORING_TIMEOUT_SECONDS
+        assert case_assessment.assessment_executor is not recordings.slow_executor
+
+    def test_server_timestamps_never_repeat(self):
+        stamps = [database.utc_now_iso() for _ in range(2000)]
+        assert stamps == sorted(stamps) and len(set(stamps)) == len(stamps)
+
+    def test_retry_during_the_settle_wait_keeps_its_force(self, monkeypatch):
+        use_scorer(monkeypatch, RuntimeError("outage"), SCORED)
+        case = start_case()
+        assert get_case(case["id"])["processing"]["status"] == "failed"
+
+        async def scenario():
+            runner = case_assessment.AssessmentRunner()
+            monkeypatch.setattr(case_assessment, "SETTLE_SECONDS", 0.05)
+            first = asyncio.create_task(runner.request(case["id"]))           # not forced
+            await asyncio.sleep(0.01)
+            await runner.request(case["id"], force=True)                       # a retry while settling
+            await first
+
+        asyncio.run(scenario())
+        assert get_case(case["id"])["processing"]["status"] == "completed"
 
 
 class TestScorerRequest:

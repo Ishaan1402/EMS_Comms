@@ -169,6 +169,14 @@ class TestThreePatientReplay:
         assert usage["input_tokens"] == 1000 * usage["assessments"]
         assert usage["cost_usd"] is None or usage["cost_usd"] > 0
 
+    def test_replay_stops_instead_of_acting_on_pending_transcripts(self, scenario, audio_dir, monkeypatch):
+        run, _ = run_replay(scenario, audio_dir)
+        monkeypatch.setattr(run, "_wait_for", lambda *args, **kwargs: False)
+        with pytest.raises(replay.ReplayError, match="not acknowledging"):
+            run.acknowledge_all({"minute": 12})
+        with pytest.raises(replay.ReplayError, match="still transcribing"):
+            run.dismiss_failed({"minute": 8, "patient": "SYN008"})
+
     def test_missing_audio_is_reported_before_anything_runs(self, scenario, tmp_path):
         with pytest.raises(replay.ReplayError, match="make_audio.py"):
             run_replay(scenario, tmp_path)
@@ -237,6 +245,17 @@ def test_cuts_land_in_pauses_not_mid_word():
         clip.writeframes(samples.tobytes())
     first, second = replay.split_wav(out.getvalue())
     assert 6000 <= replay.clip_duration_ms(first) <= 6250
+
+
+def test_high_bandwidth_wavs_are_cut_under_the_upload_limit():
+    out = io.BytesIO()
+    with wave.open(out, "wb") as clip:
+        clip.setnchannels(2)
+        clip.setsampwidth(4)
+        clip.setframerate(192000)
+        clip.writeframes(b"\0" * 192000 * 8 * 2 * 4)  # 8 s, ~12 MB
+    chunks = replay.split_wav(out.getvalue())
+    assert len(chunks) == 2 and all(len(c) <= replay.MAX_CLIP_BYTES + 44 for c in chunks)
 
 
 def test_long_reports_are_cut_into_even_recorder_sized_segments():

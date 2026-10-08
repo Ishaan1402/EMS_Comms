@@ -160,8 +160,8 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], onRetryAssessment }
           {assessment.meaningful_change && assessment.meaningful_change !== 'No earlier report' && (
             <p className="text-gray-700">
               <span className="font-medium">
-                {assessment.meaningful_change === 'Yes' ? 'Changed since you last acknowledged'
-                  : assessment.meaningful_change === 'No' ? 'No meaningful change since you last acknowledged'
+                {assessment.meaningful_change === 'Yes' ? 'Changed since the earlier acknowledged report'
+                  : assessment.meaningful_change === 'No' ? 'No meaningful change since the earlier acknowledged report'
                     : 'Change unclear'}:
               </span>{' '}
               {assessment.change_explanation}

@@ -1,6 +1,7 @@
 import sqlite3
 import os
-from datetime import datetime, timezone
+import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import bcrypt
 from contextlib import contextmanager
@@ -13,8 +14,23 @@ def to_iso(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+_clock_lock = threading.Lock()
+_last_now = datetime.min.replace(tzinfo=timezone.utc)
+
+
 def utc_now_iso() -> str:
-    return to_iso(datetime.now(timezone.utc))
+    """
+    Now, strictly later than any earlier call in this process. Clients keep the row with the
+    newest updated_at, so two changes in the same millisecond must not share a timestamp.
+    """
+    global _last_now
+    with _clock_lock:
+        current = datetime.now(timezone.utc)
+        now = current.replace(microsecond=current.microsecond // 1000 * 1000)  # stored to the millisecond
+        if now <= _last_now:
+            now = _last_now + timedelta(milliseconds=1)
+        _last_now = now
+        return to_iso(now)
 
 def get_db_connection():
     """Create and return a database connection."""
@@ -366,6 +382,7 @@ def table_columns(conn, table: str) -> set:
 def migrate_existing_tables(conn):
     """Bring tables created by an earlier version of the schema up to date. No-op on a new database."""
     case_columns = table_columns(conn, "cases")
+    added = set()
     for table, columns in ADDED_COLUMNS.items():
         existing = table_columns(conn, table)
         if not existing:
@@ -373,6 +390,14 @@ def migrate_existing_tables(conn):
         for name, definition in columns:
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+                added.add((table, name))
+    if ("risk_assessments", "preparation_category") in added:
+        # Assessments in the earlier risk-score format can't serve as the current assessment.
+        # Failing them keeps them on record and lets startup recovery re-assess the case.
+        conn.execute(
+            """UPDATE risk_assessments SET status = 'failed', error = 'assessed in an earlier format; re-assessing'
+               WHERE status IN ('completed', 'needs_review')"""
+        )
     if case_columns and "info_version" not in case_columns:
         # Older cases already hold information; give them a version so acknowledgments can refer to it.
         conn.execute("UPDATE cases SET info_version = 1, last_update_at = updated_at")

@@ -50,7 +50,10 @@ CASE_SELECT = """
            (SELECT MAX(s.recorded_at) FROM transcript_segments s WHERE s.case_id = c.id) AS last_segment_at,
            (SELECT COUNT(*) FROM transcript_segments s WHERE s.case_id = c.id AND s.status = 'pending') AS pending_segment_count,
            (SELECT COUNT(*) FROM transcript_segments s
-            WHERE s.case_id = c.id AND s.status = 'failed' AND s.dismissed_at IS NULL) AS failed_segment_count
+            WHERE s.case_id = c.id AND s.status = 'failed' AND s.dismissed_at IS NULL) AS failed_segment_count,
+           -- What the AI compares against: the latest acknowledgment of earlier information.
+           (SELECT MAX(a.info_version) FROM case_acknowledgments a
+            WHERE a.case_id = c.id AND a.info_version < c.info_version) AS baseline_version
     FROM cases c
     JOIN users u ON c.emt_id = u.id
     LEFT JOIN hospitals h ON h.id = c.destination_hospital_id
@@ -151,8 +154,11 @@ def processing_summary(case: dict, latest: Optional[dict]) -> dict:
     else:
         transcription = "completed" if case["segment_count"] else "none"
 
-    # New information that no attempt has covered yet is waiting to be assessed.
-    if latest is None or (latest["based_on_version"] < case["info_version"] and latest["status"] != "processing"):
+    # Information no attempt has covered yet, or an acknowledgment that changed what the latest
+    # attempt compared against, is waiting to be assessed.
+    if latest is None or (latest["status"] != "processing" and (
+            latest["based_on_version"] < case["info_version"]
+            or latest["baseline_version"] != case["baseline_version"])):
         assessment = "pending"
     else:
         assessment = latest["status"]
@@ -475,7 +481,12 @@ async def mark_arrived(case_id: str, current_user: dict = Depends(require_role([
 
 
 @router.post("/{case_id}/acknowledge")
-async def acknowledge_case(case_id: str, request: Request, current_user: dict = Depends(require_role(["doctor"]))):
+async def acknowledge_case(
+    case_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(require_role(["doctor"])),
+):
     """
     A hospital user confirms they have seen the case. Body (optional): {"info_version": n}, the
     version their screen showed, so information that arrived after they looked stays unacknowledged.
@@ -496,6 +507,9 @@ async def acknowledge_case(case_id: str, request: Request, current_user: dict = 
     )
     case = touch_case(case["id"])
     publish_case("case.updated", case)
+    if version < case["info_version"]:
+        # The AI compares newer information against this acknowledgment now; re-assess.
+        background_tasks.add_task(case_assessment.runner.request, case["id"])
     return case
 
 

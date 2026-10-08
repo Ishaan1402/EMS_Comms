@@ -89,8 +89,8 @@ The case is the main object. One transport is one case, and everything about the
   - `processing`: `pending` | `processing` | `completed` | `failed` | `needs_review`, with `needs_review: true` and plain-language `reasons` whenever a person should look: a failed transcription, a failed assessment, or an assessment that couldn't decide.
 - **Failed audio**: a segment that can't be transcribed flags the case until it's retried (`POST /api/cases/:id/segments/:segmentId/retry`) or marked handled (`.../dismiss`, EMT or hospital user), for example after the crew re-sent it as text. A dismissed failure stays on record with who dismissed it and when.
 - **AI assessments** (`case_assessment.py`): the model gets the evaluation harness's prompt (`evals/prompts/awareness_v2.txt`) and input fields, and must answer in the evaluation contract's five fields: `summary`, `meaningful_change`, `change_explanation`, `missing_information` and `preparation_category` (Prepare now / Can wait / Routine / Cannot assess). So what `evals/` measures is what the app runs.
-  - "Earlier" information is what the hospital had acknowledged, so `meaningful_change` answers "what changed since you last looked". Before any acknowledgment everything is current, as in a first report.
-  - `Cannot assess` (the prompt's "Unsure") and unreadable answers mark the case Needs Review. Nothing is filled with a default.
+  - "Earlier" information is what the hospital had acknowledged, so `meaningful_change` answers "what changed since the earlier acknowledged report". Before any acknowledgment everything is current, as in a first report. Acknowledging an earlier version while newer information exists re-assesses the case against it. Information is put in the order it was spoken or typed; text with no recorded version (from before upgrading) counts as not yet seen.
+  - `Cannot assess` (the prompt's "Unsure") marks the case Needs Review. An answer that doesn't follow the format is a retryable failure, and the last usable assessment stays current. Nothing is filled with a default.
   - Every attempt is a row in `risk_assessments` with the `info_version` it read, its `baseline_version`, `input_tokens`, `output_tokens`, `latency_ms` and a list-price `cost_usd`. The case's `current_assessment` is the usable one with the highest version, so a slow result for older information never replaces a newer one. A failure keeps the previous assessment (`assessment_is_outdated: true`) and can be retried (`POST /api/cases/:id/assessments/retry`). `GET /api/cases/:id/assessments` lists every attempt.
   - Assessment waits 2 s first, so a report arriving as several segments is assessed once, whole; information arriving during a run is assessed once more afterwards. On startup, open cases whose current information has no usable assessment are re-assessed.
   - Models: `OPENAI_SCORING_MODEL` (default `gpt-6-luna`; `gpt-4` shuts down 2026-10-23) and `OPENAI_TRANSCRIPTION_MODEL` (default `gpt-transcribe`). The older single-recording flow still uses its own prompt and 0–10 risk scale.
@@ -223,7 +223,7 @@ SENDGRID_FROM_EMAIL=noreply@shealthcare.com
 ### Recordings
 - `POST /api/recordings/upload` - Upload audio recording
 - `GET /api/recordings/my-recordings` - Get EMT's recordings
-- `GET /api/recordings/:id` - Get specific recording
+- `GET /api/recordings/:id` - Get specific recording (its EMT and the doctors notified about it; others get 404). Recording audio is not served over HTTP.
 
 ### Doctors
 - `GET /api/doctors/notifications` - Get doctor notifications
