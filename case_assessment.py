@@ -77,9 +77,7 @@ def read_inputs(case_id: int) -> Optional[dict]:
     with get_db() as conn:
         conn.execute("BEGIN")
         case = conn.execute(
-            """SELECT c.id, c.patient_info, c.info_version, c.ems_unit, h.name AS destination
-               FROM cases c LEFT JOIN hospitals h ON h.id = c.destination_hospital_id WHERE c.id = ?""",
-            (case_id,),
+            "SELECT id, patient_info, info_version FROM cases WHERE id = ?", (case_id,)
         ).fetchone()
         if case is None:
             return None
