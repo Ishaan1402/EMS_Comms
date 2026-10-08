@@ -10,7 +10,9 @@ import sqlite3
 from database import query, get_db
 from middleware.auth import get_current_user, APIError
 
+# Mounted at /api/recordings (threads of the older single-recording flow) and /api/cases.
 router = APIRouter()
+case_router = APIRouter()
 
 MAX_MESSAGE_LENGTH = 2000
 MAX_CLIENT_ID_LENGTH = 64
@@ -20,17 +22,30 @@ HISTORY_LIMIT = 500
 STREAM_POLL_SECONDS = 1.0
 STREAM_HEARTBEAT_SECONDS = 15.0
 
-MESSAGE_COLUMNS = """m.id, m.recording_id, m.sender_id, m.sender_role, m.body, m.client_id, m.created_at,
+MESSAGE_COLUMNS = """m.id, m.recording_id, m.case_id, m.sender_id, m.sender_role, m.body, m.client_id, m.created_at,
                      u.first_name AS sender_first_name, u.last_name AS sender_last_name"""
 
 _NON_NEGATIVE_INT = re.compile(r"[0-9]+")
 
-# recording_id -> events of the streams open on that case; set when a message is posted.
+
+class Thread:
+    """A message thread: a case, or a recording from the older single-recording flow."""
+
+    def __init__(self, column: str, thread_id: int):
+        self.column = column  # "case_id" or "recording_id"; never user input
+        self.id = thread_id
+
+    @property
+    def key(self):
+        return (self.column, self.id)
+
+
+# Thread.key -> events of the streams open on that thread; set when a message is posted.
 _listeners = defaultdict(set)
 
 
-def _wake_listeners(recording_id: int):
-    for event in _listeners.get(recording_id, ()):
+def _wake_listeners(thread: Thread):
+    for event in _listeners.get(thread.key, ()):
         event.set()
 
 
@@ -50,11 +65,11 @@ def _parse_after_id(value: Optional[str]) -> int:
     return after_id
 
 
-def _parse_recording_id(id: str) -> int:
+def _parse_id(id: str, not_found: str) -> int:
     try:
         return int(id)
     except ValueError:
-        raise APIError(404, "Recording not found")
+        raise APIError(404, not_found)
 
 
 def authorize_case(user: dict, recording_id: int) -> None:
@@ -80,19 +95,48 @@ def authorize_case(user: dict, recording_id: int) -> None:
         raise APIError(404, "Recording not found")
 
 
-def fetch_messages(recording_id: int, after_id: int = 0, limit: int = HISTORY_LIMIT) -> list:
+def authorize_live_case(user: dict, case_id: int) -> None:
     """
-    Messages for one case, oldest first. id is the order: it only ever increases.
+    Same visibility as the case itself: the EMT who owns it and hospital users.
+    TODO(KAN-15): limit hospital users to cases routed to their hospital.
+    """
+    role = user.get("role")
+    if role == "emt":
+        rows = query('SELECT 1 FROM cases WHERE id = ? AND emt_id = ?', (case_id, user.get("id")))
+    elif role == "doctor":
+        rows = query('SELECT 1 FROM cases WHERE id = ?', (case_id,))
+    else:
+        rows = []
+
+    if not rows:
+        raise APIError(404, "Case not found")
+
+
+def _recording_thread(id: str, user: dict) -> Thread:
+    recording_id = _parse_id(id, "Recording not found")
+    authorize_case(user, recording_id)
+    return Thread("recording_id", recording_id)
+
+
+def _case_thread(id: str, user: dict) -> Thread:
+    case_id = _parse_id(id, "Case not found")
+    authorize_live_case(user, case_id)
+    return Thread("case_id", case_id)
+
+
+def fetch_messages(thread: Thread, after_id: int = 0, limit: int = HISTORY_LIMIT) -> list:
+    """
+    Messages for one thread, oldest first. id is the order: it only ever increases.
     Past `limit`, callers page on with after_id (the stream does this on its own).
     """
     return query(
         f"""SELECT {MESSAGE_COLUMNS}
             FROM messages m
             JOIN users u ON m.sender_id = u.id
-            WHERE m.recording_id = ? AND m.id > ?
+            WHERE m.{thread.column} = ? AND m.id > ?
             ORDER BY m.id ASC
             LIMIT ?""",
-        (recording_id, after_id, limit)
+        (thread.id, after_id, limit)
     )
 
 
@@ -106,22 +150,12 @@ def _fetch_message(message_id: int) -> dict:
     )[0]
 
 
-@router.get("/{id}/messages")
-async def get_messages(
-    id: str,
-    request: Request,
-    after_id: Optional[str] = Query(None)
-):
-    """Message history for a case. after_id returns only newer messages (used to catch up)."""
-    current_user = get_current_user(request)
-    recording_id = _parse_recording_id(id)
-    authorize_case(current_user, recording_id)
+def _history(thread: Thread, after_id: Optional[str]):
     after_id = _parse_after_id(after_id)
-
     try:
         return {
-            "recording_id": recording_id,
-            "messages": fetch_messages(recording_id, after_id)
+            thread.column: thread.id,
+            "messages": fetch_messages(thread, after_id)
         }
     except Exception as error:
         print(f"Get messages error: {error}")
@@ -131,16 +165,11 @@ async def get_messages(
         )
 
 
-@router.post("/{id}/messages", status_code=201)
-async def post_message(id: str, request: Request):
+async def _post(thread: Thread, request: Request, current_user: dict):
     """
-    Send a message on a case. The case comes only from the URL; a recording_id
-    in the body is ignored. client_id makes retries idempotent.
+    The thread comes only from the URL; ids in the body are ignored.
+    client_id makes retries idempotent.
     """
-    current_user = get_current_user(request)
-    recording_id = _parse_recording_id(id)
-    authorize_case(current_user, recording_id)
-
     try:
         body = json.loads(await request.body() or b"{}")
     except json.JSONDecodeError:
@@ -167,17 +196,17 @@ async def post_message(id: str, request: Request):
             existing = None
             if client_id is not None:
                 existing = conn.execute(
-                    'SELECT id, recording_id FROM messages WHERE sender_id = ? AND client_id = ?',
+                    'SELECT id, recording_id, case_id FROM messages WHERE sender_id = ? AND client_id = ?',
                     (current_user["id"], client_id)
                 ).fetchone()
-            if existing and existing["recording_id"] != recording_id:
+            if existing and existing[thread.column] != thread.id:
                 raise APIError(409, "client_id already used for another case")
 
             created = existing is None
             if created:
                 message_id = conn.execute(
-                    'INSERT INTO messages (recording_id, sender_id, sender_role, body, client_id) VALUES (?, ?, ?, ?, ?)',
-                    (recording_id, current_user["id"], current_user["role"], text, client_id)
+                    f'INSERT INTO messages ({thread.column}, sender_id, sender_role, body, client_id) VALUES (?, ?, ?, ?, ?)',
+                    (thread.id, current_user["id"], current_user["role"], text, client_id)
                 ).lastrowid
             else:
                 message_id = existing["id"]
@@ -196,7 +225,7 @@ async def post_message(id: str, request: Request):
         )
 
     if created:
-        _wake_listeners(recording_id)
+        _wake_listeners(thread)
         return message
     return JSONResponse(status_code=200, content=message)
 
@@ -205,19 +234,11 @@ def _sse_event(message: dict) -> str:
     return f"id: {message['id']}\nevent: message\ndata: {json.dumps(message)}\n\n"
 
 
-@router.get("/{id}/messages/stream")
-async def stream_messages(
-    id: str,
-    request: Request,
-    after_id: Optional[str] = Query(None)
-):
+def _stream(thread: Thread, request: Request, after_id: Optional[str]):
     """
-    Server-sent events: every message on the case newer than after_id (or the
+    Server-sent events: every message on the thread newer than after_id (or the
     Last-Event-ID header), then new ones as they are posted.
     """
-    current_user = get_current_user(request)
-    recording_id = _parse_recording_id(id)
-    authorize_case(current_user, recording_id)
     after_id = _parse_after_id(after_id)
 
     last_event_id = _parse_cursor(request.headers.get("last-event-id"))
@@ -226,7 +247,7 @@ async def stream_messages(
 
     async def events():
         wake = asyncio.Event()
-        listeners = _listeners[recording_id]
+        listeners = _listeners[thread.key]
         listeners.add(wake)
         last_id = after_id
         idle = 0.0
@@ -234,7 +255,7 @@ async def stream_messages(
             yield "retry: 3000\n\n"
             while not await request.is_disconnected():
                 wake.clear()
-                rows = await run_in_threadpool(fetch_messages, recording_id, last_id)
+                rows = await run_in_threadpool(fetch_messages, thread, last_id)
                 for row in rows:
                     last_id = row["id"]
                     yield _sse_event(row)
@@ -252,8 +273,8 @@ async def stream_messages(
                         yield ": ping\n\n"
         finally:
             listeners.discard(wake)
-            if not listeners and _listeners.get(recording_id) is listeners:
-                del _listeners[recording_id]
+            if not listeners and _listeners.get(thread.key) is listeners:
+                del _listeners[thread.key]
 
     return StreamingResponse(
         events(),
@@ -264,3 +285,41 @@ async def stream_messages(
             "X-Accel-Buffering": "no",
         }
     )
+
+
+@router.get("/{id}/messages")
+async def get_messages(id: str, request: Request, after_id: Optional[str] = Query(None)):
+    """Message history for a recording. after_id returns only newer messages (used to catch up)."""
+    thread = _recording_thread(id, get_current_user(request))
+    return _history(thread, after_id)
+
+
+@router.post("/{id}/messages", status_code=201)
+async def post_message(id: str, request: Request):
+    current_user = get_current_user(request)
+    return await _post(_recording_thread(id, current_user), request, current_user)
+
+
+@router.get("/{id}/messages/stream")
+async def stream_messages(id: str, request: Request, after_id: Optional[str] = Query(None)):
+    thread = _recording_thread(id, get_current_user(request))
+    return _stream(thread, request, after_id)
+
+
+@case_router.get("/{id}/messages")
+async def get_case_messages(id: str, request: Request, after_id: Optional[str] = Query(None)):
+    """Message history for a case. after_id returns only newer messages (used to catch up)."""
+    thread = _case_thread(id, get_current_user(request))
+    return _history(thread, after_id)
+
+
+@case_router.post("/{id}/messages", status_code=201)
+async def post_case_message(id: str, request: Request):
+    current_user = get_current_user(request)
+    return await _post(_case_thread(id, current_user), request, current_user)
+
+
+@case_router.get("/{id}/messages/stream")
+async def stream_case_messages(id: str, request: Request, after_id: Optional[str] = Query(None)):
+    thread = _case_thread(id, get_current_user(request))
+    return _stream(thread, request, after_id)

@@ -42,7 +42,7 @@ If any of these keys are missing, the server still starts and logs a warning. On
 
 The SQLite schema is created in `asclepius.db` when the server starts. Demo users (password `password123`) are created only when `SEED_DEMO_USERS=1` is set, or when you run `python3 database.py --seed`.
 
-Tests use a temporary database and need no API keys: `pip install -r requirements.txt pytest && pytest test_parity.py test_messages.py test_live_transcription.py`.
+Tests use a temporary database and need no API keys: `pip install -r requirements.txt pytest && pytest test_parity.py test_messages.py test_live_transcription.py test_case_model.py`.
 
 ### Live case transcription
 
@@ -60,20 +60,35 @@ EMTs can start a **live case** from the EMT dashboard. The browser records the c
 
 | Endpoint | Who | Purpose |
 |---|---|---|
-| `POST /api/cases` | EMT | Start a live case (`{"patient_info": "..."}` optional; 409 if one is already open) |
-| `GET /api/cases[?status=active\|closed]` | EMT (own) / Doctor (all) | List cases |
+| `POST /api/cases` | EMT | Start a case (see [Cases](#cases-one-per-patient-transport); 409 if one is already open) |
+| `GET /api/cases[?status=active\|closed][&hospital_id=N]` | EMT (own) / Doctor (all) | List cases |
 | `GET /api/cases/:id` | EMT (own) / Doctor | Case details |
 | `POST /api/cases/:id/close` | EMT | End the case |
 | `GET /api/cases/:id/segments` | EMT (own) / Doctor | Transcript history, ordered by `seq` |
 | `POST /api/cases/:id/segments` | EMT | Upload a segment (multipart: `audio`, `seq`, `client_id`, `recorded_at`, `sent_at`, `duration_ms`) |
 | `POST /api/cases/:id/segments/:segmentId/retry` | EMT | Re-run a failed transcription |
-| `GET /api/cases/events` | EMT / Doctor | SSE stream: `ready`, `case.opened`, `case.updated`, `segment.created`, `segment.updated` |
+| `GET /api/cases/events` | EMT / Doctor | SSE stream: `ready`, `case.opened`, `case.updated`, `segment.created`, `segment.updated`, `update.created` |
 
 Live cases are implemented only in the Python backend.
 
+### Cases: one per patient transport
+
+The case is the main object. One transport is one case, and everything about the patient belongs to it: transcript segments, typed updates, vital signs, risk assessments, messages and hospital acknowledgments. Nothing is overwritten, so history such as SpO2 96 → 91 → 86 is kept.
+
+- **Creating**: `POST /api/cases` takes `patient_info`, `destination_hospital_id` (from `GET /api/hospitals`), `ems_unit`, and `eta_minutes`. All are optional for the API; the EMT form requires a destination. On an empty database three demo hospitals are created.
+- **Updates**: `POST /api/cases/:id/updates` (EMT, open case only) adds `{"kind": "note"|"correction", "body"}`, `{"kind": "vitals", "vitals": {"spo2": 91, "hr": 110}, "body"?}` or `{"kind": "eta", "eta_minutes"}`. A correction is a new row; the original stays. An optional `client_id` makes retries idempotent. `GET /api/cases/:id/updates` and `GET /api/cases/:id/vitals` return the history.
+- **`info_version`**: goes up by one whenever new patient information arrives (creation, a note, vitals, a correction, or a transcribed segment with text). ETA changes are logistics and don't change it.
+- **Two kinds of status, kept apart** (KAN-11):
+  - `operational_status`: `inbound` → `acknowledged` (a hospital user has seen the latest `info_version`) → `arrived` → `closed`. `POST /api/cases/:id/acknowledge` (doctor, optional `{"info_version": n}` for the version their screen showed) and `POST /api/cases/:id/arrive` (EMT or doctor). New information makes an acknowledged case `inbound` again.
+  - `processing`: `pending` | `processing` | `completed` | `failed` | `needs_review`, with `needs_review: true` and plain-language `reasons` whenever a person should look (a failed transcription, a failed assessment, or an assessment that couldn't produce a score).
+- **Risk assessments** (`case_assessment.py`): every attempt is a row in `risk_assessments` with the `info_version` it read. The case's `current_assessment` is the usable one with the highest version, so a slow result for older information never replaces a newer one. `risk_score` and `priority_level` are `null` unless the scorer returned valid values; they are never filled with defaults. A failure keeps the previous assessment (`assessment_is_outdated: true`) and can be retried with `POST /api/cases/:id/assessments/retry`. `GET /api/cases/:id/assessments` lists every attempt. While one assessment runs, newer information is queued and assessed once, at least 15s after the previous run, so a live case doesn't call the model every 8 seconds. The scorer currently reuses the recordings GPT-4 prompt and its scales until KAN-14 defines risk and priority; `preparation_category: "Cannot assess"` maps to Needs Review.
+- **Messages**: each case has its own thread at `/api/cases/:id/messages` (same API as below).
+
+Existing databases are migrated on startup: the new `cases` columns are added, and `messages` is rebuilt so a message can belong to a case or a recording.
+
 ### Case messaging (EMT ↔ hospital team)
 
-Each recording is a case with its own message thread. The EMT who recorded it and every doctor notified about it can read and send messages; anyone else gets a 404. Messages live in the `messages` table (SQLite in WAL mode), ordered by id.
+Each case has a message thread at `/api/cases/:id/messages`: the EMT who owns the case and hospital users can use it. Recordings from the older single-recording flow keep their own threads at `/api/recordings/:id/messages`, for the EMT who recorded it and every doctor notified about it. Anyone else gets a 404. Messages live in the `messages` table (SQLite in WAL mode), ordered by id; each belongs to exactly one case or recording.
 
 - `GET /api/recordings/:id/messages?after_id=N` returns the history, oldest first
 - `POST /api/recordings/:id/messages` with `{ "body": "...", "client_id": "optional-uuid" }` sends a message. The case comes only from the URL. A retry with the same `client_id` returns the original message instead of a duplicate.

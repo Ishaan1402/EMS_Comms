@@ -8,6 +8,7 @@ import asyncio
 import concurrent.futures
 from openai import OpenAI
 from database import query, run, get_db
+import case_assessment
 from middleware.auth import get_current_user, require_role, APIError
 
 router = APIRouter()
@@ -71,8 +72,9 @@ async def upload_recording(
         
         emt_id = current_user["id"]
         
+        # No score until one is produced: the column defaults (risk 5, priority 3) look like a real assessment.
         result = run(
-            'INSERT INTO recordings (emt_id, patient_info, audio_file_path) VALUES (?, ?, ?)',
+            'INSERT INTO recordings (emt_id, patient_info, audio_file_path, risk_score, priority_level) VALUES (?, ?, ?, NULL, NULL)',
             (emt_id, patient_info, str(audio_file_path))
         )
         
@@ -157,7 +159,7 @@ async def get_recording(id: str, request: Request):
 async def process_recording(recording_id: int, audio_file_path: str):
     """
     Process recording (transcription + LLM analysis).
-    Defaults for empty analysis fields are applied at storage time.
+    Defaults for empty text fields are applied at storage time; scores are never defaulted.
     """
     try:
         run(
@@ -182,8 +184,10 @@ async def process_recording(recording_id: int, audio_file_path: str):
         if not llm_summary_value:
             llm_summary_value = json.dumps(analysis, separators=(',', ':'))
         
-        risk_score_value = analysis.get("risk_score") or 5
-        priority_level_value = analysis.get("priority_level") or 3
+        # A missing or invalid score stays NULL (shown as "unavailable"), never a normal-looking default.
+        scored = case_assessment.interpret(analysis)
+        risk_score_value = scored.get("risk_score")
+        priority_level_value = scored.get("priority_level")
         chief_complaint_value = analysis.get("chief_complaint") or "Not specified"
         vital_signs_value = analysis.get("vital_signs") or "Not recorded"
         symptoms_value = analysis.get("symptoms") or "Not specified"

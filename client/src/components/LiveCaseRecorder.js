@@ -1,12 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Radio, Square, Play } from 'lucide-react';
+import { Radio, Square, Play, FilePlus } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import useCaseEvents from '../hooks/useCaseEvents';
 import useSegmentRecorder, { getMicrophone } from '../hooks/useSegmentRecorder';
 import useSegmentUploads from '../hooks/useSegmentUploads';
 import { mergeNewer, upsertNewer } from '../utils/liveRows';
+import useCaseDetails from '../hooks/useCaseDetails';
 import LiveTranscript from './LiveTranscript';
+import CaseOverview from './CaseOverview';
+import CaseUpdateForm from './CaseUpdateForm';
+import CaseChat from './CaseChat';
 
 const SEGMENT_MS = 8000;
 
@@ -25,6 +29,10 @@ const nextSeqAfter = (segments) => segments.reduce((max, s) => Math.max(max, s.s
 
 const LiveCaseRecorder = () => {
   const [patientInfo, setPatientInfo] = useState('');
+  const [hospitals, setHospitals] = useState([]);
+  const [destinationId, setDestinationId] = useState('');
+  const [emsUnit, setEmsUnit] = useState('');
+  const [etaMinutes, setEtaMinutes] = useState('');
   const [activeCase, setActiveCase] = useState(null);
   const [segments, setSegments] = useState([]);
   const [openCaseCheck, setOpenCaseCheck] = useState('checking'); // checking | done | failed
@@ -79,6 +87,15 @@ const LiveCaseRecorder = () => {
     loadOpenCase();
   }, [loadOpenCase]);
 
+  useEffect(() => {
+    axios.get('/api/hospitals')
+      .then((response) => setHospitals(response.data))
+      .catch((error) => console.error('Error loading hospitals:', error));
+  }, []);
+
+  const details = useCaseDetails(activeCase?.id);
+  const addCaseUpdate = details.addUpdate;
+
   const handleEvent = useCallback((type, data) => {
     const current = caseRef.current;
     if (!current) return;
@@ -88,36 +105,52 @@ const LiveCaseRecorder = () => {
         .catch((error) => console.error('Error re-syncing transcript:', error));
     } else if ((type === 'segment.created' || type === 'segment.updated') && data.case_id === current.id) {
       addSegment(data.segment);
+    } else if (type === 'case.updated' && data.case.id === current.id) {
+      setActiveCase((c) => (c && c.updated_at > data.case.updated_at ? c : data.case));
+    } else if (type === 'update.created') {
+      addCaseUpdate(data.update);
     }
-  }, [addSegment]);
+  }, [addSegment, addCaseUpdate]);
 
   const connection = useCaseEvents(handleEvent, !!activeCase);
 
-  const startLiveCase = () => runBusy('Starting live case…', async () => {
-    let stream;
-    try {
-      stream = await getMicrophone();
-    } catch (error) {
-      toast.error(microphoneErrorMessage(error));
+  // withAudio: open the microphone and start streaming; otherwise the case starts from typed information.
+  const startLiveCase = (withAudio) => runBusy('Starting case…', async () => {
+    if (!destinationId) {
+      toast.error('Choose the destination hospital');
       return;
     }
+    let stream = null;
+    if (withAudio) {
+      try {
+        stream = await getMicrophone();
+      } catch (error) {
+        toast.error(microphoneErrorMessage(error));
+        return;
+      }
+    }
     try {
-      const response = await axios.post('/api/cases', { patient_info: patientInfo.trim() || null });
+      const response = await axios.post('/api/cases', {
+        patient_info: patientInfo.trim() || null,
+        destination_hospital_id: Number(destinationId),
+        ems_unit: emsUnit.trim() || null,
+        eta_minutes: etaMinutes === '' ? null : Number(etaMinutes),
+      });
       caseRef.current = response.data;
       setActiveCase(response.data);
       setSegments([]);
       uploads.reset();
       nextSeqRef.current = 0;
-      recorder.start(stream);
-      toast.success(`Live case #${response.data.id} started — doctors can follow along`);
+      if (stream) recorder.start(stream);
+      toast.success(`Case #${response.data.id} started — the hospital can follow along`);
     } catch (error) {
-      stream.getTracks().forEach((track) => track.stop());
+      if (stream) stream.getTracks().forEach((track) => track.stop());
       if (error.response?.status === 409) {
         toast.error('You already have an open case — resume or end it first.');
         await loadOpenCase();
       } else {
         console.error('Error starting case:', error);
-        toast.error('Failed to start live case');
+        toast.error(error.response?.data?.error || 'Failed to start case');
       }
     }
   });
@@ -136,6 +169,7 @@ const LiveCaseRecorder = () => {
       setActiveCase(response.data);
       uploads.reset();
       setPatientInfo('');
+      setEtaMinutes('');
       toast.success(`Case #${response.data.id} closed`);
     } catch (error) {
       console.error('Error closing case:', error);
@@ -178,6 +212,22 @@ const LiveCaseRecorder = () => {
     }
   };
 
+  const retryAssessment = async () => {
+    try {
+      await axios.post(`/api/cases/${activeCase.id}/assessments/retry`);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Could not retry the assessment');
+    }
+  };
+
+  const markArrived = async () => {
+    try {
+      setActiveCase((await axios.post(`/api/cases/${activeCase.id}/arrive`)).data);
+    } catch (error) {
+      toast.error('Could not mark the patient as arrived');
+    }
+  };
+
   const isOpen = activeCase?.status === 'active';
   const transcriptItems = [
     ...segments,
@@ -188,7 +238,7 @@ const LiveCaseRecorder = () => {
     <div className="bg-white rounded-lg shadow-md p-6 mb-8">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-          <Radio className="h-5 w-5 text-red-600" /> Live Case — Stream Updates to Doctors
+          <Radio className="h-5 w-5 text-red-600" /> Patient Case — Keep the Hospital Updated
         </h2>
         {isOpen && (
           <span className={`text-xs font-medium ${connection === 'live' ? 'text-green-700' : 'text-orange-600'}`}>
@@ -199,21 +249,62 @@ const LiveCaseRecorder = () => {
 
       {!isOpen && (
         <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="text-sm text-gray-700">
+              Destination hospital
+              <select
+                value={destinationId}
+                onChange={(e) => setDestinationId(e.target.value)}
+                className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              >
+                <option value="">Choose…</option>
+                {hospitals.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+              </select>
+            </label>
+            <label className="text-sm text-gray-700">
+              EMS unit
+              <input
+                value={emsUnit}
+                onChange={(e) => setEmsUnit(e.target.value)}
+                maxLength={40}
+                placeholder="e.g. Medic 12"
+                className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </label>
+            <label className="text-sm text-gray-700">
+              ETA (minutes)
+              <input
+                type="number"
+                min="0"
+                value={etaMinutes}
+                onChange={(e) => setEtaMinutes(e.target.value)}
+                className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </label>
+          </div>
           <textarea
             value={patientInfo}
             onChange={(e) => setPatientInfo(e.target.value)}
-            placeholder="Patient summary (optional): age, sex, chief complaint, location…"
+            placeholder="Patient summary: age, sex, chief complaint, what you found…"
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
             rows="2"
           />
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <button
-              onClick={startLiveCase}
+              onClick={() => startLiveCase(true)}
               disabled={openCaseCheck !== 'done' || !!busyMessage}
               className="flex items-center space-x-2 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <Radio className="h-5 w-5" />
-              <span>{busyMessage || 'Start Live Case'}</span>
+              <span>{busyMessage || 'Start Case & Record'}</span>
+            </button>
+            <button
+              onClick={() => startLiveCase(false)}
+              disabled={openCaseCheck !== 'done' || !!busyMessage}
+              className="flex items-center space-x-2 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <FilePlus className="h-5 w-5" />
+              <span>Start Case Without Audio</span>
             </button>
             {openCaseCheck === 'checking' && <span className="text-sm text-gray-500">Checking for an open case…</span>}
             {openCaseCheck === 'failed' && (
@@ -252,7 +343,7 @@ const LiveCaseRecorder = () => {
                 className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
               >
                 <Play className="h-4 w-4" />
-                <span>Resume Recording</span>
+                <span>{segments.length || uploads.pending.length ? 'Resume Recording' : 'Start Recording'}</span>
               </button>
               <button
                 onClick={endCaseAnyway}
@@ -262,6 +353,23 @@ const LiveCaseRecorder = () => {
               </button>
             </>
           )}
+          {!activeCase.arrived_at && (
+            <button onClick={markArrived} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+              Mark Arrived
+            </button>
+          )}
+        </div>
+      )}
+
+      {activeCase && (
+        <div className="mt-4 space-y-4">
+          <CaseOverview
+            liveCase={activeCase}
+            updates={details.updates}
+            vitals={details.vitals}
+            onRetryAssessment={isOpen ? retryAssessment : undefined}
+          />
+          {isOpen && <CaseUpdateForm caseId={activeCase.id} onAdded={addCaseUpdate} />}
         </div>
       )}
 
@@ -278,6 +386,8 @@ const LiveCaseRecorder = () => {
           />
         </div>
       )}
+
+      {activeCase && <CaseChat caseId={activeCase.id} className="mt-6" />}
     </div>
   );
 };
