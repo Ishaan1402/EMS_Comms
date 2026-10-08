@@ -926,8 +926,8 @@ async def transcribe_segment(segment_id: int):
             )
         else:
             conn.execute(
-                "UPDATE transcript_segments SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
-                (error_message, now, segment_id),
+                "UPDATE transcript_segments SET status = 'failed', error = ?, failed_at = ?, updated_at = ? WHERE id = ?",
+                (error_message, now, now, segment_id),
             )
         # New transcript text is new patient information; in the same transaction, so the
         # version an assessment reads always matches the transcript it sees.
@@ -969,10 +969,12 @@ async def run_transcription(segment: dict):
 
 def fail_interrupted_segments() -> None:
     """Called at startup: transcriptions in flight when the server stopped will never finish on their own."""
+    now = utc_now_iso()
     result = run(
-        """UPDATE transcript_segments SET status = 'failed', error = 'interrupted by a server restart', updated_at = ?
+        """UPDATE transcript_segments SET status = 'failed', error = 'interrupted by a server restart',
+               failed_at = ?, updated_at = ?
            WHERE status = 'pending'""",
-        (utc_now_iso(),),
+        (now, now),
     )
     if result["changes"]:
         print(f"⚠️  Marked {result['changes']} interrupted transcript segment(s) as failed")

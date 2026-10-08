@@ -281,6 +281,7 @@ def init_database():
       info_version INTEGER,
       dismissed_at TEXT,
       dismissed_by INTEGER REFERENCES users (id),
+      failed_at TEXT,
       UNIQUE (case_id, seq),
       FOREIGN KEY (case_id) REFERENCES cases (id)
     );
@@ -360,6 +361,7 @@ ADDED_COLUMNS = {
         ("info_version", "INTEGER"),
         ("dismissed_at", "TEXT"),
         ("dismissed_by", "INTEGER REFERENCES users (id)"),
+        ("failed_at", "TEXT"),
     ],
     "risk_assessments": [
         ("baseline_version", "INTEGER"),
