@@ -52,6 +52,7 @@
     {"minute": 7, "action": "garbled_audio", "patient": "SYN008", "comment": "Radio dropout: an unreadable clip, so transcription fails visibly."},
     {"minute": 7.5, "action": "typed_report", "patient": "SYN008", "report": "update", "comment": "The crew re-sends the lost update as text."},
     {"minute": 7.5, "action": "eta", "patient": "SYN008", "minutes": 30},
+    {"minute": 8, "action": "dismiss_failed", "patient": "SYN008", "comment": "Having re-sent it, the crew marks the lost clip as handled; it stays on record."},
     {"minute": 9, "action": "audio_report", "patient": "SYN002", "report": "update"},
     {"minute": 9, "action": "eta", "patient": "SYN002", "minutes": 20},
     {"minute": 11, "action": "audio_report", "patient": "SYN010", "report": "update"},

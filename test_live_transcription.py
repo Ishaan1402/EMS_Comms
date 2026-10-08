@@ -18,6 +18,7 @@ import database
 from database import init_database, insert_sample_data, query
 from middleware.auth import create_access_token
 from realtime import EventBroker
+import case_assessment
 from routes import cases, recordings
 
 client = TestClient(app, raise_server_exceptions=False)
@@ -38,6 +39,7 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(recordings, "openai_client", None)
     monkeypatch.setattr(cases, "SEGMENT_DIR", tmp_path / "segments")
     monkeypatch.setattr(cases, "RETRY_DELAY_SECONDS", 0)
+    monkeypatch.setattr(case_assessment, "SETTLE_SECONDS", 0)
 
 
 def auth_headers(username):
@@ -56,7 +58,10 @@ def start_case(username=EMT, patient_info="54M chest pain"):
         "UPDATE cases SET status = 'closed' WHERE status = 'active' AND emt_id = (SELECT id FROM users WHERE username = ?)",
         (username,),
     )
-    response = client.post("/api/cases", json={"patient_info": patient_info}, headers=auth_headers(username))
+    # Routed to the doctor's hospital: hospital users only see cases sent to them.
+    hospital_id = query("SELECT hospital_id FROM users WHERE username = ?", (DOCTOR,))[0]["hospital_id"]
+    response = client.post("/api/cases", json={"patient_info": patient_info, "destination_hospital_id": hospital_id},
+                           headers=auth_headers(username))
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -318,8 +323,8 @@ class TestBroker:
     def test_events_are_filtered_by_owner(self):
         async def scenario():
             broker = EventBroker()
-            doctor = broker.subscribe(lambda owner: True)
-            emt = broker.subscribe(lambda owner: owner == 7)
+            doctor = broker.subscribe(lambda owner, hospital: True)
+            emt = broker.subscribe(lambda owner, hospital: owner == 7)
             broker.publish("segment.created", {"n": 1}, owner_id=7)
             broker.publish("segment.created", {"n": 2}, owner_id=8)
             return doctor.queue.qsize(), emt.queue.qsize(), emt.queue.get_nowait()
@@ -335,7 +340,7 @@ class TestBroker:
 
         async def scenario():
             broker = EventBroker()
-            sub = broker.subscribe(lambda owner: True)
+            sub = broker.subscribe(lambda owner, hospital: True)
             for i in range(3):
                 broker.publish("e", {"i": i})
             return broker.subscriber_count, sub.queue.get_nowait()

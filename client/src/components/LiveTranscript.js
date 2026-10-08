@@ -19,7 +19,7 @@ const formatOffset = (iso, startIso) => {
  * segments: server segments plus (EMT side only) local entries with status
  * 'uploading' or 'upload_failed' for audio not yet accepted by the server.
  */
-const LiveTranscript = ({ segments, caseStartedAt, onRetry, emptyText = 'No transcript yet.' }) => {
+const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText = 'No transcript yet.' }) => {
   const scrollRef = useRef(null);
   const stickToBottom = useRef(true);
   const [now, setNow] = useState(Date.now());
@@ -91,7 +91,14 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, emptyText = 'No tran
                 </p>
               )}
 
-              {(segment.status === 'failed' || segment.status === 'upload_failed') && (
+              {segment.status === 'failed' && segment.dismissed_at && (
+                <p className="flex items-center gap-2 text-gray-500">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  Transcription failed ({segment.error || 'unknown error'}) · marked handled by {segment.dismissed_by_name}
+                </p>
+              )}
+
+              {((segment.status === 'failed' && !segment.dismissed_at) || segment.status === 'upload_failed') && (
                 <div className="flex items-center gap-3 text-red-700">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   <span>
@@ -105,6 +112,15 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, emptyText = 'No tran
                       className="flex items-center gap-1 px-2 py-0.5 text-xs border border-red-300 rounded hover:bg-red-50"
                     >
                       <RotateCw className="h-3 w-3" /> Retry
+                    </button>
+                  )}
+                  {onDismiss && segment.status === 'failed' && (
+                    <button
+                      onClick={() => onDismiss(segment)}
+                      title="Use when the information was re-sent another way. The failure stays on record."
+                      className="px-2 py-0.5 text-xs border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
+                    >
+                      Mark handled
                     </button>
                   )}
                 </div>

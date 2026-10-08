@@ -6,7 +6,7 @@ import useCaseEvents from '../hooks/useCaseEvents';
 import { mergeNewer, upsertNewer } from '../utils/liveRows';
 import useCaseDetails from '../hooks/useCaseDetails';
 import LiveTranscript from './LiveTranscript';
-import CaseOverview, { OperationalBadge, ProcessingBadge, RiskBadge } from './CaseOverview';
+import CaseOverview, { CategoryBadge, OperationalBadge, ProcessingBadge } from './CaseOverview';
 import CaseChat from './CaseChat';
 
 // An open case with no new audio for this long is shown as idle instead of LIVE.
@@ -62,6 +62,14 @@ const LiveCasesPanel = () => {
   selectedRef.current = selectedId;
   const details = useCaseDetails(selectedId);
   const { addUpdate: addCaseUpdate, reload: reloadUpdates } = details;
+  // The hospital whose inbound cases this user sees; null if the account has none.
+  const [hospital, setHospital] = useState(undefined);
+
+  useEffect(() => {
+    axios.get('/api/hospitals/mine')
+      .then((response) => setHospital(response.data))
+      .catch((error) => console.error('Error loading hospital:', error));
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 15000);
@@ -131,6 +139,15 @@ const LiveCasesPanel = () => {
   const selected = cases.find((c) => c.id === selectedId);
   const serverNow = now + clockOffsetMs;
 
+  const dismissSegment = async (segment) => {
+    try {
+      const response = await axios.post(`/api/cases/${segment.case_id}/segments/${segment.id}/dismiss`);
+      setSegments((list) => upsertNewer(list, response.data));
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Could not mark the clip as handled');
+    }
+  };
+
   const caseAction = async (path, body, failure) => {
     try {
       const response = await axios.post(`/api/cases/${selected.id}/${path}`, body);
@@ -152,13 +169,19 @@ const LiveCasesPanel = () => {
           <div className="p-2 bg-gradient-to-r from-red-600 to-pink-600 rounded-lg">
             <Radio className="h-5 w-5 text-white" />
           </div>
-          <h2 className="text-xl font-semibold text-gray-900">Live Cases — Incoming Transcripts</h2>
+          <h2 className="text-xl font-semibold text-gray-900">
+            Inbound Cases{hospital ? ` — ${hospital.name}` : ''}
+          </h2>
         </div>
         <ConnectionBadge status={connection} />
       </div>
 
       {cases.length === 0 ? (
-        <p className="p-6 text-sm text-gray-500">No live cases. Transcripts will appear here as soon as an EMT starts one.</p>
+        <p className="p-6 text-sm text-gray-500">
+          {hospital === null
+            ? 'Your account isn\'t linked to a hospital, so no inbound cases are shown. Ask an administrator to assign one.'
+            : 'No inbound cases. They appear here as soon as an EMT routes one to your hospital.'}
+        </p>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3">
           <ul className="border-r border-gray-200 max-h-[28rem] overflow-y-auto">
@@ -179,7 +202,7 @@ const LiveCasesPanel = () => {
                   </div>
                   <div className="flex flex-wrap gap-1 mb-1">
                     {c.status === 'active' && <OperationalBadge status={c.operational_status} />}
-                    <RiskBadge liveCase={c} />
+                    <CategoryBadge liveCase={c} />
                     {c.processing?.needs_review && <ProcessingBadge processing={c.processing} />}
                   </div>
                   <p className="text-sm text-gray-700 truncate">{c.patient_info || 'No patient info'}</p>
@@ -243,6 +266,7 @@ const LiveCasesPanel = () => {
                 <LiveTranscript
                   segments={segments}
                   caseStartedAt={selected.started_at}
+                  onDismiss={dismissSegment}
                   emptyText={selected.status === 'active' ? 'Waiting for the EMT\'s first audio update…' : 'No transcript was recorded for this case.'}
                 />
                 <CaseChat caseId={selected.id} className="mt-6" />

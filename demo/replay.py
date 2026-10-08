@@ -19,8 +19,10 @@ Audio is uploaded the way the browser recorder does it: ~8 second segments with 
 client_id and timestamps, so this exercises the real live-transcription path.
 """
 import argparse
+import array
 import io
 import json
+import math
 import sys
 import time
 import uuid
@@ -38,7 +40,8 @@ DEFAULT_RUNS_DIR = DEMO_DIR / "runs"
 SEGMENT_SECONDS = 8
 # Password of the seeded demo accounts (database.insert_sample_data).
 DEMO_PASSWORD = "password123"
-ACTIONS = {"start_case", "audio_report", "typed_report", "garbled_audio", "eta", "message", "acknowledge_all"}
+ACTIONS = {"start_case", "audio_report", "typed_report", "garbled_audio", "dismiss_failed", "eta", "message",
+           "acknowledge_all"}
 
 
 class ReplayError(Exception):
@@ -49,21 +52,55 @@ def iso(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _quietest_cut(samples, start: int, end: int, target: int, window: int) -> int:
+    """Sample index in [start, end] at the quietest window, nearest the target on ties."""
+    best, best_key = target, None
+    for position in range(start, max(start + 1, end - window + 1), window):
+        middle = position + window // 2
+        key = (sum(abs(v) for v in samples[position:position + window]), abs(middle - target))
+        if best_key is None or key < best_key:
+            best, best_key = middle, key
+    return best
+
+
 def split_wav(data: bytes, seconds: float = SEGMENT_SECONDS) -> list:
-    """Cut a WAV into consecutive WAVs of at most `seconds`, like the recorder's segments."""
-    chunks = []
+    """
+    Cut a WAV into consecutive clips of at most `seconds`, like the recorder's segments, but
+    evenly sized and cut in pauses: Whisper mishears short fragments and words sliced in half
+    (a 2-second tail turned "awake and" into "Awaken").
+    """
     with wave.open(io.BytesIO(data)) as source:
         params = source.getparams()
-        frames_per_chunk = int(source.getframerate() * seconds)
-        while True:
-            frames = source.readframes(frames_per_chunk)
-            if not frames:
-                break
-            out = io.BytesIO()
-            with wave.open(out, "wb") as chunk:
-                chunk.setparams(params)
-                chunk.writeframes(frames)
-            chunks.append(out.getvalue())
+        frames = source.readframes(source.getnframes())
+    rate, width, channels = params.framerate, params.sampwidth, params.nchannels
+    frame_bytes = width * channels
+    total = len(frames) // frame_bytes
+    limit = int(rate * seconds)
+    pieces = max(1, math.ceil(total / limit))
+    samples = None
+    if width == 2 and channels == 1:
+        samples = array.array("h")
+        samples.frombytes(frames[:total * 2])
+        if sys.byteorder == "big":
+            samples.byteswap()
+
+    cuts, previous = [], 0
+    for index in range(1, pieces):
+        target = total * index // pieces
+        # Search 1.5 s either side of the even split, without letting a clip exceed the limit.
+        start = max(previous + 1, target - int(1.5 * rate), total - (pieces - index) * limit)
+        end = min(previous + limit, target + int(1.5 * rate))
+        cut = target if samples is None or end <= start else \
+            _quietest_cut(samples, start, end, target, max(1, rate // 100))
+        cuts.append(cut)
+        previous = cut
+    chunks = []
+    for begin, finish in zip([0] + cuts, cuts + [total]):
+        out = io.BytesIO()
+        with wave.open(out, "wb") as chunk:
+            chunk.setparams(params)
+            chunk.writeframes(frames[begin * frame_bytes:finish * frame_bytes])
+        chunks.append(out.getvalue())
     return chunks
 
 
@@ -217,6 +254,15 @@ class Replay:
         self._upload(event, [b"radio static " * 64], f"{event['patient']}-garbled")
         self.log(f"[{event['minute']:>4}] {event['patient']}: unreadable audio sent (transcription should fail visibly)")
 
+    def dismiss_failed(self, event) -> None:
+        """The crew marks failed clips as handled once their content was re-sent; the failure stays on record."""
+        case_id = self._case(event)
+        self._wait_for(lambda c: c["id"] != case_id or c["processing"]["transcription"]["pending"] == 0, timeout=30)
+        for segment in self.call("GET", f"/api/cases/{case_id}/segments", self._emt(event)):
+            if segment["status"] == "failed" and not segment["dismissed_at"]:
+                self.call("POST", f"/api/cases/{case_id}/segments/{segment['id']}/dismiss", self._emt(event))
+                self.log(f"[{event['minute']:>4}] {event['patient']}: crew dismissed failed clip {segment['seq']}")
+
     def eta(self, event) -> None:
         self.call("POST", f"/api/cases/{self._case(event)}/updates", self._emt(event),
                   json={"kind": "eta", "eta_minutes": event["minutes"]})
@@ -277,6 +323,18 @@ class Replay:
     def summary(self) -> list:
         return [self.call("GET", f"/api/cases/{case_id}", self.scenario["doctor"]) for case_id in self.cases.values()]
 
+    def model_usage(self) -> dict:
+        """Tokens and estimated cost of every assessment in this run (cost is None if any is unpriced)."""
+        attempts = [a for case_id in self.cases.values()
+                    for a in self.call("GET", f"/api/cases/{case_id}/assessments", self.scenario["doctor"])]
+        costs = [a["cost_usd"] for a in attempts if a["status"] != "processing"]
+        return {
+            "assessments": len(attempts),
+            "input_tokens": sum(a["input_tokens"] or 0 for a in attempts),
+            "output_tokens": sum(a["output_tokens"] or 0 for a in attempts),
+            "cost_usd": None if any(c is None for c in costs) else sum(costs),
+        }
+
     def finish(self) -> None:
         """Hand-over: mark each patient arrived and close the case."""
         for source_case_id, case_id in self.cases.items():
@@ -285,13 +343,17 @@ class Replay:
             self.call("POST", f"/api/cases/{case_id}/close", emt)
 
 
-def print_summary(cases: list) -> None:
-    print(f"\n{'source':<8} {'case':>5}  {'status':<13} {'risk':<10} {'processing':<13} acknowledged  notes")
+def print_summary(cases: list, usage: dict) -> None:
+    print(f"\n{'source':<8} {'case':>5}  {'status':<13} {'preparation':<14} {'change':<8} {'processing':<13} acked  notes")
     for c in cases:
-        risk = f"{c['risk_score']}/10 P{c['priority_level']}" if c["risk_score"] is not None else "unavailable"
-        print(f"{c['source_case_id'] or '-':<8} {c['id']:>5}  {c['operational_status']:<13} {risk:<10} "
-              f"{c['processing']['status']:<13} {'yes' if c['latest_update_acknowledged'] else 'no':<13} "
+        assessment = c["current_assessment"] or {}
+        print(f"{c['source_case_id'] or '-':<8} {c['id']:>5}  {c['operational_status']:<13} "
+              f"{c['preparation_category'] or 'unavailable':<14} {assessment.get('meaningful_change') or '-':<8} "
+              f"{c['processing']['status']:<13} {'yes' if c['latest_update_acknowledged'] else 'no':<6} "
               f"{'; '.join(c['processing']['reasons'])}")
+    cost = "unknown" if usage["cost_usd"] is None else f"${usage['cost_usd']:.4f}"
+    print(f"\nModel: {usage['assessments']} assessments, {usage['input_tokens']} input + "
+          f"{usage['output_tokens']} output tokens, {cost} (list price; transcription not included)")
 
 
 def main():
@@ -314,7 +376,7 @@ def main():
             manifest_path = DEFAULT_RUNS_DIR / f"{replay.run_id}.json"
             manifest_path.write_text(json.dumps(replay.manifest(), indent=2) + "\n")
             replay.wait_until_settled()
-            print_summary(replay.summary())
+            print_summary(replay.summary(), replay.model_usage())
             print(f"\nRun {replay.run_id} saved to {manifest_path}")
             if args.finish:
                 replay.finish()

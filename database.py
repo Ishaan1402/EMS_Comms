@@ -196,28 +196,36 @@ def init_database():
       FOREIGN KEY (update_id) REFERENCES case_updates (id)
     );
 
-    -- Every risk/priority assessment attempt for a case, kept as history.
-    -- based_on_version is the case info_version the assessment read. The current assessment
-    -- is the usable one with the highest based_on_version, so a slow result for older
-    -- information can never replace a newer one.
-    -- risk_score and priority_level stay NULL unless the scorer returned valid values:
-    -- an unknown score is never stored as a normal-looking default.
+    -- Every AI assessment attempt for a case, kept as history.
+    -- based_on_version is the case info_version the assessment read; baseline_version is the
+    -- version the hospital had last acknowledged before it, which the model treated as "earlier"
+    -- information. The current assessment is the usable one with the highest based_on_version,
+    -- so a slow result for older information can never replace a newer one.
+    -- The output fields follow the evaluation contract (evals/contracts.py); they stay NULL
+    -- unless the model returned valid values, never filled with a normal-looking default.
+    -- input_tokens/output_tokens/latency_ms come from the model call; cost_usd is a list-price
+    -- estimate, NULL when the model's price isn't known.
     CREATE TABLE IF NOT EXISTS risk_assessments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       case_id INTEGER NOT NULL,
       based_on_version INTEGER NOT NULL,
       status TEXT NOT NULL CHECK (status IN ('processing', 'completed', 'failed', 'needs_review')),
-      risk_score INTEGER CHECK (risk_score IS NULL OR (risk_score >= 0 AND risk_score <= 10)),
-      priority_level INTEGER CHECK (priority_level IS NULL OR (priority_level >= 1 AND priority_level <= 5)),
-      chief_complaint TEXT,
       summary TEXT,
-      critical_info TEXT,
       review_reason TEXT,
       error TEXT,
       scorer_version TEXT NOT NULL,
       started_at TEXT NOT NULL,
       completed_at TEXT,
       updated_at TEXT NOT NULL,
+      baseline_version INTEGER,
+      preparation_category TEXT,
+      meaningful_change TEXT,
+      change_explanation TEXT,
+      missing_information TEXT,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      latency_ms INTEGER,
+      cost_usd REAL,
       FOREIGN KEY (case_id) REFERENCES cases (id)
     );
 
@@ -236,6 +244,9 @@ def init_database():
     -- seq is assigned by the EMT client and defines chronological order within a case;
     -- client_id identifies one recorded clip so a re-upload is told apart from a seq collision.
     -- updated_at changes on every state change so clients can keep the newest version of a row.
+    -- info_version is the case version this segment's text created (NULL until transcribed).
+    -- A failed segment can be dismissed (e.g. its content was re-sent as text); it stays on
+    -- record but no longer flags the case for review.
     CREATE TABLE IF NOT EXISTS transcript_segments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       case_id INTEGER NOT NULL,
@@ -251,6 +262,9 @@ def init_database():
       created_at TEXT NOT NULL,
       transcribed_at TEXT,
       updated_at TEXT NOT NULL,
+      info_version INTEGER,
+      dismissed_at TEXT,
+      dismissed_by INTEGER REFERENCES users (id),
       UNIQUE (case_id, seq),
       FOREIGN KEY (case_id) REFERENCES cases (id)
     );
@@ -313,16 +327,36 @@ DEMO_HOSPITALS = [
 ]
 
 # Columns added to `cases` after it first shipped; ALTER TABLE adds them to older databases.
-ADDED_CASE_COLUMNS = [
-    ("destination_hospital_id", "INTEGER REFERENCES hospitals (id)"),
-    ("ems_unit", "TEXT"),
-    ("eta_at", "TEXT"),
-    ("info_version", "INTEGER NOT NULL DEFAULT 0"),
-    ("last_update_at", "TEXT"),
-    ("arrived_at", "TEXT"),
-    ("source_case_id", "TEXT"),
-    ("source_run_id", "TEXT"),
-]
+# Columns added to tables after they first shipped; ALTER TABLE adds them to older databases.
+ADDED_COLUMNS = {
+    "users": [("hospital_id", "INTEGER REFERENCES hospitals (id)")],
+    "cases": [
+        ("destination_hospital_id", "INTEGER REFERENCES hospitals (id)"),
+        ("ems_unit", "TEXT"),
+        ("eta_at", "TEXT"),
+        ("info_version", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_update_at", "TEXT"),
+        ("arrived_at", "TEXT"),
+        ("source_case_id", "TEXT"),
+        ("source_run_id", "TEXT"),
+    ],
+    "transcript_segments": [
+        ("info_version", "INTEGER"),
+        ("dismissed_at", "TEXT"),
+        ("dismissed_by", "INTEGER REFERENCES users (id)"),
+    ],
+    "risk_assessments": [
+        ("baseline_version", "INTEGER"),
+        ("preparation_category", "TEXT"),
+        ("meaningful_change", "TEXT"),
+        ("change_explanation", "TEXT"),
+        ("missing_information", "TEXT"),
+        ("input_tokens", "INTEGER"),
+        ("output_tokens", "INTEGER"),
+        ("latency_ms", "INTEGER"),
+        ("cost_usd", "REAL"),
+    ],
+}
 
 
 def table_columns(conn, table: str) -> set:
@@ -331,18 +365,17 @@ def table_columns(conn, table: str) -> set:
 
 def migrate_existing_tables(conn):
     """Bring tables created by an earlier version of the schema up to date. No-op on a new database."""
-    user_columns = table_columns(conn, "users")
-    if user_columns and "hospital_id" not in user_columns:
-        conn.execute("ALTER TABLE users ADD COLUMN hospital_id INTEGER REFERENCES hospitals (id)")
-
-    existing = table_columns(conn, "cases")
-    if existing:
-        for name, definition in ADDED_CASE_COLUMNS:
+    case_columns = table_columns(conn, "cases")
+    for table, columns in ADDED_COLUMNS.items():
+        existing = table_columns(conn, table)
+        if not existing:
+            continue  # created fresh by the schema
+        for name, definition in columns:
             if name not in existing:
-                conn.execute(f"ALTER TABLE cases ADD COLUMN {name} {definition}")
-        if "info_version" not in existing:
-            # Older cases already hold information; give them a version so acknowledgments can refer to it.
-            conn.execute("UPDATE cases SET info_version = 1, last_update_at = updated_at")
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+    if case_columns and "info_version" not in case_columns:
+        # Older cases already hold information; give them a version so acknowledgments can refer to it.
+        conn.execute("UPDATE cases SET info_version = 1, last_update_at = updated_at")
 
     message_columns = table_columns(conn, "messages")
     if message_columns and "case_id" not in message_columns:

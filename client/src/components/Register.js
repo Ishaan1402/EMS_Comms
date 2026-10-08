@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import axios from 'axios';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Eye, EyeOff, User, Lock, Mail, Phone, Shield } from 'lucide-react';
@@ -14,8 +15,16 @@ const Register = () => {
     first_name: '',
     last_name: '',
     phone: '',
-    specialty: ''
+    specialty: '',
+    hospital_id: ''
   });
+  const [hospitals, setHospitals] = useState([]);
+
+  useEffect(() => {
+    axios.get('/api/hospitals')
+      .then((response) => setHospitals(response.data))
+      .catch((error) => console.error('Error loading hospitals:', error));
+  }, []);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -51,6 +60,15 @@ const Register = () => {
       
       if (userData.role === 'emt') {
         delete userData.specialty;
+        delete userData.hospital_id;
+      } else {
+        // Hospital users see only the cases routed to their hospital.
+        if (!userData.hospital_id) {
+          toast.error('Choose your hospital');
+          setLoading(false);
+          return;
+        }
+        userData.hospital_id = Number(userData.hospital_id);
       }
 
       const result = await register(userData);
@@ -204,6 +222,25 @@ const Register = () => {
                 />
               </div>
             </div>
+
+            {/* Hospital (for doctors): decides which inbound cases they see */}
+            {formData.role === 'doctor' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Hospital
+                </label>
+                <select
+                  name="hospital_id"
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  value={formData.hospital_id}
+                  onChange={handleChange}
+                >
+                  <option value="">Choose…</option>
+                  {hospitals.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+                </select>
+              </div>
+            )}
 
             {/* Specialty (for doctors) */}
             {formData.role === 'doctor' && (

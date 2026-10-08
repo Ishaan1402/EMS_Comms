@@ -1,9 +1,9 @@
 """Render a demo scenario's reports to speech, one WAV per report, for replay.py.
 
     python3 demo/make_audio.py                     # macOS `say`, offline and free
-    python3 demo/make_audio.py --engine openai     # OpenAI TTS (needs OPENAI_API_KEY; more natural)
+    python3 demo/make_audio.py --engine openai     # OpenAI voice, more natural for the video (OPENAI_API_KEY)
 
-Files go to demo/audio/<source_case_id>-<report>.wav (16 kHz mono). Existing files are kept
+Files go to demo/audio/<source_case_id>-<report>.wav (mono WAV). Existing files are kept
 unless --force is given, so re-running is cheap.
 """
 import argparse
@@ -32,11 +32,16 @@ def render_say(text: str, out: Path, voice: str = None) -> None:
 
 
 def render_openai(text: str, out: Path, voice: str = None) -> None:
+    from dotenv import load_dotenv
     from openai import OpenAI
 
+    load_dotenv(DEMO_DIR.parent / ".env")
     if not os.getenv("OPENAI_API_KEY"):
-        raise SystemExit("Set OPENAI_API_KEY to use --engine openai.")
-    response = OpenAI().audio.speech.create(model="tts-1", voice=voice or "alloy", input=text, response_format="wav")
+        raise SystemExit("Set OPENAI_API_KEY (in .env) to use --engine openai.")
+    response = OpenAI().audio.speech.create(
+        model="gpt-4o-mini-tts", voice=voice or "onyx", input=text, response_format="wav",
+        extra_body={"instructions": "A calm, experienced paramedic giving a radio report to the hospital."},
+    )
     out.write_bytes(response.content)
 
 

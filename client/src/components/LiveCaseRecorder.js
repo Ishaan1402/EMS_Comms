@@ -212,6 +212,14 @@ const LiveCaseRecorder = () => {
     }
   };
 
+  const dismissSegment = async (segment) => {
+    try {
+      addSegment((await axios.post(`/api/cases/${segment.case_id}/segments/${segment.id}/dismiss`)).data);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Could not mark the clip as handled');
+    }
+  };
+
   const retryAssessment = async () => {
     try {
       await axios.post(`/api/cases/${activeCase.id}/assessments/retry`);
@@ -382,6 +390,7 @@ const LiveCaseRecorder = () => {
             segments={transcriptItems}
             caseStartedAt={activeCase.started_at}
             onRetry={isOpen ? retry : undefined}
+            onDismiss={dismissSegment}
             emptyText={recorder.isRecording ? 'Listening… first transcript arrives in a few seconds.' : 'No transcript yet.'}
           />
         </div>

@@ -46,6 +46,11 @@ async def register(request: Request):
         last_name = body.get("last_name")
         phone = body.get("phone")
         specialty = body.get("specialty")
+        # Hospital users see the cases routed to their hospital; EMTs have none.
+        hospital_id = body.get("hospital_id") if role == "doctor" else None
+        if hospital_id is not None and (isinstance(hospital_id, bool) or not isinstance(hospital_id, int)
+                                        or not query('SELECT 1 FROM hospitals WHERE id = ?', (hospital_id,))):
+            return JSONResponse(status_code=400, content={"error": "Unknown hospital"})
         
         existing_users = query(
             'SELECT * FROM users WHERE username = ? OR email = ?',
@@ -65,8 +70,8 @@ async def register(request: Request):
         
         # Insert new user - if required fields missing, SQL will fail -> 500
         result = run(
-            'INSERT INTO users (username, email, password_hash, role, first_name, last_name, phone, specialty) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (username, email, password_hash, role, first_name, last_name, phone, specialty)
+            'INSERT INTO users (username, email, password_hash, role, first_name, last_name, phone, specialty, hospital_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (username, email, password_hash, role, first_name, last_name, phone, specialty, hospital_id)
         )
         
         new_users = query(
