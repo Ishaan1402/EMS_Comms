@@ -26,6 +26,10 @@ OPENAI_API_KEY=...
 OPENAI_SCORING_MODEL=gpt-6-luna   # optional; risk scoring model
 OPENAI_REASONING_EFFORT=none      # optional; leave blank for models without reasoning
 OPENAI_TRANSCRIPTION_MODEL=gpt-transcribe   # optional; speech-to-text model
+SAS_VIYA_URL=...                  # optional: push case data to SAS Viya (see below)
+SAS_CLIENT_ID=...
+SAS_CLIENT_SECRET=...
+SAS_SYNC_ENABLED=1
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=...
@@ -45,7 +49,7 @@ If any of these keys are missing, the server still starts and logs a warning. On
 
 The SQLite schema is created in `asclepius.db` when the server starts. Demo users (password `password123`) are created only when `SEED_DEMO_USERS=1` is set, or when you run `python3 database.py --seed`.
 
-Tests use a temporary database and need no API keys: `pip install -r requirements.txt pytest && pytest test_parity.py test_messages.py test_live_transcription.py test_case_model.py test_demo_replay.py`.
+Tests use a temporary database and need no API keys: `pip install -r requirements.txt pytest && pytest test_parity.py test_messages.py test_live_transcription.py test_case_model.py test_demo_replay.py test_sas_sync.py`.
 
 To replay the three-patient demo scenario against a running server, see [demo/README.md](demo/README.md). Demo accounts: `dr.smith` (General Hospital), `dr.jones` (Northside), `emt.wilson`, `emt.garcia`, `emt.lee`.
 
@@ -97,6 +101,25 @@ The case is the main object. One transport is one case, and everything about the
 - **Messages**: each case has its own thread at `/api/cases/:id/messages` (same API as below).
 
 Existing databases are migrated on startup: new columns are added, and `messages` is rebuilt so a message can belong to a case or a recording.
+
+### SAS Viya sync
+
+`sas_sync.py` pushes the app's case data to CAS tables in SAS Viya for evaluation and Visual Analytics. With `SAS_SYNC_ENABLED=1` the server rebuilds four tables every 10 s and replaces any that changed (upload to a staging table, swap it in, save to disk). SAS is never in a request's path: failures are retried with backoff and shown at `GET /api/sas/status` (hospital users; `?check=true` also signs in to SAS and reads the CAS server).
+
+| Table (`SAS_CASLIB`, default `Public`) | One row per |
+|---|---|
+| `ASC_CASES` | case, current state (transport status, AI processing, category, acknowledgment) |
+| `ASC_EVENTS` | thing that happened: case started/arrived/closed, update, segment uploaded/transcribed/failed/dismissed, assessment, acknowledgment, message |
+| `ASC_ASSESSMENTS` | AI assessment attempt, with tokens, latency and cost |
+| `ASC_VITALS` | vital sign reading |
+
+Rows carry `CASE_ID`, `SOURCE_CASE_ID` and `SOURCE_RUN_ID`, so they join with the evaluation datasets. Each timestamp comes as `*_AT` (ISO UTC text) and `*_DT` (SAS datetime). No free text leaves the app: transcripts, notes, messages and AI summaries stay in SQLite.
+
+- `python -m sas_sync check`: sign in and read the CAS server and caslibs (no writes)
+- `python -m sas_sync push`: push every table now
+- `python -m sas_sync csv sas_export/`: write the tables as CSV files plus `schema.json`; no SAS needed
+
+Sign-in uses an OAuth client with the client_credentials grant. That client needs permission to run CAS actions and write tables in the caslib. Until it has that, export the CSVs and load them as yourself from Jupyter in SAS Viya with `sas/load_csvs.py`: it creates the same tables with the same column types, so dashboards keep working when the live push takes over.
 
 ### Case messaging (EMT ↔ hospital team)
 

@@ -13,9 +13,10 @@ import json
 load_dotenv()
 
 from middleware.auth import APIError
-from routes import auth, recordings, doctors, notifications, messages, cases
+from routes import auth, recordings, doctors, notifications, messages, cases, sas
 from database import init_database, insert_sample_data
 import case_assessment
+import sas_sync
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,7 +33,10 @@ async def lifespan(app: FastAPI):
         case_assessment.runner.start(case_id, force=True)
     if os.getenv("SEED_DEMO_USERS", "").lower() in ("1", "true", "yes"):
         insert_sample_data()
+    # Off unless SAS_SYNC_ENABLED is set; failures stay inside the sync and never reach requests.
+    sas_sync.sync.start()
     yield
+    await sas_sync.sync.stop()
 
 app = FastAPI(title="Asclepius EMT System", lifespan=lifespan)
 
@@ -119,6 +123,7 @@ app.include_router(notifications.router, prefix="/api/notifications", tags=["not
 app.include_router(cases.router, prefix="/api/cases", tags=["cases"])
 app.include_router(messages.case_router, prefix="/api/cases", tags=["messages"])
 app.include_router(cases.hospitals_router, prefix="/api/hospitals", tags=["hospitals"])
+app.include_router(sas.router, prefix="/api/sas", tags=["sas"])
 
 # Serve React app in production
 if os.getenv("NODE_ENV") == "production":
