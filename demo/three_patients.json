@@ -1,0 +1,61 @@
+{
+  "scenario_id": "three-patients-v1",
+  "dataset_version": "pilot_v1",
+  "provenance": "Fictional, AI-authored EMS reports from docs/clinician-annotation/pilot_cases.json (vrishank-branch). Not real patients. The update reports are copied verbatim from current_transcript; each initial report is prior_information with its leading time phrase removed. These three cases are Queue exercise group Q02, so the replayed queue can be compared with the clinician's ranking. Pilot cases are for development only, not held-out testing.",
+  "hospital_code": "GEN",
+  "doctor": "dr.smith",
+  "patients": [
+    {
+      "source_case_id": "SYN008",
+      "emt": "emt.lee",
+      "ems_unit": "Medic 8",
+      "patient_info": "Adult with fever and weakness",
+      "initial_eta_minutes": 37,
+      "reports": {
+        "initial": "Heart rate 118, BP 110/70, respiratory rate 24. Awake, reported fever and weakness.",
+        "update": "Still weak. Heart rate 128, BP 92 over 58, respirations 28. Temperature thirty-nine point one degrees Celsius. Still answering questions, but slower than before. IV access obtained. Fluids are planned but have not yet been started. Thirty minutes out."
+      }
+    },
+    {
+      "source_case_id": "SYN002",
+      "emt": "emt.wilson",
+      "ems_unit": "Medic 2",
+      "patient_info": "Adult with breathing trouble",
+      "initial_eta_minutes": 28,
+      "reports": {
+        "initial": "Heart rate 104, BP 118/76, respiratory rate 24, oxygen saturation 94 percent on room air. Awake and speaking normally.",
+        "update": "Update on our adult with breathing trouble. Now only speaking a few words at a time. Heart rate 126, BP 100 over 64, respirations thirty, saturation 89 percent on room air. We have started oxygen, but do not have a repeat saturation yet. Twenty minutes out."
+      }
+    },
+    {
+      "source_case_id": "SYN010",
+      "emt": "emt.garcia",
+      "ems_unit": "Medic 10",
+      "patient_info": "Adult after a vehicle collision, abdominal pain",
+      "initial_eta_minutes": 20,
+      "reports": {
+        "initial": "After a vehicle collision, awake, heart rate 106, BP 126/84. Reported abdominal pain.",
+        "update": "Abdominal pain is worse. Pulse 132, BP 90 over 60. Patient now appears pale and says they feel faint. External bleeding is not seen. We have not assessed internal bleeding. Eleven minutes out."
+      }
+    }
+  ],
+  "events": [
+    {"minute": 0, "action": "start_case", "patient": "SYN008"},
+    {"minute": 0, "action": "audio_report", "patient": "SYN008", "report": "initial"},
+    {"minute": 1, "action": "start_case", "patient": "SYN002"},
+    {"minute": 1, "action": "audio_report", "patient": "SYN002", "report": "initial"},
+    {"minute": 2, "action": "start_case", "patient": "SYN010"},
+    {"minute": 2, "action": "audio_report", "patient": "SYN010", "report": "initial"},
+    {"minute": 3, "action": "acknowledge_all"},
+    {"minute": 4, "action": "message", "patient": "SYN010", "from": "doctor", "body": "Received. Trauma team is being notified."},
+    {"minute": 4.5, "action": "message", "patient": "SYN010", "from": "emt", "body": "Copy."},
+    {"minute": 7, "action": "garbled_audio", "patient": "SYN008", "comment": "Radio dropout: an unreadable clip, so transcription fails visibly."},
+    {"minute": 7.5, "action": "typed_report", "patient": "SYN008", "report": "update", "comment": "The crew re-sends the lost update as text."},
+    {"minute": 7.5, "action": "eta", "patient": "SYN008", "minutes": 30},
+    {"minute": 9, "action": "audio_report", "patient": "SYN002", "report": "update"},
+    {"minute": 9, "action": "eta", "patient": "SYN002", "minutes": 20},
+    {"minute": 11, "action": "audio_report", "patient": "SYN010", "report": "update"},
+    {"minute": 11, "action": "eta", "patient": "SYN010", "minutes": 11},
+    {"minute": 12, "action": "acknowledge_all"}
+  ]
+}

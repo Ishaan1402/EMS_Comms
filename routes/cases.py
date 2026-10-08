@@ -1,6 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 import asyncio
@@ -10,12 +10,15 @@ import sqlite3
 import math
 import uuid
 import openai
-from database import query, run
+import case_assessment
+from case_assessment import ASSESSMENT_COLUMNS, VITAL_SIGNS
+from database import get_db, query, run, to_iso, utc_now_iso
 from middleware.auth import require_role, APIError
 from realtime import broker, format_sse
 from routes import recordings
 
 router = APIRouter()
+hospitals_router = APIRouter()
 
 # Outside the public /uploads static mount: segment audio is PHI and is only read by the server.
 SEGMENT_DIR = Path("private_uploads") / "live_segments"
@@ -34,12 +37,22 @@ HEARTBEAT_SECONDS = 15
 # Live segments get their own pool so they never queue behind slow GPT-4 analysis calls.
 transcription_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="transcribe")
 
+MAX_UPDATE_LENGTH = 2000
+MAX_EMS_UNIT_LENGTH = 40
+MAX_SOURCE_ID_LENGTH = 64
+MAX_CLIENT_ID_LENGTH = 64
+MAX_ETA_MINUTES = 24 * 60
+
 CASE_SELECT = """
     SELECT c.*, u.first_name AS emt_first_name, u.last_name AS emt_last_name,
+           h.name AS destination_hospital_name,
            (SELECT COUNT(*) FROM transcript_segments s WHERE s.case_id = c.id) AS segment_count,
-           (SELECT MAX(s.recorded_at) FROM transcript_segments s WHERE s.case_id = c.id) AS last_segment_at
+           (SELECT MAX(s.recorded_at) FROM transcript_segments s WHERE s.case_id = c.id) AS last_segment_at,
+           (SELECT COUNT(*) FROM transcript_segments s WHERE s.case_id = c.id AND s.status = 'pending') AS pending_segment_count,
+           (SELECT COUNT(*) FROM transcript_segments s WHERE s.case_id = c.id AND s.status = 'failed') AS failed_segment_count
     FROM cases c
     JOIN users u ON c.emt_id = u.id
+    LEFT JOIN hospitals h ON h.id = c.destination_hospital_id
 """
 
 SEGMENT_COLUMNS = (
@@ -47,17 +60,15 @@ SEGMENT_COLUMNS = (
     "created_at, transcribed_at, updated_at"
 )
 
+UPDATE_SELECT = """
+    SELECT cu.id, cu.case_id, cu.info_version, cu.kind, cu.body, cu.eta_at, cu.author_id, cu.client_id, cu.created_at,
+           u.first_name AS author_first_name, u.last_name AS author_last_name, u.role AS author_role
+    FROM case_updates cu JOIN users u ON cu.author_id = u.id
+"""
+
 
 class TranscriptionUnavailable(Exception):
     pass
-
-
-def to_iso(moment: datetime) -> str:
-    return moment.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def utc_now_iso() -> str:
-    return to_iso(datetime.now(timezone.utc))
 
 
 def parse_timestamp(value: Optional[str]) -> Optional[datetime]:
@@ -113,9 +124,145 @@ async def read_json_body(request: Request) -> dict:
     return body
 
 
+def operational_status(case: dict) -> str:
+    """Where the transport is: inbound -> acknowledged (hospital saw the latest info) -> arrived -> closed."""
+    if case["status"] == "closed":
+        return "closed"
+    if case["arrived_at"]:
+        return "arrived"
+    if case["latest_update_acknowledged"]:
+        return "acknowledged"
+    return "inbound"
+
+
+def processing_summary(case: dict, latest: Optional[dict]) -> dict:
+    """
+    What the AI pipeline is doing for this case, kept separate from operational_status.
+    status: pending | processing | completed | failed | needs_review.
+    needs_review is true whenever a person should look, with the reasons listed.
+    """
+    pending, failed = case["pending_segment_count"], case["failed_segment_count"]
+    if failed:
+        transcription = "failed"
+    elif pending:
+        transcription = "processing"
+    else:
+        transcription = "completed" if case["segment_count"] else "none"
+
+    # New information that no attempt has covered yet is waiting to be assessed.
+    if latest is None or (latest["based_on_version"] < case["info_version"] and latest["status"] != "processing"):
+        assessment = "pending"
+    else:
+        assessment = latest["status"]
+
+    reasons = []
+    if failed:
+        reasons.append(f"{failed} transcript segment(s) failed to transcribe")
+    if assessment == "failed":
+        reasons.append(f"Risk assessment failed: {latest['error'] or 'unknown error'}")
+    if assessment == "needs_review":
+        reasons.append(latest["review_reason"])
+
+    if transcription == "failed" or assessment == "failed":
+        status = "failed"
+    elif assessment == "needs_review":
+        status = "needs_review"
+    elif transcription == "processing" or assessment == "processing":
+        status = "processing"
+    elif assessment == "pending":
+        status = "pending"
+    else:
+        status = "completed"
+
+    return {
+        "status": status,
+        "needs_review": bool(reasons),
+        "reasons": reasons,
+        "transcription": {"status": transcription, "pending": pending, "failed": failed},
+        "assessment": {
+            "status": assessment,
+            "error": latest["error"] if latest and assessment == "failed" else None,
+            "can_retry": assessment == "failed",
+        },
+    }
+
+
+def _newest_per_case(sql: str, case_ids: list) -> dict:
+    if not case_ids:
+        return {}
+    placeholders = ",".join("?" * len(case_ids))
+    return {row["case_id"]: row for row in query(sql.format(ids=placeholders), tuple(case_ids))}
+
+
+def describe_cases(rows: list) -> list:
+    """Add acknowledgment, current assessment, and processing state to case rows."""
+    ids = [row["id"] for row in rows]
+    current = _newest_per_case(
+        f"""SELECT {ASSESSMENT_COLUMNS} FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY case_id ORDER BY based_on_version DESC, id DESC) AS rn
+                FROM risk_assessments WHERE status IN ('completed', 'needs_review') AND case_id IN ({{ids}})
+            ) WHERE rn = 1""",
+        ids,
+    )
+    latest = _newest_per_case(
+        f"""SELECT {ASSESSMENT_COLUMNS} FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY case_id ORDER BY id DESC) AS rn
+                FROM risk_assessments WHERE case_id IN ({{ids}})
+            ) WHERE rn = 1""",
+        ids,
+    )
+    acks = _newest_per_case(
+        """SELECT case_id, info_version, acknowledged_at, user_id, first_name, last_name FROM (
+               SELECT a.*, u.first_name, u.last_name,
+                      ROW_NUMBER() OVER (PARTITION BY a.case_id ORDER BY a.info_version DESC, a.id DESC) AS rn
+               FROM case_acknowledgments a JOIN users u ON u.id = a.user_id WHERE a.case_id IN ({ids})
+           ) WHERE rn = 1""",
+        ids,
+    )
+
+    described = []
+    for row in rows:
+        case = dict(row)
+        ack = acks.get(case["id"])
+        case["acknowledgment"] = ack and {
+            "info_version": ack["info_version"],
+            "acknowledged_at": ack["acknowledged_at"],
+            "user_id": ack["user_id"],
+            "user_name": f"{ack['first_name']} {ack['last_name']}",
+        }
+        case["latest_update_acknowledged"] = bool(ack) and ack["info_version"] >= case["info_version"]
+        case["operational_status"] = operational_status(case)
+
+        assessment = current.get(case["id"])
+        case["current_assessment"] = assessment
+        # Only a completed assessment supplies a score. Unknown stays None, never a default.
+        usable = assessment if assessment and assessment["status"] == "completed" else None
+        case["risk_score"] = usable["risk_score"] if usable else None
+        case["priority_level"] = usable["priority_level"] if usable else None
+        case["assessment_is_outdated"] = bool(assessment) and assessment["based_on_version"] < case["info_version"]
+        case["processing"] = processing_summary(case, latest.get(case["id"]))
+        described.append(case)
+    return described
+
+
 def get_case(case_id: int) -> Optional[dict]:
     rows = query(CASE_SELECT + " WHERE c.id = ?", (case_id,))
-    return rows[0] if rows else None
+    return describe_cases(rows)[0] if rows else None
+
+
+def touch_case(case_id: int) -> Optional[dict]:
+    """Bump updated_at so clients treat the re-published case as newer, and return it."""
+    run("UPDATE cases SET updated_at = ? WHERE id = ?", (utc_now_iso(), case_id))
+    return get_case(case_id)
+
+
+def publish_case_changed(case_id: int) -> None:
+    case = touch_case(case_id)
+    if case:
+        publish_case("case.updated", case)
+
+
+case_assessment.runner.on_change = publish_case_changed
 
 
 def get_case_for_user(case_id_param: str, user: dict) -> dict:
@@ -182,30 +329,77 @@ async def case_events(current_user: dict = Depends(require_role(["emt", "doctor"
     )
 
 
+def parse_eta_minutes(value) -> str:
+    """Minutes from now -> eta_at timestamp."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) \
+            or not 0 <= value <= MAX_ETA_MINUTES:
+        raise APIError(400, f"eta_minutes must be a number between 0 and {MAX_ETA_MINUTES}")
+    return to_iso(datetime.now(timezone.utc) + timedelta(minutes=value))
+
+
+def optional_text(body: dict, key: str, max_length: int) -> Optional[str]:
+    value = body.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise APIError(400, f"{key} must be a string")
+    value = value.strip()
+    if len(value) > max_length:
+        raise APIError(400, f"{key} must be at most {max_length} characters")
+    return value or None
+
+
 @router.post("", status_code=201)
-async def start_case(request: Request, current_user: dict = Depends(require_role(["emt"]))):
-    """EMT opens a live case. Body (optional): {"patient_info": "..."}. 409 if the EMT already has one open."""
+async def start_case(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(require_role(["emt"])),
+):
+    """
+    EMT opens a case for one patient transport. 409 if the EMT already has one open.
+    Body (all optional): {"patient_info": "...", "destination_hospital_id": 1, "ems_unit": "Medic 12",
+    "eta_minutes": 15}. demo/replay.py also sends source_case_id and source_run_id.
+    The case starts at info_version 1: what the EMT entered here.
+    """
     body = await read_json_body(request)
     patient_info = body.get("patient_info")
     if patient_info is not None and not isinstance(patient_info, str):
         raise APIError(400, "patient_info must be a string")
+    ems_unit = optional_text(body, "ems_unit", MAX_EMS_UNIT_LENGTH)
+    eta_at = parse_eta_minutes(body["eta_minutes"]) if body.get("eta_minutes") is not None else None
+    source_case_id = optional_text(body, "source_case_id", MAX_SOURCE_ID_LENGTH)
+    source_run_id = optional_text(body, "source_run_id", MAX_SOURCE_ID_LENGTH)
+    hospital_id = body.get("destination_hospital_id")
+    if hospital_id is not None:
+        if isinstance(hospital_id, bool) or not isinstance(hospital_id, int) \
+                or not query("SELECT 1 FROM hospitals WHERE id = ?", (hospital_id,)):
+            raise APIError(400, "Unknown destination hospital")
 
     now = utc_now_iso()
     try:
         result = run(
-            "INSERT INTO cases (emt_id, patient_info, status, started_at, updated_at) VALUES (?, ?, 'active', ?, ?)",
-            (current_user["id"], patient_info, now, now),
+            """INSERT INTO cases (emt_id, patient_info, status, started_at, updated_at,
+                                  destination_hospital_id, ems_unit, eta_at, info_version, last_update_at,
+                                  source_case_id, source_run_id)
+               VALUES (?, ?, 'active', ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
+            (current_user["id"], patient_info, now, now, hospital_id, ems_unit, eta_at, now,
+             source_case_id, source_run_id),
         )
     except sqlite3.IntegrityError:
         # idx_cases_one_active_per_emt: an EMT has at most one open case at a time.
         raise APIError(409, "You already have an active case")
     case = get_case(result["id"])
     publish_case("case.opened", case)
+    background_tasks.add_task(case_assessment.runner.request, case["id"])
     return case
 
 
 @router.get("")
-async def list_cases(status: Optional[str] = None, current_user: dict = Depends(require_role(["emt", "doctor"]))):
+async def list_cases(
+    status: Optional[str] = None,
+    hospital_id: Optional[str] = None,
+    current_user: dict = Depends(require_role(["emt", "doctor"])),
+):
     """Active cases first, then most recent. Doctors see all cases; EMTs see their own."""
     conditions, params = [], []
     if current_user["role"] == "emt":
@@ -214,11 +408,14 @@ async def list_cases(status: Optional[str] = None, current_user: dict = Depends(
     if status in ("active", "closed"):
         conditions.append("c.status = ?")
         params.append(status)
+    if hospital_id is not None:
+        conditions.append("c.destination_hospital_id = ?")
+        params.append(parse_id(hospital_id, "Hospital not found"))
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-    return query(
+    return describe_cases(query(
         CASE_SELECT + where + " ORDER BY (c.status = 'active') DESC, c.started_at DESC LIMIT 50",
         tuple(params),
-    )
+    ))
 
 
 @router.get("/{case_id}")
@@ -235,6 +432,203 @@ async def close_case(case_id: str, current_user: dict = Depends(require_role(["e
         case = get_case(case["id"])
         publish_case("case.updated", case)
     return case
+
+
+@router.post("/{case_id}/arrive")
+async def mark_arrived(case_id: str, current_user: dict = Depends(require_role(["emt", "doctor"]))):
+    """The EMT or the hospital marks the patient as handed over. Idempotent."""
+    case = get_case_for_user(case_id, current_user)
+    if not case["arrived_at"]:
+        now = utc_now_iso()
+        run("UPDATE cases SET arrived_at = ?, updated_at = ? WHERE id = ? AND arrived_at IS NULL", (now, now, case["id"]))
+        case = get_case(case["id"])
+        publish_case("case.updated", case)
+    return case
+
+
+@router.post("/{case_id}/acknowledge")
+async def acknowledge_case(case_id: str, request: Request, current_user: dict = Depends(require_role(["doctor"]))):
+    """
+    A hospital user confirms they have seen the case. Body (optional): {"info_version": n}, the
+    version their screen showed, so information that arrived after they looked stays unacknowledged.
+    Defaults to the current version.
+    """
+    case = get_case_for_user(case_id, current_user)
+    body = await read_json_body(request)
+    version = body.get("info_version", case["info_version"])
+    if isinstance(version, bool) or not isinstance(version, int) or not 0 < version <= case["info_version"]:
+        raise APIError(400, f"info_version must be between 1 and {case['info_version']}")
+
+    ack = case["acknowledgment"]
+    if ack and ack["info_version"] >= version:
+        return case
+    run(
+        "INSERT INTO case_acknowledgments (case_id, user_id, info_version, acknowledged_at) VALUES (?, ?, ?, ?)",
+        (case["id"], current_user["id"], version, utc_now_iso()),
+    )
+    case = touch_case(case["id"])
+    publish_case("case.updated", case)
+    return case
+
+
+def parse_vitals(value) -> dict:
+    """{"spo2": 91, "hr": 110} -> validated readings. Empty fields (null) are skipped."""
+    if not isinstance(value, dict):
+        raise APIError(400, "vitals must be an object of readings")
+    readings = {}
+    for name, number in value.items():
+        if number is None:
+            continue
+        if name not in VITAL_SIGNS:
+            raise APIError(400, f"Unknown vital sign: {name}")
+        _, _, low, high = VITAL_SIGNS[name]
+        if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number) \
+                or not low <= number <= high:
+            raise APIError(400, f"{name} must be a number between {low} and {high}")
+        readings[name] = float(number)
+    if not readings:
+        raise APIError(400, "Enter at least one vital sign")
+    return readings
+
+
+def describe_reading(reading: dict) -> dict:
+    label, unit, _, _ = VITAL_SIGNS.get(reading["name"], (reading["name"], "", 0, 0))
+    return {**reading, "label": label, "unit": unit}
+
+
+def get_updates(case_id: int, update_id: Optional[int] = None) -> list:
+    """A case's typed updates, oldest first, each with the vital sign readings it recorded."""
+    where, params = "WHERE cu.case_id = ?", [case_id]
+    if update_id is not None:
+        where += " AND cu.id = ?"
+        params.append(update_id)
+    updates = query(UPDATE_SELECT + where + " ORDER BY cu.id", tuple(params))
+    readings = query(
+        "SELECT id, update_id, name, value, measured_at FROM vital_readings WHERE case_id = ? ORDER BY id",
+        (case_id,),
+    )
+    for update in updates:
+        update["vitals"] = [describe_reading(r) for r in readings if r["update_id"] == update["id"]]
+    return updates
+
+
+@router.post("/{case_id}/updates", status_code=201)
+async def add_update(
+    case_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(require_role(["emt"])),
+):
+    """
+    EMT adds information to an open case. Body:
+      {"kind": "note" | "correction", "body": "..."}
+      {"kind": "vitals", "vitals": {"spo2": 91, "hr": 110}, "body": "optional comment"}
+      {"kind": "eta", "eta_minutes": 8}
+    plus an optional "client_id"; a retry with the same client_id returns the stored update with 200.
+    Patient information (everything but eta) raises the case's info_version and is re-assessed.
+    """
+    case = get_case_for_user(case_id, current_user)
+    body = await read_json_body(request)
+    kind = body.get("kind")
+    if kind not in ("note", "vitals", "correction", "eta"):
+        raise APIError(400, "kind must be one of note, vitals, correction, eta")
+    text = optional_text(body, "body", MAX_UPDATE_LENGTH)
+    if kind in ("note", "correction") and not text:
+        raise APIError(400, "body is required")
+    vitals = parse_vitals(body.get("vitals")) if kind == "vitals" else {}
+    eta_at = parse_eta_minutes(body.get("eta_minutes")) if kind == "eta" else None
+    if kind == "eta":
+        text = None
+    client_id = body.get("client_id")
+    if client_id is not None and (not isinstance(client_id, str) or not 0 < len(client_id) <= MAX_CLIENT_ID_LENGTH):
+        raise APIError(400, "Invalid client_id")
+
+    with get_db() as conn:
+        # Write lock first, so a retry can't race the original past the client_id check.
+        conn.execute("BEGIN IMMEDIATE")
+        if client_id is not None:
+            existing = conn.execute(
+                "SELECT id FROM case_updates WHERE case_id = ? AND client_id = ?", (case["id"], client_id)
+            ).fetchone()
+            if existing:
+                return JSONResponse(status_code=200, content=get_updates(case["id"], existing["id"])[0])
+        current = conn.execute("SELECT status, info_version FROM cases WHERE id = ?", (case["id"],)).fetchone()
+        if current["status"] != "active":
+            raise APIError(409, "Case is closed")
+
+        now = utc_now_iso()
+        if kind == "eta":
+            # Logistics, not patient information: no new version, no re-assessment.
+            version = current["info_version"]
+            conn.execute("UPDATE cases SET eta_at = ?, updated_at = ? WHERE id = ?", (eta_at, now, case["id"]))
+        else:
+            version = current["info_version"] + 1
+            conn.execute(
+                "UPDATE cases SET info_version = ?, last_update_at = ?, updated_at = ? WHERE id = ?",
+                (version, now, now, case["id"]),
+            )
+        update_id = conn.execute(
+            """INSERT INTO case_updates (case_id, info_version, kind, body, eta_at, author_id, client_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (case["id"], version, kind, text, eta_at, current_user["id"], client_id, now),
+        ).lastrowid
+        conn.executemany(
+            "INSERT INTO vital_readings (case_id, update_id, name, value, measured_at) VALUES (?, ?, ?, ?, ?)",
+            [(case["id"], update_id, name, value, now) for name, value in vitals.items()],
+        )
+
+    update = get_updates(case["id"], update_id)[0]
+    broker.publish("update.created", {"case_id": case["id"], "update": update}, owner_id=case["emt_id"])
+    publish_case("case.updated", get_case(case["id"]))
+    if kind != "eta":
+        background_tasks.add_task(case_assessment.runner.request, case["id"])
+    return update
+
+
+@router.get("/{case_id}/updates")
+async def list_updates(case_id: str, current_user: dict = Depends(require_role(["emt", "doctor"]))):
+    case = get_case_for_user(case_id, current_user)
+    return get_updates(case["id"])
+
+
+@router.get("/{case_id}/vitals")
+async def list_vitals(case_id: str, current_user: dict = Depends(require_role(["emt", "doctor"]))):
+    """Every vital sign reading, oldest first, so trends (SpO2 96 -> 91 -> 86) can be shown."""
+    case = get_case_for_user(case_id, current_user)
+    readings = query(
+        "SELECT id, update_id, name, value, measured_at FROM vital_readings WHERE case_id = ? ORDER BY id",
+        (case["id"],),
+    )
+    return [describe_reading(r) for r in readings]
+
+
+@router.get("/{case_id}/assessments")
+async def list_assessments(case_id: str, current_user: dict = Depends(require_role(["emt", "doctor"]))):
+    """Every assessment attempt, newest first, including failed ones."""
+    case = get_case_for_user(case_id, current_user)
+    return query(
+        f"SELECT {ASSESSMENT_COLUMNS} FROM risk_assessments WHERE case_id = ? ORDER BY id DESC",
+        (case["id"],),
+    )
+
+
+@router.post("/{case_id}/assessments/retry", status_code=202)
+async def retry_assessment(
+    case_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(require_role(["emt", "doctor"])),
+):
+    """Re-run a failed risk assessment on the case's current information."""
+    case = get_case_for_user(case_id, current_user)
+    if not case["processing"]["assessment"]["can_retry"]:
+        raise APIError(409, "Only a failed assessment can be retried")
+    background_tasks.add_task(case_assessment.runner.request, case["id"], True)
+    return case
+
+
+@hospitals_router.get("")
+async def list_hospitals(current_user: dict = Depends(require_role(["emt", "doctor"]))):
+    return query("SELECT id, code, name FROM hospitals ORDER BY name")
 
 
 @router.get("/{case_id}/segments")
@@ -373,6 +767,8 @@ async def retry_segment(
 
     segment = get_segment(segment["id"])
     publish_segment("segment.updated", segment, case["emt_id"])
+    # The case's failed/pending counts changed.
+    publish_case_changed(case["id"])
     background_tasks.add_task(transcribe_segment, segment["id"])
     return segment
 
@@ -441,18 +837,32 @@ async def transcribe_segment(segment_id: int):
         text, error_message = None, "unexpected error"
 
     now = utc_now_iso()
-    if text is not None:
-        run(
-            """UPDATE transcript_segments
-               SET status = 'completed', text = ?, error = NULL, transcribed_at = ?, updated_at = ? WHERE id = ?""",
-            (str(text).strip(), now, now, segment_id),
-        )
-    else:
-        run(
-            "UPDATE transcript_segments SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
-            (error_message, now, segment_id),
-        )
+    text = str(text).strip() if text is not None else None
+    with get_db() as conn:
+        if text is not None:
+            conn.execute(
+                """UPDATE transcript_segments
+                   SET status = 'completed', text = ?, error = NULL, transcribed_at = ?, updated_at = ? WHERE id = ?""",
+                (text, now, now, segment_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE transcript_segments SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
+                (error_message, now, segment_id),
+            )
+        # New transcript text is new patient information; in the same transaction, so the
+        # version an assessment reads always matches the transcript it sees.
+        if text:
+            conn.execute(
+                "UPDATE cases SET info_version = info_version + 1, last_update_at = ?, updated_at = ? WHERE id = ?",
+                (now, now, segment["case_id"]),
+            )
+        else:
+            conn.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, segment["case_id"]))
     publish_segment("segment.updated", get_segment(segment_id), segment["emt_id"])
+    publish_case("case.updated", get_case(segment["case_id"]))
+    if text:
+        await case_assessment.runner.request(segment["case_id"])
 
 
 async def run_transcription(segment: dict):

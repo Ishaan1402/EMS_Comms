@@ -64,7 +64,11 @@ const readEventStream = async (url, headers, signal, onOpen, onMessage) => {
   }
 };
 
-const CaseChat = ({ recordingId, className = '' }) => {
+// Pass caseId for a case's thread, or recordingId for the older single-recording flow.
+const CaseChat = ({ caseId, recordingId, className = '' }) => {
+  const threadField = caseId != null ? 'case_id' : 'recording_id';
+  const threadId = caseId != null ? caseId : recordingId;
+  const basePath = caseId != null ? `/api/cases/${caseId}` : `/api/recordings/${recordingId}`;
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
   const [status, setStatus] = useState('loading'); // loading | ready | error
@@ -76,11 +80,11 @@ const CaseChat = ({ recordingId, className = '' }) => {
 
   const applyMessages = useCallback((incoming) => {
     // Never accept a message for a different case, whatever the server sends.
-    const forThisCase = incoming.filter(m => m.recording_id === recordingId);
+    const forThisCase = incoming.filter(m => m[threadField] === threadId);
     if (forThisCase.length === 0) return;
     lastIdRef.current = Math.max(lastIdRef.current, ...forThisCase.map(m => m.id));
     setMessages(current => mergeMessages(current, forThisCase));
-  }, [recordingId]);
+  }, [threadField, threadId]);
 
   // Bumped by the Retry button to reload history.
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -92,7 +96,7 @@ const CaseChat = ({ recordingId, className = '' }) => {
     setMessages([]);
     lastIdRef.current = 0;
 
-    axios.get(`/api/recordings/${recordingId}/messages`)
+    axios.get(`${basePath}/messages`)
       .then(response => {
         if (cancelled) return;
         applyMessages(response.data.messages);
@@ -107,7 +111,7 @@ const CaseChat = ({ recordingId, className = '' }) => {
       });
 
     return () => { cancelled = true; };
-  }, [recordingId, applyMessages, loadAttempt]);
+  }, [basePath, applyMessages, loadAttempt]);
 
   // Live updates once history has loaded; reconnects from the last seen id after any drop.
   useEffect(() => {
@@ -120,7 +124,7 @@ const CaseChat = ({ recordingId, className = '' }) => {
       try {
         const headers = { Authorization: axios.defaults.headers.common['Authorization'] };
         await readEventStream(
-          `/api/recordings/${recordingId}/messages/stream?after_id=${lastIdRef.current}`,
+          `${basePath}/messages/stream?after_id=${lastIdRef.current}`,
           headers,
           controller.signal,
           () => setConnection('live'),
@@ -146,7 +150,7 @@ const CaseChat = ({ recordingId, className = '' }) => {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [status, recordingId, applyMessages]);
+  }, [status, basePath, applyMessages]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -155,7 +159,7 @@ const CaseChat = ({ recordingId, className = '' }) => {
   const postMessage = async (pending) => {
     setMessages(current => current.map(m => (m.client_id === pending.client_id ? { ...m, failed: false } : m)));
     try {
-      const response = await axios.post(`/api/recordings/${recordingId}/messages`, {
+      const response = await axios.post(`${basePath}/messages`, {
         body: pending.body,
         client_id: pending.client_id,
       });
@@ -172,7 +176,7 @@ const CaseChat = ({ recordingId, className = '' }) => {
     if (!body || body.length > MAX_LENGTH) return;
     const pending = {
       client_id: newClientId(),
-      recording_id: recordingId,
+      [threadField]: threadId,
       sender_id: user?.id,
       sender_role: user?.role,
       sender_first_name: user?.first_name,

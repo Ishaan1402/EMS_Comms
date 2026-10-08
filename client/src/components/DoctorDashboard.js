@@ -267,16 +267,26 @@ const DoctorDashboard = () => {
                         <div className="flex items-center space-x-3 mb-4">
                           <div className="flex items-center space-x-2">
                             <span className="text-lg font-bold text-gray-400">#{index + 1}</span>
-                            {getRiskIcon(notification.risk_score || 0)}
+                            {notification.risk_score == null
+                              ? <AlertTriangle className="h-5 w-5 text-purple-600" />
+                              : getRiskIcon(notification.risk_score)}
                           </div>
                           
-                          <div className={`px-3 py-1 rounded-full text-sm font-bold border ${getRiskColor(notification.risk_score || 0)}`}>
-                            Risk: {notification.risk_score || 0}/10
-                          </div>
-                          
-                          <div className={`px-3 py-1 rounded-full text-sm font-bold ${getPriorityColor(notification.priority_level || 5)}`}>
-                            {getPriorityText(notification.priority_level || 5)}
-                          </div>
+                          {/* An unscored recording is shown as needing review, never as a low default score. */}
+                          {notification.risk_score == null || notification.priority_level == null ? (
+                            <div className="px-3 py-1 rounded-full text-sm font-bold border text-purple-700 bg-purple-50 border-purple-200">
+                              Risk unavailable · Needs review
+                            </div>
+                          ) : (
+                            <>
+                              <div className={`px-3 py-1 rounded-full text-sm font-bold border ${getRiskColor(notification.risk_score)}`}>
+                                Risk: {notification.risk_score}/10
+                              </div>
+                              <div className={`px-3 py-1 rounded-full text-sm font-bold ${getPriorityColor(notification.priority_level)}`}>
+                                {getPriorityText(notification.priority_level)}
+                              </div>
+                            </>
+                          )}
                           
                           {!notification.read_at && (
                             <div className="px-3 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold rounded-full animate-pulse">

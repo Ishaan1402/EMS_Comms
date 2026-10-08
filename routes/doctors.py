@@ -47,7 +47,8 @@ async def get_doctor_notifications(
         if sortBy == "newest":
             order_clause = "ORDER BY n.sent_at DESC"
         elif sortBy == "priority":
-            order_clause = "ORDER BY r.risk_score DESC, r.priority_level ASC, n.sent_at DESC"
+            # Unscored recordings first: they need a person to look, and unknown is not low risk.
+            order_clause = "ORDER BY (r.risk_score IS NULL) DESC, r.risk_score DESC, r.priority_level ASC, n.sent_at DESC"
         elif sortBy == "oldest":
             order_clause = "ORDER BY n.sent_at ASC"
         else:

@@ -1,10 +1,20 @@
 import sqlite3
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import bcrypt
 from contextlib import contextmanager
 
 DB_PATH = Path(__file__).parent / "asclepius.db"
+
+
+def to_iso(moment: datetime) -> str:
+    """Timestamp format of the case tables: fixed-width UTC, so string order is time order."""
+    return moment.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def utc_now_iso() -> str:
+    return to_iso(datetime.now(timezone.utc))
 
 def get_db_connection():
     """Create and return a database connection."""
@@ -44,6 +54,24 @@ def run(sql: str, params: tuple = ()):
         cursor.execute(sql, params)
         return {"id": cursor.lastrowid, "changes": cursor.rowcount}
 
+# Messages between the EMT and the receiving hospital team. Each message belongs to exactly
+# one thread: a case (case_id) or, for the older single-recording flow, a recording (recording_id).
+MESSAGES_TABLE = """
+    CREATE TABLE IF NOT EXISTS {name} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      recording_id INTEGER,
+      case_id INTEGER,
+      sender_id INTEGER NOT NULL,
+      sender_role TEXT NOT NULL CHECK (sender_role IN ('emt', 'doctor')),
+      body TEXT NOT NULL CHECK (length(trim(body)) > 0),
+      client_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      CHECK ((recording_id IS NULL) != (case_id IS NULL)),
+      FOREIGN KEY (recording_id) REFERENCES recordings (id) ON DELETE CASCADE,
+      FOREIGN KEY (case_id) REFERENCES cases (id) ON DELETE CASCADE,
+      FOREIGN KEY (sender_id) REFERENCES users (id)
+    )"""
+
 def init_database():
     """Create database tables if they do not exist. Does not seed users."""
     print("✅ SQLite database connected successfully")
@@ -63,7 +91,9 @@ def init_database():
       specialty TEXT,
       is_available BOOLEAN DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      -- The hospital a doctor/nurse works at; NULL for EMTs.
+      hospital_id INTEGER REFERENCES hospitals (id)
     );
 
     -- Recordings table
@@ -102,7 +132,19 @@ def init_database():
       FOREIGN KEY (doctor_id) REFERENCES users (id)
     );
 
-    -- Live EMS cases: one per patient encounter, open while the EMT is en route
+    -- Receiving hospitals an EMT can route a case to.
+    CREATE TABLE IF NOT EXISTS hospitals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL
+    );
+
+    -- EMS cases: one per patient transport. Transcript segments, typed updates, vitals,
+    -- risk assessments, messages and acknowledgments all belong to the case.
+    -- status is whether the EMT still has the case open; arrived_at marks hand-over.
+    -- info_version goes up by one whenever new patient information arrives, so assessments
+    -- and acknowledgments can record exactly which information they covered.
+    -- Older databases get the columns after updated_at from migrate_existing_tables().
     CREATE TABLE IF NOT EXISTS cases (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       emt_id INTEGER NOT NULL,
@@ -111,7 +153,83 @@ def init_database():
       started_at TEXT NOT NULL,
       closed_at TEXT,
       updated_at TEXT NOT NULL,
+      destination_hospital_id INTEGER REFERENCES hospitals (id),
+      ems_unit TEXT,
+      eta_at TEXT,
+      info_version INTEGER NOT NULL DEFAULT 0,
+      last_update_at TEXT,
+      arrived_at TEXT,
+      -- Set only for cases replayed from a test scenario (demo/replay.py): the fictional source
+      -- case (e.g. SYN002, the evaluation datasets' case_id) and the replay run. NULL in real use.
+      source_case_id TEXT,
+      source_run_id TEXT,
       FOREIGN KEY (emt_id) REFERENCES users (id)
+    );
+
+    -- Patient information the EMT adds after creating the case. Append-only: a correction
+    -- is a new row, so earlier information is never overwritten. info_version is the
+    -- case's version once this update was applied.
+    CREATE TABLE IF NOT EXISTS case_updates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      info_version INTEGER NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('note', 'vitals', 'correction', 'eta')),
+      body TEXT,
+      eta_at TEXT,
+      author_id INTEGER NOT NULL,
+      client_id TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (case_id) REFERENCES cases (id),
+      FOREIGN KEY (author_id) REFERENCES users (id)
+    );
+
+    -- One row per vital sign reading, so a trend like SpO2 96 -> 91 -> 86 is kept.
+    -- Each name has a fixed unit (VITAL_SIGNS in case_assessment.py).
+    CREATE TABLE IF NOT EXISTS vital_readings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      update_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      value REAL NOT NULL,
+      measured_at TEXT NOT NULL,
+      FOREIGN KEY (case_id) REFERENCES cases (id),
+      FOREIGN KEY (update_id) REFERENCES case_updates (id)
+    );
+
+    -- Every risk/priority assessment attempt for a case, kept as history.
+    -- based_on_version is the case info_version the assessment read. The current assessment
+    -- is the usable one with the highest based_on_version, so a slow result for older
+    -- information can never replace a newer one.
+    -- risk_score and priority_level stay NULL unless the scorer returned valid values:
+    -- an unknown score is never stored as a normal-looking default.
+    CREATE TABLE IF NOT EXISTS risk_assessments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      based_on_version INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('processing', 'completed', 'failed', 'needs_review')),
+      risk_score INTEGER CHECK (risk_score IS NULL OR (risk_score >= 0 AND risk_score <= 10)),
+      priority_level INTEGER CHECK (priority_level IS NULL OR (priority_level >= 1 AND priority_level <= 5)),
+      chief_complaint TEXT,
+      summary TEXT,
+      critical_info TEXT,
+      review_reason TEXT,
+      error TEXT,
+      scorer_version TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (case_id) REFERENCES cases (id)
+    );
+
+    -- A hospital user confirming they have seen the case's information up to info_version.
+    CREATE TABLE IF NOT EXISTS case_acknowledgments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      info_version INTEGER NOT NULL,
+      acknowledged_at TEXT NOT NULL,
+      FOREIGN KEY (case_id) REFERENCES cases (id),
+      FOREIGN KEY (user_id) REFERENCES users (id)
     );
 
     -- Transcript segments: short audio chunks transcribed independently.
@@ -151,26 +269,22 @@ def init_database():
       FOREIGN KEY (segment_id) REFERENCES transcript_segments (id)
     );
 
-    -- Case messages between the EMT and the receiving hospital team.
-    -- recording_id is the case; every message belongs to exactly one.
-    CREATE TABLE IF NOT EXISTS messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      recording_id INTEGER NOT NULL,
-      sender_id INTEGER NOT NULL,
-      sender_role TEXT NOT NULL CHECK (sender_role IN ('emt', 'doctor')),
-      body TEXT NOT NULL CHECK (length(trim(body)) > 0),
-      client_id TEXT,
-      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-      FOREIGN KEY (recording_id) REFERENCES recordings (id) ON DELETE CASCADE,
-      FOREIGN KEY (sender_id) REFERENCES users (id)
-    );
+    """ + MESSAGES_TABLE.format(name="messages") + """;
 
     -- Create indexes for better performance
     CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_cases_one_active_per_emt ON cases(emt_id) WHERE status = 'active';
     CREATE INDEX IF NOT EXISTS idx_cases_emt_id ON cases(emt_id);
+    CREATE INDEX IF NOT EXISTS idx_cases_destination ON cases(destination_hospital_id, status);
     CREATE INDEX IF NOT EXISTS idx_case_findings_segment_id ON case_findings(segment_id);
+    CREATE INDEX IF NOT EXISTS idx_case_updates_case ON case_updates(case_id, id);
+    -- A retried update with the same client_id returns the stored row instead of a duplicate.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_case_updates_client_id ON case_updates(case_id, client_id) WHERE client_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_vital_readings_case ON vital_readings(case_id, name, id);
+    CREATE INDEX IF NOT EXISTS idx_risk_assessments_case ON risk_assessments(case_id, based_on_version);
+    CREATE INDEX IF NOT EXISTS idx_case_acknowledgments_case ON case_acknowledgments(case_id, info_version);
     CREATE INDEX IF NOT EXISTS idx_messages_recording ON messages(recording_id, id);
+    CREATE INDEX IF NOT EXISTS idx_messages_case ON messages(case_id, id);
     -- A retried send with the same client_id returns the original message instead of a duplicate.
     CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_id ON messages(sender_id, client_id) WHERE client_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_recordings_emt_id ON recordings(emt_id);
@@ -184,8 +298,68 @@ def init_database():
         # WAL lets the SSE readers poll while a message is being written; the mode persists in the file.
         journal_mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
         print(f"✅ SQLite journal mode: {journal_mode}")
+        migrate_existing_tables(conn)
         conn.executescript(schema)
+        if conn.execute("SELECT COUNT(*) FROM hospitals").fetchone()[0] == 0:
+            conn.executemany("INSERT INTO hospitals (code, name) VALUES (?, ?)", DEMO_HOSPITALS)
         print("✅ Database schema created successfully")
+
+
+# Destinations offered to EMTs until real hospitals are configured. Only inserted into an empty table.
+DEMO_HOSPITALS = [
+    ("GEN", "General Hospital (demo)"),
+    ("NORTH", "Northside Medical Center (demo)"),
+    ("CHILD", "Children's Hospital (demo)"),
+]
+
+# Columns added to `cases` after it first shipped; ALTER TABLE adds them to older databases.
+ADDED_CASE_COLUMNS = [
+    ("destination_hospital_id", "INTEGER REFERENCES hospitals (id)"),
+    ("ems_unit", "TEXT"),
+    ("eta_at", "TEXT"),
+    ("info_version", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_update_at", "TEXT"),
+    ("arrived_at", "TEXT"),
+    ("source_case_id", "TEXT"),
+    ("source_run_id", "TEXT"),
+]
+
+
+def table_columns(conn, table: str) -> set:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def migrate_existing_tables(conn):
+    """Bring tables created by an earlier version of the schema up to date. No-op on a new database."""
+    user_columns = table_columns(conn, "users")
+    if user_columns and "hospital_id" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN hospital_id INTEGER REFERENCES hospitals (id)")
+
+    existing = table_columns(conn, "cases")
+    if existing:
+        for name, definition in ADDED_CASE_COLUMNS:
+            if name not in existing:
+                conn.execute(f"ALTER TABLE cases ADD COLUMN {name} {definition}")
+        if "info_version" not in existing:
+            # Older cases already hold information; give them a version so acknowledgments can refer to it.
+            conn.execute("UPDATE cases SET info_version = 1, last_update_at = updated_at")
+
+    message_columns = table_columns(conn, "messages")
+    if message_columns and "case_id" not in message_columns:
+        # recording_id was NOT NULL; SQLite can only relax that by rebuilding the table.
+        # Foreign keys are off while copying (SQLite's documented procedure), so rows written
+        # before enforcement was on are carried over instead of aborting startup.
+        conn.commit()
+        conn.executescript(
+            "PRAGMA foreign_keys = OFF; BEGIN;"
+            + MESSAGES_TABLE.format(name="messages_new")
+            + """;
+            INSERT INTO messages_new (id, recording_id, sender_id, sender_role, body, client_id, created_at)
+              SELECT id, recording_id, sender_id, sender_role, body, client_id, created_at FROM messages;
+            DROP TABLE messages;
+            ALTER TABLE messages_new RENAME TO messages;
+            COMMIT; PRAGMA foreign_keys = ON;"""
+        )
 
 def insert_sample_data():
     """Insert sample data with proper password hashes."""
@@ -197,8 +371,12 @@ def insert_sample_data():
             ('dr.smith', 'dr.smith@hospital.com', password_hash, 'doctor', 'John', 'Smith', '+1234567890', 'Emergency Medicine'),
             ('dr.jones', 'dr.jones@hospital.com', password_hash, 'doctor', 'Sarah', 'Jones', '+1234567891', 'Cardiology'),
             ('emt.wilson', 'emt.wilson@ems.com', password_hash, 'emt', 'Mike', 'Wilson', '+1234567892', None),
-            ('emt.garcia', 'emt.garcia@ems.com', password_hash, 'emt', 'Maria', 'Garcia', '+1234567893', None)
+            ('emt.garcia', 'emt.garcia@ems.com', password_hash, 'emt', 'Maria', 'Garcia', '+1234567893', None),
+            # A third crew, so the demo can run three inbound cases at once (one open case per EMT).
+            ('emt.lee', 'emt.lee@ems.com', password_hash, 'emt', 'Jordan', 'Lee', '+1234567894', None)
         ]
+        # Two hospitals, so "another hospital's doctor" can be tested.
+        doctor_hospitals = [('dr.smith', 'GEN'), ('dr.jones', 'NORTH')]
         
         with get_db() as conn:
             cursor = conn.cursor()
@@ -206,6 +384,11 @@ def insert_sample_data():
                 cursor.execute(
                     'INSERT OR IGNORE INTO users (username, email, password_hash, role, first_name, last_name, phone, specialty) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                     user
+                )
+            for username, code in doctor_hospitals:
+                cursor.execute(
+                    'UPDATE users SET hospital_id = (SELECT id FROM hospitals WHERE code = ?) WHERE username = ? AND hospital_id IS NULL',
+                    (code, username)
                 )
         
         print("✅ Sample data inserted successfully with proper passwords")
