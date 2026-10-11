@@ -345,6 +345,46 @@ def list_runs(case_id: int) -> list:
     )
 
 
+# Vital signs in the order clinicians read them; "bp" pairs systolic and diastolic.
+TREND_ORDER = ("hr", "bp", "rr", "spo2", "temp_c", "gcs", "glucose")
+
+
+def vital_changes(case_ids: list) -> dict:
+    """
+    For each case, the vital signs whose two latest readings differ, typed or extracted, for a
+    queue row: [{"name": "spo2", "label": "SpO2", "from": "94", "to": "89", "unit": "%"}].
+    """
+    if not case_ids:
+        return {}
+    marks = ",".join("?" * len(case_ids))
+    rows = query(
+        f"""SELECT case_id, name, value, measured_at AS at FROM vital_readings WHERE case_id IN ({marks})
+            UNION ALL
+            SELECT case_id, vital_name, vital_value, recorded_at FROM case_findings
+            WHERE finding_type = 'vital' AND run_id IS NOT NULL AND case_id IN ({marks})
+            ORDER BY at""",
+        tuple(case_ids) * 2,
+    )
+    series = {}
+    for row in rows:
+        series.setdefault((row["case_id"], row["name"]), []).append(str(_number(row["value"])))
+    changes = {}
+    for case_id in case_ids:
+        found = []
+        for name in TREND_ORDER:
+            if name == "bp":
+                sbp, dbp = series.get((case_id, "sbp"), []), series.get((case_id, "dbp"), [])
+                values = [f"{s}/{d}" for s, d in zip(sbp[-2:], dbp[-2:])] if len(sbp) >= 2 and len(dbp) >= 2 else []
+                label, unit = "BP", "mmHg"
+            else:
+                values = series.get((case_id, name), [])
+                label, unit, _, _ = VITAL_SIGNS[name]
+            if len(values) >= 2 and values[-1] != values[-2]:
+                found.append({"name": name, "label": label, "from": values[-2], "to": values[-1], "unit": unit})
+        changes[case_id] = found
+    return changes
+
+
 def fail_interrupted_extractions() -> None:
     """Called at startup: extractions in flight when the server stopped will never finish on their own."""
     now = utc_now_iso()

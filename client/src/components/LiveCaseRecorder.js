@@ -40,6 +40,8 @@ const LiveCaseRecorder = () => {
   const [busyMessage, setBusyMessage] = useState(null);
   const caseRef = useRef(null);
   const nextSeqRef = useRef(0);
+  // The acknowledgment last announced, so each one is announced once.
+  const announcedAck = useRef(null);
   caseRef.current = activeCase;
 
   const addSegment = useCallback((segment) => setSegments((list) => upsertNewer(list, segment)), []);
@@ -115,6 +117,14 @@ const LiveCaseRecorder = () => {
     } else if ((type === 'segment.created' || type === 'segment.updated') && data.case_id === current.id) {
       addSegment(data.segment);
     } else if (type === 'case.updated' && data.case.id === current.id) {
+      const ack = data.case.acknowledgment;
+      const seen = announcedAck.current?.caseId === current.id
+        ? announcedAck.current.version : (current.acknowledgment?.info_version || 0);
+      if (ack && ack.info_version > seen) {
+        announcedAck.current = { caseId: current.id, version: ack.info_version };
+        toast.success(`${data.case.destination_hospital_name || 'The hospital'} saw your latest update (${ack.user_name})`,
+          { icon: '✅' });
+      }
       setActiveCase((c) => (c && c.updated_at >= data.case.updated_at ? c : data.case));
     } else if (type === 'update.created') {
       addCaseUpdate(data.update);

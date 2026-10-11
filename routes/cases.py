@@ -489,6 +489,9 @@ async def hospital_queue(current_user: dict = Depends(require_role(["doctor"])))
         (hospital_id,),
     ) if hospital_id is not None else []
     ordered = case_queue.order(describe_cases(rows), datetime.now(timezone.utc))
+    changes = case_extraction.vital_changes([case["id"] for case in ordered])
+    for case in ordered:
+        case["vital_changes"] = changes[case["id"]]
     return {
         "rule_version": case_queue.QUEUE_RULE_VERSION,
         "rule": case_queue.QUEUE_RULE,

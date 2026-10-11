@@ -23,6 +23,25 @@ const newestFirst = (cases) => [...cases].sort((a, b) => b.started_at.localeComp
 
 // Wait this long after a change before re-fetching the queue, so a burst of events is one request.
 const QUEUE_REFRESH_MS = 300;
+// How long a case that changed position shows where it came from.
+const MOVE_CUE_MS = 30 * 1000;
+
+const clockTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+// "arrives in 11 min (14:32)", counted down against the server clock.
+const etaText = (etaAt, serverNow) => {
+  if (!etaAt) return 'ETA not given';
+  const minutes = Math.round((Date.parse(etaAt) - serverNow) / 60000);
+  if (minutes > 0) return `arrives in ${minutes} min (${clockTime(etaAt)})`;
+  if (minutes === 0) return `arriving now (${clockTime(etaAt)})`;
+  return `ETA passed ${-minutes} min ago (${clockTime(etaAt)})`;
+};
+
+const MoveCue = ({ move }) => (move.to < move.from ? (
+  <span className="px-2 py-0.5 text-xs font-bold text-white bg-amber-500 rounded-full">↑ from #{move.from}</span>
+) : (
+  <span className="px-2 py-0.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-full">↓ from #{move.from}</span>
+));
 
 const ConnectionBadge = ({ status }) =>
   status === 'live' ? (
@@ -51,28 +70,39 @@ const CaseStatusBadge = ({ liveCase, serverNow }) => {
   return <span className="px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full animate-pulse">LIVE</span>;
 };
 
-const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow }) => (
+const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move }) => (
   <li>
     <button
       onClick={() => onSelect(c.id)}
-      className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-blue-50 ${selected ? 'bg-blue-50' : ''}`}
+      className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-blue-50 transition-colors ${selected ? 'bg-blue-50' : ''} ${move && move.to < move.from ? 'ring-2 ring-inset ring-amber-300' : ''}`}
     >
-      <div className="flex items-center justify-between mb-1">
-        <span className="font-medium text-gray-900">
-          {c.queue_position && <span className="mr-2 text-gray-400">#{c.queue_position}</span>}
-          Case #{c.id}
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <span className="flex flex-wrap items-baseline gap-x-2 text-gray-900">
+          <span className="font-semibold whitespace-nowrap">
+            {c.queue_position && <span className="mr-2 text-gray-400">#{c.queue_position}</span>}
+            {c.ems_unit || `Case #${c.id}`}
+          </span>
+          {c.status === 'active' && !c.arrived_at && (
+            <span className="text-sm text-gray-600 whitespace-nowrap">{etaText(c.eta_at, serverNow)}</span>
+          )}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
+          {move && <MoveCue move={move} />}
           {unseen > 0 && <span className="px-2 text-xs font-bold text-white bg-blue-600 rounded-full">{unseen} new</span>}
           <CaseStatusBadge liveCase={c} serverNow={serverNow} />
         </div>
       </div>
       <div className="flex flex-wrap gap-1 mb-1">
-        {c.status === 'active' && <OperationalBadge status={c.operational_status} />}
         <CategoryBadge liveCase={c} />
+        {c.status === 'active' && <OperationalBadge status={c.operational_status} />}
         {c.processing?.needs_review && <ProcessingBadge processing={c.processing} />}
       </div>
       <p className="text-sm text-gray-700 truncate">{c.patient_info || 'No patient info'}</p>
+      {c.vital_changes?.length > 0 && (
+        <p className="text-xs font-medium text-gray-800 mt-0.5">
+          {c.vital_changes.map((v) => `${v.label} ${v.from}→${v.to}`).join(' · ')}
+        </p>
+      )}
       {c.queue_reasons && (
         <p className="text-xs text-gray-600 mt-0.5 truncate" title={c.queue_reasons.join(' · ')}>
           Why here: {c.queue_reasons.join(' · ')}
@@ -80,7 +110,7 @@ const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow }) =>
       )}
       <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
         <Clock className="h-3 w-3" />
-        {new Date(c.started_at).toLocaleTimeString()} · EMT {c.emt_first_name} {c.emt_last_name} · {c.segment_count || 0} segments
+        Case #{c.id} · started {clockTime(c.started_at)} · EMT {c.emt_first_name} {c.emt_last_name}
       </p>
     </button>
   </li>
@@ -105,10 +135,26 @@ const LiveCasesPanel = () => {
   // Order, counts and reasons come from the server (GET /api/cases/queue); this view never re-sorts.
   const [queue, setQueue] = useState({ cases: [], counts: null, rule: '' });
   const queueTimer = useRef(null);
+  // Cases that just changed position: id -> { from, to }, cleared after MOVE_CUE_MS.
+  const [moves, setMoves] = useState({});
+  const positions = useRef(null);
 
   const fetchQueue = useCallback(async () => {
     try {
       const response = await axios.get('/api/cases/queue');
+      const next = Object.fromEntries(response.data.cases.map((c) => [c.id, c.queue_position]));
+      const moved = positions.current ? Object.entries(next)
+        .filter(([id, position]) => positions.current[id] && positions.current[id] !== position)
+        .map(([id, position]) => [id, { from: positions.current[id], to: position }]) : [];
+      positions.current = next;
+      if (moved.length) {
+        setMoves((current) => ({ ...current, ...Object.fromEntries(moved) }));
+        setTimeout(() => setMoves((current) => {
+          const rest = { ...current };
+          moved.forEach(([id, move]) => { if (rest[id] === move) delete rest[id]; });
+          return rest;
+        }), MOVE_CUE_MS);
+      }
       setQueue(response.data);
       setSelectedId((current) => current ?? response.data.cases[0]?.id ?? null);
     } catch (error) {
@@ -181,6 +227,7 @@ const LiveCasesPanel = () => {
       addCaseUpdate(data.update);
     } else if (type === 'findings.updated') {
       applyFindings(data);
+      refreshQueueSoon();  // the rows show which vitals changed
     } else if (type === 'case.opened' || type === 'case.updated') {
       setCases((list) => upsertNewer(list, data.case));
       refreshQueueSoon();
@@ -263,11 +310,11 @@ const LiveCasesPanel = () => {
             : 'No inbound cases. They appear here as soon as an EMT routes one to your hospital.'}
         </p>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3">
-          <ul className="border-r border-gray-200 max-h-[32rem] overflow-y-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-5">
+          <ul className="lg:col-span-2 border-r border-gray-200 max-h-[48rem] overflow-y-auto">
             {queued.map((c) => (
               <CaseListItem key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
-                            unseen={unseen[c.id]} serverNow={serverNow} />
+                            unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]} />
             ))}
             {others.length > 0 && (
               <li className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-100">
@@ -280,12 +327,12 @@ const LiveCasesPanel = () => {
             ))}
           </ul>
 
-          <div className="lg:col-span-2 p-6">
+          <div className="lg:col-span-3 p-6">
             {selected ? (
               <>
                 <div className="mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">
-                    Case #{selected.id} — EMT {selected.emt_first_name} {selected.emt_last_name}
+                    {selected.ems_unit && `${selected.ems_unit} · `}Case #{selected.id} — EMT {selected.emt_first_name} {selected.emt_last_name}
                   </h3>
                   <p className="text-sm text-gray-600">{selected.patient_info || 'No patient info provided'}</p>
                   <p className="text-xs text-gray-500 mt-1">
