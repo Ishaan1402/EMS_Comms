@@ -69,20 +69,26 @@ const LiveCaseRecorder = () => {
 
   // Pick up a case left open by a page refresh or closed tab. It is shown only once its
   // transcript is loaded, so resumed audio continues after the last seq the server has.
+  // Only the latest check applies its answer, and never over a case opened here meanwhile.
+  const loadSeq = useRef(0);
   const loadOpenCase = useCallback(async () => {
+    const seq = ++loadSeq.current;
+    const stillCurrent = () => seq === loadSeq.current && caseRef.current?.status !== 'active';
     setOpenCaseCheck('checking');
     try {
       const open = (await axios.get('/api/cases?status=active')).data[0];
       if (open) {
         const existing = (await axios.get(`/api/cases/${open.id}/segments`)).data;
+        if (!stillCurrent()) return;
         nextSeqRef.current = nextSeqAfter(existing);
+        caseRef.current = open;
         setSegments(existing);
         setActiveCase(open);
       }
-      setOpenCaseCheck('done');
+      if (seq === loadSeq.current) setOpenCaseCheck('done');
     } catch (error) {
       console.error('Error checking for an open case:', error);
-      setOpenCaseCheck('failed');
+      if (seq === loadSeq.current) setOpenCaseCheck('failed');
     }
   }, []);
 
@@ -112,11 +118,14 @@ const LiveCaseRecorder = () => {
     if (!current) return;
     if (type === 'ready') {
       // Events sent while disconnected aren't replayed: re-fetch everything this view shows.
-      axios.get(`/api/cases/${current.id}/segments`)
-        .then((response) => setSegments((list) => mergeNewer(list, response.data)))
+      // An answer for a case that is no longer on screen (closed, another one opened) is dropped.
+      const caseId = current.id;
+      const stillShown = () => caseRef.current?.id === caseId;
+      axios.get(`/api/cases/${caseId}/segments`)
+        .then((response) => stillShown() && setSegments((list) => mergeNewer(list, response.data)))
         .catch((error) => console.error('Error re-syncing transcript:', error));
-      axios.get(`/api/cases/${current.id}`)
-        .then((response) => setActiveCase((c) => (c && c.updated_at >= response.data.updated_at ? c : response.data)))
+      axios.get(`/api/cases/${caseId}`)
+        .then((response) => stillShown() && setActiveCase((c) => (c && c.id === caseId && c.updated_at < response.data.updated_at ? response.data : c)))
         .catch((error) => console.error('Error re-syncing case:', error));
       reloadCaseUpdates();
       reloadFindings();
@@ -131,7 +140,9 @@ const LiveCaseRecorder = () => {
         toast.success(`${data.case.destination_hospital_name || 'The hospital'} saw your latest update (${ack.user_name})`,
           { icon: '✅', duration: 6000 });
       }
-      setActiveCase((c) => (c && c.updated_at >= data.case.updated_at ? c : data.case));
+      // Seen by the next event in the same batch too (e.g. "closed" then "opened" before a re-render).
+      if (current.updated_at < data.case.updated_at) caseRef.current = data.case;
+      setActiveCase((c) => (c && c.id === data.case.id && c.updated_at < data.case.updated_at ? data.case : c));
     } else if (type === 'update.created') {
       addCaseUpdate(data.update);
     } else if (type === 'findings.updated') {

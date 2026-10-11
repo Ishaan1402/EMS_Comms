@@ -268,6 +268,12 @@ class TestExtractionRuns:
                 assert client.get(f"/api/cases/{case['id']}/{path}", headers=auth(username)).status_code == 404
             assert client.post(f"/api/cases/{case['id']}/findings/retry", headers=auth(username)).status_code == 404
 
+    def test_snapshots_carry_an_increasing_as_of(self, monkeypatch):
+        use_extractor(monkeypatch, answer())
+        case = start_case()
+        first, second = findings(case["id"]), findings(case["id"])
+        assert first["as_of"] < second["as_of"]
+
     def test_changes_are_pushed_to_the_cases_viewers(self, monkeypatch):
         use_extractor(monkeypatch, answer(chief=[(0, "Breathing trouble")]))
         published = []
