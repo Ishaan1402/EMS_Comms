@@ -103,6 +103,12 @@ const LiveCaseRecorder = () => {
 
   const handleEvent = useCallback((type, data) => {
     const current = caseRef.current;
+    if ((type === 'case.opened' || type === 'ready') && current?.status !== 'active') {
+      // No case open here: pick up one this EMT opened somewhere else (another device, or the
+      // demo replay), including one opened while this screen was disconnected.
+      loadOpenCase();
+      return;
+    }
     if (!current) return;
     if (type === 'ready') {
       // Events sent while disconnected aren't replayed: re-fetch everything this view shows.
@@ -123,7 +129,7 @@ const LiveCaseRecorder = () => {
       if (ack && ack.info_version > seen) {
         announcedAck.current = { caseId: current.id, version: ack.info_version };
         toast.success(`${data.case.destination_hospital_name || 'The hospital'} saw your latest update (${ack.user_name})`,
-          { icon: '✅' });
+          { icon: '✅', duration: 6000 });
       }
       setActiveCase((c) => (c && c.updated_at >= data.case.updated_at ? c : data.case));
     } else if (type === 'update.created') {
@@ -131,9 +137,10 @@ const LiveCaseRecorder = () => {
     } else if (type === 'findings.updated') {
       applyFindings(data);
     }
-  }, [addSegment, addCaseUpdate, reloadCaseUpdates, applyFindings, reloadFindings]);
+  }, [addSegment, addCaseUpdate, reloadCaseUpdates, applyFindings, reloadFindings, loadOpenCase]);
 
-  const connection = useCaseEvents(handleEvent, !!activeCase);
+  // Always connected, so a case opened elsewhere shows up here too.
+  const connection = useCaseEvents(handleEvent);
 
   // withAudio: open the microphone and start streaming; otherwise the case starts from typed information.
   const startLiveCase = (withAudio) => runBusy('Starting case…', async () => {
