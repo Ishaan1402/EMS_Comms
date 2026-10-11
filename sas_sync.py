@@ -42,7 +42,7 @@ from typing import Optional
 import httpx
 
 import database
-from database import query, utc_now_iso
+from database import query, read_snapshot, utc_now_iso
 
 SAS_EPOCH = datetime(1960, 1, 1, tzinfo=timezone.utc)
 DATETIME_FORMAT = "DATETIME22.3"
@@ -169,7 +169,15 @@ def _bool(value) -> Optional[int]:
 
 
 def build_tables() -> dict:
-    """The four tables as {name: list of rows}, each row a dict keyed by column name."""
+    """
+    The tables as {name: list of rows}, each row a dict keyed by column name, all read from one
+    consistent snapshot of the database.
+    """
+    with read_snapshot():
+        return _build_tables()
+
+
+def _build_tables() -> dict:
     from case_assessment import VITAL_SIGNS
     from routes.cases import CASE_SELECT, describe_cases
 
@@ -425,25 +433,32 @@ class CasClient:
 
     async def replace_tables(self, tables: dict) -> None:
         """
-        Replace each shared table with new contents ({name: csv bytes}; empty bytes drops it).
-        Upload to a staging table, then swap it in, so a failed upload leaves the old table.
+        Replace each shared table with new contents ({name: csv bytes}). Upload to a staging table,
+        then swap it in, so a failed upload leaves the old table. Nothing to upload (no rows) leaves
+        the shared table as it is: an empty or new database must never wipe published data.
+        CAS can't promote over an existing table, so the old one is dropped first; if the promote
+        then fails, the last saved copy (.sashdat) is loaded back.
         """
         caslib = self.settings.caslib
+        tables = {name: data for name, data in tables.items() if data}
+        if not tables:
+            return
         session = await self.open_session()
         try:
             for name, data in tables.items():
                 target = self.settings.prefix + name
-                if not data:
-                    await self.action(session, "table.dropTable", {"caslib": caslib, "name": target, "quiet": True})
-                    continue
                 stage = f"{target}_STAGE"
                 await self.upload_csv(session, stage, name, data)
                 await self.action(session, "table.alterTable",
                                   {"caslib": caslib, "name": stage, "columns": table_formats(name)})
                 await self.action(session, "table.dropTable", {"caslib": caslib, "name": target, "quiet": True})
-                await self.action(session, "table.promote", {
-                    "caslib": caslib, "name": stage, "target": target, "targetLib": caslib, "drop": True,
-                })
+                try:
+                    await self.action(session, "table.promote", {
+                        "caslib": caslib, "name": stage, "target": target, "targetLib": caslib, "drop": True,
+                    })
+                except SasError as error:
+                    await self._restore_saved(session, target, error)
+                    raise
                 if self.settings.save_tables:
                     await self.action(session, "table.save", {
                         "table": {"caslib": caslib, "name": target}, "caslib": caslib,
@@ -454,6 +469,20 @@ class CasClient:
                 await self.close_session(session)
             except Exception as error:  # don't hide the real failure; the session times out on its own
                 print(f"⚠️  SAS: could not close CAS session: {error}")
+
+    async def _restore_saved(self, session: str, target: str, error: "SasError") -> None:
+        """After a failed promote: put the last saved copy of the shared table back, if there is one."""
+        if not self.settings.save_tables:
+            return
+        caslib = self.settings.caslib
+        try:
+            await self.action(session, "table.loadTable", {
+                "caslib": caslib, "path": f"{target}.sashdat",
+                "casOut": {"caslib": caslib, "name": target, "promote": True},
+            })
+        except SasError as restore_error:
+            raise SasError(f"{error}; restoring {target} from its saved copy also failed: {restore_error}") from error
+        print(f"⚠️  SAS: {target} restored from its last saved copy after: {error}")
 
 
 # --- Background sync -------------------------------------------------------------------------
@@ -484,7 +513,11 @@ class SasSync:
     async def push(self, force: bool = False) -> list:
         """Push tables whose contents changed (all of them with force). Returns the names pushed."""
         tables = await asyncio.get_running_loop().run_in_executor(None, build_tables)
-        payloads = {name: to_csv(name, rows) if rows else b"" for name, rows in tables.items()}
+        # A table with no rows is not sent: the shared copy (and dashboards on it) stays as it was.
+        payloads = {name: to_csv(name, rows) for name, rows in tables.items() if rows}
+        for name in tables:
+            if not tables[name]:
+                self.status["tables"].setdefault(self.settings.prefix + name, {})["skipped"] = "no rows"
         changed = {name: data for name, data in payloads.items()
                    if force or self._hashes.get(name) != hashlib.sha256(data).hexdigest()}
         self.status["last_attempt_at"] = utc_now_iso()

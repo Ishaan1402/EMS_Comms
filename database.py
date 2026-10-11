@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import threading
+import contextvars
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import bcrypt
@@ -60,8 +61,32 @@ def get_db():
     finally:
         conn.close()
 
+# Set by read_snapshot(): the connection whose read transaction query() uses instead of a new one.
+_snapshot = contextvars.ContextVar("read_snapshot", default=None)
+
+
+@contextmanager
+def read_snapshot():
+    """
+    Every query() inside sees one consistent state of the database (a single read transaction in
+    WAL mode), e.g. so an export's tables can't mix states while the app keeps writing.
+    """
+    conn = get_db_connection()
+    conn.execute("BEGIN")
+    token = _snapshot.set(conn)
+    try:
+        yield
+    finally:
+        _snapshot.reset(token)
+        conn.rollback()
+        conn.close()
+
+
 def query(sql: str, params: tuple = ()):
     """Execute a SELECT query and return all results."""
+    snapshot = _snapshot.get()
+    if snapshot is not None:
+        return [dict(row) for row in snapshot.execute(sql, params).fetchall()]
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(sql, params)

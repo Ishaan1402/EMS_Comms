@@ -250,7 +250,7 @@ class TestCasClient:
                                                "targetLib": "Public", "drop": True}
         assert json.loads(save.content)["name"] == "ASC_VITALS.sashdat"
 
-    def test_empty_table_is_dropped_not_uploaded(self):
+    def test_nothing_to_upload_never_touches_the_shared_table(self):
         fake = FakeSas()
 
         async def go():
@@ -260,7 +260,36 @@ class TestCasClient:
             finally:
                 await c.close()
         run_async(go())
-        assert [p for _, p in fake.calls()][2:] == ["/cas/sessions/sess-1/actions/table.dropTable", "/cas/sessions/sess-1"]
+        assert fake.calls() == []  # an empty or new database must never wipe published data
+
+    def test_a_failed_swap_restores_the_last_saved_copy(self):
+        fake = FakeSas(fail={"table.promote": "ERROR: Insufficient authorization"})
+
+        async def go():
+            c = cas_client(fake)
+            try:
+                await c.replace_tables({"CASES": b"x\n1\n"})
+            finally:
+                await c.close()
+        with pytest.raises(sas_sync.SasError, match="table.promote: ERROR: Insufficient authorization"):
+            run_async(go())
+        steps = [p.rsplit("/", 1)[-1] for _, p in fake.calls()]
+        assert steps[-3:] == ["table.promote", "table.loadTable", "sess-1"]
+        restore = json.loads(fake.requests[-2].content)
+        assert restore == {"caslib": "Public", "path": "ASC_CASES.sashdat",
+                           "casOut": {"caslib": "Public", "name": "ASC_CASES", "promote": True}}
+
+    def test_a_failed_restore_says_so(self):
+        fake = FakeSas(fail={"table.promote": "ERROR: Insufficient authorization", "table.loadTable": "ERROR: File not found"})
+
+        async def go():
+            c = cas_client(fake)
+            try:
+                await c.replace_tables({"CASES": b"x\n1\n"})
+            finally:
+                await c.close()
+        with pytest.raises(sas_sync.SasError, match="restoring ASC_CASES from its saved copy also failed"):
+            run_async(go())
 
     def test_failed_action_raises_and_still_closes_the_session(self):
         fake = FakeSas(fail={"table.promote": "ERROR: Insufficient authorization"})
@@ -295,8 +324,8 @@ class TestCasClient:
         async def go():
             c = cas_client(fake)
             try:
-                await c.replace_tables({"VITALS": b""})
-                await c.replace_tables({"VITALS": b""})
+                await c.replace_tables({"CASES": b"x\n1\n"})
+                await c.replace_tables({"CASES": b"x\n1\n"})
             finally:
                 await c.close()
         run_async(go())
@@ -322,6 +351,21 @@ class TestSync:
         assert second == [] and third == ["CASES"]
         assert status["last_error"] is None and status["tables"]["ASC_CASES"]["rows"] >= 1
         assert "client_secret" not in json.dumps(status) and "s3cret" not in json.dumps(status)
+
+    def test_a_table_with_no_rows_is_skipped_not_dropped(self, story, monkeypatch):
+        fake = FakeSas()
+        tables = sas_sync.build_tables()
+        monkeypatch.setattr(sas_sync, "build_tables", lambda: {**tables, "VITALS": []})
+
+        async def go():
+            syncer = sas_sync.SasSync(SETTINGS, client=cas_client(fake))
+            try:
+                return await syncer.push(force=True), syncer.describe()
+            finally:
+                await syncer.stop()
+        pushed, status = run_async(go())
+        assert "VITALS" not in pushed and status["tables"]["ASC_VITALS"] == {"skipped": "no rows"}
+        assert not any("ASC_VITALS" in request.content.decode(errors="ignore") for request in fake.requests)
 
     def test_failures_back_off_and_recover(self, story):
         syncer = sas_sync.SasSync(SETTINGS, client=cas_client(FakeSas(http_error={"/cas/sessions": 403})))
@@ -429,3 +473,14 @@ class TestCsvAndLoader:
         conn = SimpleNamespace(table=Table(), upload_file=lambda path, **params: None)
         with pytest.raises(RuntimeError, match="publish ASC_CASES failed: Insufficient authorization"):
             load_csvs.load_tables(conn, str(tmp_path))
+
+
+class TestSnapshot:
+    def test_an_export_reads_one_consistent_state(self):
+        before = len(query("SELECT id FROM hospitals"))
+        with database.read_snapshot():
+            assert len(query("SELECT id FROM hospitals")) == before
+            run("INSERT INTO hospitals (code, name) VALUES ('SNAP', 'Written during the export')")  # another connection
+            assert len(query("SELECT id FROM hospitals")) == before
+        assert len(query("SELECT id FROM hospitals")) == before + 1
+        run("DELETE FROM hospitals WHERE code = 'SNAP'")
