@@ -46,7 +46,10 @@ TRANSCRIPT_WAIT_SECONDS = 120
 # Password of the seeded demo accounts (database.insert_sample_data).
 DEMO_PASSWORD = "password123"
 ACTIONS = {"start_case", "audio_report", "typed_report", "garbled_audio", "dismiss_failed", "eta", "message",
-           "acknowledge_all"}
+           "acknowledge", "acknowledge_all", "finish_case", "snapshot_queue"}
+# The app stores "Cannot assess" for the evaluation contract's "Unsure".
+CATEGORY_FOR_EVALS = {"Cannot assess": "Unsure"}
+FAILURE_STATUS = {"timed out": "timeout", "the AI declined to assess this case": "refusal"}
 
 
 class ReplayError(Exception):
@@ -136,6 +139,10 @@ def validate(scenario: dict) -> None:
     for event in scenario["events"]:
         if event["action"] not in ACTIONS:
             raise ReplayError(f"Unknown action {event['action']!r}")
+        if event["action"] == "snapshot_queue":
+            if not event.get("queue_id") or not event.get("patients") or set(event["patients"]) - patients:
+                raise ReplayError(f"Queue snapshot at minute {event['minute']} needs a queue_id and known patients")
+            continue
         if event["action"] != "acknowledge_all" and event.get("patient") not in patients:
             raise ReplayError(f"Event at minute {event['minute']} refers to unknown patient {event.get('patient')!r}")
         report = event.get("report")
@@ -161,6 +168,7 @@ class Replay:
         self.tokens = {}
         self.cases = {}     # source_case_id -> case id
         self.next_seq = {}  # source_case_id -> next segment seq
+        self.queue_snapshots = {}  # queue_id -> {source_case_id: rank within the group}
 
     # --- HTTP -----------------------------------------------------------------
 
@@ -294,6 +302,38 @@ class Replay:
         self.call("POST", f"/api/cases/{self._case(event)}/messages", sender, json={"body": event["body"]})
         self.log(f"[{event['minute']:>4}] {event['patient']}: {event['from']} says {event['body']!r}")
 
+    def acknowledge(self, event) -> None:
+        """The doctor acknowledges one patient's information, once its transcript has arrived."""
+        case_id, doctor = self._case(event), self.scenario["doctor"]
+        if not self._wait_for(lambda c: c["id"] != case_id or c["processing"]["transcription"]["pending"] == 0,
+                              timeout=TRANSCRIPT_WAIT_SECONDS):
+            raise ReplayError(f"{event['patient']} still transcribing after {TRANSCRIPT_WAIT_SECONDS} s")
+        version = self.call("GET", f"/api/cases/{case_id}", doctor)["info_version"]
+        self.call("POST", f"/api/cases/{case_id}/acknowledge", doctor, json={"info_version": version})
+        self.log(f"[{event['minute']:>4}] {doctor} acknowledged {event['patient']} at version {version}")
+
+    def finish_case(self, event) -> None:
+        """The patient arrives and the crew closes the case, so the EMT can start another."""
+        case_id, emt = self._case(event), self._emt(event)
+        self.call("POST", f"/api/cases/{case_id}/arrive", emt)
+        self.call("POST", f"/api/cases/{case_id}/close", emt)
+        self.log(f"[{event['minute']:>4}] {event['patient']}: arrived, case closed")
+
+    def snapshot_queue(self, event) -> None:
+        """Record how the hospital queue orders a group of patients, once their information is assessed."""
+        group = {self.cases[p] for p in event["patients"] if p in self.cases}
+        if len(group) != len(event["patients"]):
+            raise ReplayError(f"Queue {event['queue_id']}: not every patient has a case yet")
+        if not self._wait_for(lambda c: c["id"] not in group or self._settled(c), timeout=TRANSCRIPT_WAIT_SECONDS):
+            raise ReplayError(f"Queue {event['queue_id']}: patients still being processed")
+        positions = {c["source_case_id"]: c["queue_position"] for c in self.queue_order()["cases"]
+                     if c["source_case_id"] in event["patients"]}
+        if set(positions) != set(event["patients"]):
+            raise ReplayError(f"Queue {event['queue_id']}: not every patient is in the hospital's queue")
+        ranked = sorted(positions, key=positions.get)
+        self.queue_snapshots[event["queue_id"]] = {p: ranked.index(p) + 1 for p in event["patients"]}
+        self.log(f"[{event['minute']:>4}] queue {event['queue_id']}: " + " > ".join(ranked))
+
     def acknowledge_all(self, event) -> None:
         """
         The doctor acknowledges exactly the version on their screen, like the dashboard button,
@@ -322,13 +362,14 @@ class Replay:
                 return False
             self.sleep(1)
 
+    @staticmethod
+    def _settled(case: dict) -> bool:
+        return case["processing"]["transcription"]["pending"] == 0 \
+            and case["processing"]["assessment"]["status"] not in ("processing", "pending")
+
     def wait_until_settled(self, timeout: float = 120.0) -> None:
         """Real transcription and scoring run after the requests return, including queued re-assessments."""
-        settled = self._wait_for(
-            lambda c: c["processing"]["transcription"]["pending"] == 0
-            and c["processing"]["assessment"]["status"] not in ("processing", "pending"),
-            timeout,
-        )
+        settled = self._wait_for(self._settled, timeout)
         if not settled:
             self.log("still processing after the timeout; showing the current state")
 
@@ -401,6 +442,81 @@ class Replay:
                     extracted.append(seconds_between(arrived[attempt["to_version"]], attempt["completed_at"]))
         return {"transcript": spread(transcript), "assessment": spread(assessed), "extraction": spread(extracted)}
 
+    def predictions(self) -> dict:
+        """
+        The run in the evaluation harness's model_predictions format (evals/README.md), so
+        `python -m evals score` can compare what the app did with the clinician's answers:
+        one record per patient from the app's last assessment of its final information, and a
+        queue order for each snapshot. The inputs were the replayed reports as the app received
+        them (input_contract_version), not the dataset's text verbatim; app_run says how.
+        """
+        doctor = self.scenario["doctor"]
+        config_id = f"app-replay-{self.run_id}"
+        records, details, versions = [], {}, set()
+        for source_case_id, case_id in self.cases.items():
+            case = self.call("GET", f"/api/cases/{case_id}", doctor)
+            attempts = self.call("GET", f"/api/cases/{case_id}/assessments", doctor)  # newest first
+            final = next((a for a in attempts if a["status"] != "processing"), None)
+            record = {"config_id": config_id, "case_id": source_case_id, "repeat_id": 1, "retry_count": None}
+            if final is None or final["based_on_version"] < case["info_version"]:
+                record["status"] = "error"  # the final information was never assessed
+            elif final["status"] in ("completed", "needs_review"):
+                category = final["preparation_category"]
+                record.update(status="ok", output={
+                    "summary": final["summary"],
+                    "meaningful_change": final["meaningful_change"],
+                    "change_explanation": final["change_explanation"],
+                    "missing_information": final["missing_information"],
+                    "preparation_category": CATEGORY_FOR_EVALS.get(category, category),
+                })
+            else:
+                record["status"] = FAILURE_STATUS.get(final["error"], "error")
+            if final:
+                versions.add(final["scorer_version"])
+                record.update({key: final[key] for key in ("latency_ms", "input_tokens", "output_tokens", "cost_usd")})
+            records.append(record)
+            findings = self.call("GET", f"/api/cases/{case_id}/findings", doctor)
+            facts = ([findings["chief_complaint"]] if findings["chief_complaint"] else []) \
+                + findings["vitals"] + findings["findings"] + findings["treatments"]
+            details[source_case_id] = {
+                "case_id": case_id,
+                "assessment_id": final and final["id"],
+                "based_on_version": final and final["based_on_version"],
+                "baseline_version": final and final["baseline_version"],
+                # The extraction step's output (KAN-8), for reviewing alongside the assessment.
+                "extracted": [{**{key: fact.get(key) for key in ("type", "text", "status", "name", "value", "unit",
+                                                                   "qualifier")},
+                               "source": fact["source"]["kind"]} for fact in facts],
+            }
+        if len(versions) > 1:
+            raise ReplayError(f"Assessments in this run used different models/prompts: {sorted(versions)}")
+        model, prompt_version = (versions.pop() if versions else "unknown/unknown").split("/", 1)
+        return {
+            "kind": "model_predictions",
+            "dataset_version": self.scenario["dataset_version"],
+            "configs": [{
+                "config_id": config_id,
+                "provider": "openai",
+                "model": model,
+                "prompt_version": prompt_version,
+                "input_contract_version": f"app_replay_{'typed' if self.typed else 'speech'}",
+                "repeats": 1,
+            }],
+            "records": records,
+            "queues": [{"config_id": config_id, "queue_id": queue_id, "repeat_id": 1, "order": order}
+                       for queue_id, order in self.queue_snapshots.items()],
+            "app_run": {
+                **self.manifest(),
+                "notes": ("Outputs of the running app (Asclepius) on a replay. Each record is the app's last AI "
+                          "assessment of the case's final information. Earlier information is what the doctor "
+                          "had acknowledged; reports were " + ("typed" if self.typed else
+                                                               "spoken (text-to-speech) and transcribed") +
+                          ", and time was compressed by seconds_per_minute, which the model sees as "
+                          "elapsed_minutes. Queue orders come from the app's queue rule, not a model."),
+                "cases": details,
+            },
+        }
+
     def finish(self) -> None:
         """Hand-over: mark each patient arrived and close the case."""
         for source_case_id, case_id in self.cases.items():
@@ -461,10 +577,13 @@ def main():
             manifest_path = DEFAULT_RUNS_DIR / f"{replay.run_id}.json"
             manifest_path.write_text(json.dumps({**replay.manifest(), "model_usage": usage, "speed": speed},
                                                 indent=2) + "\n")
+            predictions_path = DEFAULT_RUNS_DIR / f"{replay.run_id}-predictions.json"
+            predictions_path.write_text(json.dumps(replay.predictions(), indent=2) + "\n")
             print_summary(replay.summary(), usage)
             print_speed(speed)
             print_queue(replay.queue_order())
             print(f"\nRun {replay.run_id} saved to {manifest_path}")
+            print(f"Predictions for the evaluation harness: {predictions_path}")
             if args.finish:
                 replay.finish()
                 print("\nAll patients marked arrived and cases closed.")

@@ -57,6 +57,7 @@
     {"minute": 9, "action": "eta", "patient": "SYN002", "minutes": 20},
     {"minute": 11, "action": "audio_report", "patient": "SYN010", "report": "update"},
     {"minute": 11, "action": "eta", "patient": "SYN010", "minutes": 11},
-    {"minute": 12, "action": "acknowledge_all"}
+    {"minute": 12, "action": "acknowledge_all"},
+    {"minute": 12.5, "action": "snapshot_queue", "queue_id": "Q02", "patients": ["SYN002", "SYN008", "SYN010"], "comment": "The clinician ranked this group (queue exercise Q02); record the app's order for the evaluation."}
   ]
 }
