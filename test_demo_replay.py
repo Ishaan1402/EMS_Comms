@@ -190,6 +190,15 @@ class TestThreePatientReplay:
         assert usage["input_tokens"] == 1000 * usage["assessments"] + 300 * usage["extractions"]
         assert usage["cost_usd"] is None or usage["cost_usd"] > 0
 
+    def test_speed_measures_each_step_in_real_seconds(self, scenario, audio_dir):
+        run, _ = run_replay(scenario, audio_dir)
+        speed = run.speed()
+        # The test recordings are one clip per radioed report: three initial reports and two updates
+        # (SYN008's update is typed; its garbled clip failed). One assessment and one extraction per report.
+        assert speed["transcript"]["n"] == 5
+        assert speed["assessment"]["n"] >= 6 and speed["extraction"]["n"] >= 6
+        assert all(0 <= value["median_s"] <= value["max_s"] < 30 for value in speed.values())
+
     def test_heart_rates_spoken_on_the_radio_are_extracted_into_the_trend(self, scenario, audio_dir):
         run, results = run_replay(scenario, audio_dir)
         syn010 = by_source(results)["SYN010"]
