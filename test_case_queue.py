@@ -136,3 +136,26 @@ def test_arrived_closed_and_other_hospitals_cases_are_not_in_the_queue(monkeypat
 def test_only_hospital_users_have_a_queue():
     assert client.get("/api/cases/queue", headers=auth("emt.wilson")).status_code == 403
     assert client.get("/api/cases/queue").status_code == 401
+
+
+def test_rows_say_which_vitals_changed_typed_or_from_the_radio(monkeypatch):
+    score_as(monkeypatch, {"x": "Can wait"})
+    case_id = open_case("emt.wilson", "x patient", eta=10)
+    for vitals in ({"hr": 110, "sbp": 120, "dbp": 80, "spo2": 95}, {"hr": 125, "sbp": 100, "dbp": 60, "spo2": 95}):
+        response = client.post(f"/api/cases/{case_id}/updates", json={"kind": "vitals", "vitals": vitals},
+                               headers=auth("emt.wilson"))
+        assert response.status_code == 201, response.text
+    [case] = queue()["cases"]
+    assert [(v["label"], v["from"], v["to"]) for v in case["vital_changes"]] == [("HR", "110", "125"),
+                                                                               ("BP", "120/80", "100/60")]
+
+    # A heart rate extracted from a later radio report continues the same series.
+    now = database.utc_now_iso()
+    run_id = run("""INSERT INTO extraction_runs (case_id, from_version, to_version, status, extractor_version,
+                                                 started_at, updated_at)
+                    VALUES (?, 0, 3, 'completed', 'test', ?, ?)""", (case_id, now, now))["id"]
+    run("""INSERT INTO case_findings (case_id, run_id, finding_type, value, vital_name, vital_value, recorded_at,
+                                      created_at)
+           VALUES (?, ?, 'vital', 'HR 131 bpm', 'hr', 131, ?, ?)""", (case_id, run_id, now, now))
+    [case] = queue()["cases"]
+    assert case["vital_changes"][0] == {"name": "hr", "label": "HR", "from": "125", "to": "131", "unit": "bpm"}
