@@ -495,6 +495,8 @@ class TestAuditFixes:
                                               (case["id"],))]
         texts = {0: "Heart rate 126, BP 100", 1: "over 64, saturation 89 percent."}
 
+        monkeypatch.setattr(case_assessment, "TRANSCRIPTION_POLL_SECONDS", 0.01)
+
         async def scenario():
             release = asyncio.Event()
 
@@ -504,9 +506,12 @@ class TestAuditFixes:
                 return texts[segment["seq"]], None
             monkeypatch.setattr(cases, "run_transcription", transcription)
             first = asyncio.create_task(cases.transcribe_segment(segment_ids[0]))
-            await cases.transcribe_segment(segment_ids[1])  # seq 1 finishes first
+            second = asyncio.create_task(cases.transcribe_segment(segment_ids[1]))
+            while query("SELECT status FROM transcript_segments WHERE id = ?",
+                        (segment_ids[1],))[0]["status"] != "completed":
+                await asyncio.sleep(0.01)  # seq 1 finishes first
             release.set()
-            await first
+            await asyncio.gather(first, second)
 
         asyncio.run(scenario())
         versions = [r["info_version"] for r in query(
@@ -746,6 +751,53 @@ class TestScoringRequest:
 
 
 class TestAssessmentRunner:
+    def test_waits_for_segments_still_being_transcribed(self, monkeypatch):
+        """A report whose clip is still transcribing is assessed once, with the clip's text."""
+        calls = use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        calls.clear()
+        now = database.utc_now_iso()
+        segment = run(
+            """INSERT INTO transcript_segments (case_id, seq, client_id, recorded_at, audio_file_path, status,
+                                               created_at, updated_at)
+               VALUES (?, 0, 'clip-0', ?, 'x.webm', 'pending', ?, ?)""",
+            (case["id"], now, now, now),
+        )["id"]
+        monkeypatch.setattr(case_assessment, "TRANSCRIPTION_POLL_SECONDS", 0.01)
+
+        async def scenario():
+            runner = case_assessment.AssessmentRunner()
+            run("UPDATE cases SET info_version = info_version + 1 WHERE id = ?", (case["id"],))
+            task = asyncio.create_task(runner.request(case["id"]))
+            await asyncio.sleep(0.1)
+            assert calls == [], "assessed before the clip finished transcribing"
+            with database.get_db() as conn:  # what transcribe_segment does when the clip is done
+                conn.execute("UPDATE cases SET info_version = info_version + 1 WHERE id = ?", (case["id"],))
+                conn.execute(
+                    """UPDATE transcript_segments SET status = 'completed', text = 'SpO2 now 86 percent',
+                           info_version = (SELECT info_version FROM cases WHERE id = ?) WHERE id = ?""",
+                    (case["id"], segment),
+                )
+            await task
+
+        asyncio.run(scenario())
+        assert len(calls) == 1
+        assert "SpO2 now 86 percent" in calls[0]["input"]["current_transcript"]
+
+    def test_a_stuck_transcription_does_not_hold_the_assessment_forever(self, monkeypatch):
+        calls = use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        calls.clear()
+        now = database.utc_now_iso()
+        run("""INSERT INTO transcript_segments (case_id, seq, client_id, recorded_at, audio_file_path, status,
+                                                created_at, updated_at)
+               VALUES (?, 0, 'clip-0', ?, 'x.webm', 'pending', ?, ?)""", (case["id"], now, now, now))
+        monkeypatch.setattr(case_assessment, "TRANSCRIPTION_WAIT_SECONDS", 0.05)
+        monkeypatch.setattr(case_assessment, "TRANSCRIPTION_POLL_SECONDS", 0.01)
+        run("UPDATE cases SET info_version = info_version + 1 WHERE id = ?", (case["id"],))
+        asyncio.run(case_assessment.AssessmentRunner().request(case["id"]))
+        assert len(calls) == 1
+
     def test_information_arriving_mid_assessment_is_assessed_once_more(self, monkeypatch):
         case = start_case()
         started = []

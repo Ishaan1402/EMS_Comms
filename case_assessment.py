@@ -67,6 +67,11 @@ assessment_executor = concurrent.futures.ThreadPoolExecutor(max_workers=8, threa
 # Wait this long before assessing, and again before re-assessing information that arrived
 # during a run, so a report that arrives as several segments is assessed once, whole.
 SETTLE_SECONDS = 2.0
+# Then wait for segments still being transcribed: assessing without them would be out of date
+# as soon as they finish. Bounded, so a slow transcription can't hold the assessment back for
+# long (its text is assessed when it arrives).
+TRANSCRIPTION_WAIT_SECONDS = 60
+TRANSCRIPTION_POLL_SECONDS = 0.25
 
 ASSESSMENT_COLUMNS = (
     "id, case_id, based_on_version, baseline_version, status, preparation_category, meaningful_change, "
@@ -320,6 +325,11 @@ def get_assessment(assessment_id: int) -> Optional[dict]:
     return rows[0] if rows else None
 
 
+def transcription_in_flight(case_id: int) -> bool:
+    return bool(query("SELECT 1 FROM transcript_segments WHERE case_id = ? AND status = 'pending' LIMIT 1",
+                      (case_id,)))
+
+
 def latest_attempt(case_id: int) -> Optional[dict]:
     rows = query(
         f"SELECT {ASSESSMENT_COLUMNS} FROM risk_assessments WHERE case_id = ? ORDER BY id DESC LIMIT 1",
@@ -348,17 +358,25 @@ class AssessmentRunner:
             return
         self._active.add(case_id)
         try:
-            await asyncio.sleep(SETTLE_SECONDS)
+            await self._settle(case_id)
             # Anything that arrived while settling is read now; keep a retry's force flag.
             force = self._queued.pop(case_id, False) or force
             await self._assess(case_id, force)
             while case_id in self._queued:
                 force = self._queued.pop(case_id) or force
-                await asyncio.sleep(SETTLE_SECONDS)
+                await self._settle(case_id)
                 await self._assess(case_id, force)
         finally:
             self._active.discard(case_id)
             self._queued.pop(case_id, None)
+
+    @staticmethod
+    async def _settle(case_id: int) -> None:
+        """Let the rest of a report arrive: a short pause, then any transcription still in flight."""
+        await asyncio.sleep(SETTLE_SECONDS)
+        deadline = time.monotonic() + TRANSCRIPTION_WAIT_SECONDS
+        while transcription_in_flight(case_id) and time.monotonic() < deadline:
+            await asyncio.sleep(TRANSCRIPTION_POLL_SECONDS)
 
     def start(self, case_id: int, force: bool = False) -> None:
         """request() as a background task, for callers that aren't awaiting it (startup)."""
