@@ -110,3 +110,6 @@ private_uploads/
 # Demo audio and run records from demo/make_audio.py and demo/replay.py
 demo/audio/
 demo/runs/
+
+# Tables exported by `python -m sas_sync csv sas_export/`
+sas_export/
