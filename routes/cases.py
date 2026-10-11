@@ -11,6 +11,7 @@ import math
 import uuid
 import openai
 import case_assessment
+import case_queue
 from case_assessment import ASSESSMENT_COLUMNS, VITAL_SIGNS
 from database import get_db, query, run, to_iso, utc_now_iso
 from middleware.auth import require_role, APIError
@@ -450,6 +451,26 @@ async def list_cases(
         CASE_SELECT + where + " ORDER BY (c.status = 'active') DESC, c.started_at DESC LIMIT 50",
         tuple(params),
     ))
+
+
+@router.get("/queue")
+async def hospital_queue(current_user: dict = Depends(require_role(["doctor"]))):
+    """
+    The user's hospital's inbound queue, ordered on the server (case_queue.py), with each
+    case's position and the reasons for it. Arrived and closed cases are not in it.
+    """
+    hospital_id = user_hospital_id(current_user)
+    rows = query(
+        CASE_SELECT + " WHERE c.destination_hospital_id = ? AND c.status = 'active' AND c.arrived_at IS NULL",
+        (hospital_id,),
+    ) if hospital_id is not None else []
+    ordered = case_queue.order(describe_cases(rows), datetime.now(timezone.utc))
+    return {
+        "rule_version": case_queue.QUEUE_RULE_VERSION,
+        "rule": case_queue.QUEUE_RULE,
+        "counts": case_queue.counts(ordered),
+        "cases": ordered,
+    }
 
 
 @router.get("/{case_id}")
