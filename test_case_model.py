@@ -874,3 +874,11 @@ class TestMigration:
             assert message == {"recording_id": 7, "case_id": None, "body": "kept"}
         finally:
             database.DB_PATH = previous
+
+
+class TestDatabasePath:
+    def test_a_separate_database_can_be_named(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ASCLEPIUS_DB_PATH", str(tmp_path / "demo.db"))
+        assert database.configured_db_path() == tmp_path / "demo.db"
+        monkeypatch.delenv("ASCLEPIUS_DB_PATH")
+        assert database.configured_db_path() == Path(database.__file__).parent / "asclepius.db"

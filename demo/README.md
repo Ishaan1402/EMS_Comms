@@ -14,6 +14,14 @@ python3 demo/replay.py                                   # ~25 s; --seconds-per-
 
 Open the Doctor dashboard as `dr.smith` and an EMT dashboard as `emt.wilson`, `emt.garcia` or `emt.lee` (password `password123`) to watch.
 
+For a clean screen (no closed cases from earlier runs in the doctor's list), run the server on its own database and delete it between rehearsals; your usual `asclepius.db` is untouched:
+
+```bash
+rm -f demo.db && ASCLEPIUS_DB_PATH=demo.db SEED_DEMO_USERS=1 python3 main.py
+```
+
+Export that run for SAS with the same setting: `ASCLEPIUS_DB_PATH=demo.db python -m sas_sync csv sas_export/`.
+
 - `--typed` sends every report as a typed note: no audio files and no Whisper needed.
 - `--finish` marks every patient arrived and closes the cases afterwards.
 - Each run first closes whatever the scenario's EMTs left open, so it can be repeated.

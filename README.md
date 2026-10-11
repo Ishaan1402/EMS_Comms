@@ -47,7 +47,7 @@ If any of these keys are missing, the server still starts and logs a warning. On
 - No `OPENAI_API_KEY`: uploads succeed, but each recording is marked `error` and no doctors are notified.
 - No Twilio or SendGrid credentials: the notification send routes return 500.
 
-The SQLite schema is created in `asclepius.db` when the server starts. Demo users (password `password123`) are created only when `SEED_DEMO_USERS=1` is set, or when you run `python3 database.py --seed`.
+The SQLite schema is created in `asclepius.db` when the server starts (`ASCLEPIUS_DB_PATH` names another file, e.g. a separate one for demo runs). Demo users (password `password123`) are created only when `SEED_DEMO_USERS=1` is set, or when you run `python3 database.py --seed`.
 
 Tests use a temporary database and need no API keys: `pip install -r requirements.txt pytest && pytest test_parity.py test_messages.py test_live_transcription.py test_case_model.py test_demo_replay.py test_sas_sync.py`.
 
