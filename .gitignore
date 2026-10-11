@@ -113,3 +113,6 @@ demo/runs/
 
 # Tables exported by `python -m sas_sync csv sas_export/`
 sas_export/
+
+# React production build (built locally; see demo/README.md)
+client/build/
