@@ -156,7 +156,7 @@ const PatientInformation = ({ findings, onRetry, isNew }) => {
   const empty = !findings.chief_complaint && findings.findings.length === 0 && findings.treatments.length === 0;
   return (
     <div className="space-y-2">
-      {findings.status === 'processing' && (
+      {['processing', 'pending'].includes(findings.status) && (
         <p className="flex items-center gap-1 text-xs text-blue-700"><Loader2 className="h-3 w-3 animate-spin" /> Reading the latest report…</p>
       )}
       {findings.status === 'failed' && (
@@ -177,7 +177,7 @@ const PatientInformation = ({ findings, onRetry, isNew }) => {
       )}
       <FactList title="Findings" facts={findings.findings} isNew={isNew} />
       <FactList title="Treatment" facts={findings.treatments} isNew={isNew} />
-      {empty && findings.status !== 'processing' && <p className="text-sm text-gray-500 italic">Nothing extracted yet.</p>}
+      {empty && !['processing', 'pending'].includes(findings.status) && <p className="text-sm text-gray-500 italic">Nothing extracted yet.</p>}
     </div>
   );
 };

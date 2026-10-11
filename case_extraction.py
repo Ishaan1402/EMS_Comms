@@ -331,6 +331,13 @@ def case_findings(case_id: int) -> dict:
             LEFT JOIN case_updates u ON u.id = f.update_id
             WHERE f.case_id = ? AND f.run_id IS NOT NULL ORDER BY f.recorded_at, f.id""", (case_id,))]
     latest = latest_run(case_id)
+    # pending: text arrived that no run has read yet (a run starts after a short pause for the rest
+    # of a report), so "everything done" can be told apart from "nothing started yet".
+    if latest and latest["status"] in ("processing", "failed"):
+        status = latest["status"]
+    else:
+        info = read_new_information(case_id)
+        status = "pending" if info and info["new"] else (latest["status"] if latest else "none")
     complaints = [f for f in facts if f["type"] == "chief_complaint"]
     complaint = complaints[-1] if complaints else None
     if complaint:
@@ -341,7 +348,7 @@ def case_findings(case_id: int) -> dict:
             (f["source_version"] for f in same if f["source_version"] is not None), default=None)}
     return {
         "case_id": case_id,
-        "status": latest["status"] if latest else "none",
+        "status": status,
         "error": latest["error"] if latest and latest["status"] == "failed" else None,
         "can_retry": bool(latest) and latest["status"] == "failed",
         "chief_complaint": complaint,

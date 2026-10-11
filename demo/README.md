@@ -26,7 +26,12 @@ Export that run for SAS with the same setting: `ASCLEPIUS_DB_PATH=demo.db python
 - `--finish` marks every patient arrived and closes the cases afterwards.
 - Each run first closes whatever the scenario's EMTs left open, so it can be repeated.
 - Without `OPENAI_API_KEY`, transcription and scoring fail. The dashboards show this as Needs Review with the reason, which is the intended behavior, but you won't see AI assessments.
-- The summary ends with the run's model usage (assessments and extractions, tokens, list-price cost; transcription isn't included, about $0.0045 a minute of audio) and the **time to the doctor** in real seconds, whatever the replay speed: radio clip → transcript on screen, and new information → AI assessment and → extracted patient information. Both are also saved in `demo/runs/<run_id>.json`. A real-model run on Oct 11: 0.9 s, 4.0 s (including the 2 s wait for the rest of a report) and 5.0 s median.
+- The summary ends with:
+  - **Model usage:** assessments and extractions, tokens, list-price cost, and calls that reported no usage.
+  - **Transcription:** audio minutes sent, priced at the list rate per minute. This is an upper bound, since failed calls may not be billed.
+  - **Time on the server,** in real seconds whatever the replay speed: clip received → transcript stored and pushed, and new information → AI assessment and → extracted patient information stored and pushed. These are server timestamps. They exclude the time spent recording a clip before upload, and the browser's receive and render time; neither is measured yet. A real-model run on Oct 11 gave 0.9 s, 4.0 s (including the 2 s wait for the rest of a report) and 5.0 s median.
+- `demo/runs/<run_id>.json` saves all of this plus what the run used: the server's build from `GET /api/version` (code revision and whether it had local changes, client bundle hash, model and prompt versions, queue rule), the replay's own revision, and hashes of the scenario and audio.
+- The replay waits for transcription, assessment **and** patient information extraction to finish before summarizing.
 
 ## Presenting it (run sheet)
 
@@ -64,7 +69,7 @@ rm -f demo.db && ASCLEPIUS_DB_PATH=demo.db SEED_DEMO_USERS=1 SAS_SYNC_ENABLED=0 
 | 1:10–1:20 | **Visible failure.** Medic 8's radio drops out: red "1 transcript segment failed", and Medic 8 jumps to the top (↑). The crew re-sends the update as text, and the AI moves Medic 8 to Prepare now (HR 118→128, BP 110/70→92/58, temp 39.1). The crew marks the lost clip handled, and it stays on record. |
 | 1:30, 1:50 | Medic 2 and Medic 10 get worse on the radio. Rows show "↑ from #3" and what changed. Open one: the AI handoff compares with what the doctor acknowledged, and **NEW** tags mark exactly what arrived since. Medic 10, 11 min out, ends up first. |
 | 2:00 | The doctor acknowledges everything. The EMT sees the toast. |
-| end | The terminal prints the cost (about $0.002) and the time to the doctor (about 1 s for the transcript, 4 s for the assessment), and writes `demo/runs/<run_id>.json` and `<run_id>-predictions.json`. |
+| end | The terminal prints the model cost (about $0.002), the transcription estimate, and the time on the server: about 1 s from a clip arriving to its transcript being pushed, about 4 s to the assessment. Say "on the server" if you quote it. It also writes `demo/runs/<run_id>.json` and `<run_id>-predictions.json`. |
 
 **If asked:**
 - **A first report sometimes comes back "Cannot assess"** (fever without a temperature). The AI says what's missing instead of guessing. Once the doctor acknowledges it, it ranks below known Prepare-now patients but above Can wait (queue rule draft-2, still to be agreed with the clinician).
