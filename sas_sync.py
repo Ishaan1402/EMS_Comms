@@ -41,6 +41,7 @@ from typing import Optional
 
 import httpx
 
+import database
 from database import query, utc_now_iso
 
 SAS_EPOCH = datetime(1960, 1, 1, tzinfo=timezone.utc)
@@ -597,4 +598,5 @@ def main(argv: list) -> int:
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent / ".env")
+    database.DB_PATH = database.configured_db_path()  # .env may name a different database
     sys.exit(main(sys.argv))
