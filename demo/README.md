@@ -26,7 +26,7 @@ Export that run for SAS with the same setting: `ASCLEPIUS_DB_PATH=demo.db python
 - `--finish` marks every patient arrived and closes the cases afterwards.
 - Each run first closes whatever the scenario's EMTs left open, so it can be repeated.
 - Without `OPENAI_API_KEY`, transcription and scoring fail. The dashboards show this as Needs Review with the reason, which is the intended behavior, but you won't see AI assessments.
-- The summary ends with the run's model usage: assessments, tokens and list-price cost. Transcription isn't included (about $0.0045 a minute of audio).
+- The summary ends with the run's model usage (assessments and extractions, tokens, list-price cost; transcription isn't included, about $0.0045 a minute of audio) and the **time to the doctor** in real seconds, whatever the replay speed: radio clip → transcript on screen, and new information → AI assessment and → extracted patient information. Both are also saved in `demo/runs/<run_id>.json`. A real-model run on Oct 11: 0.9 s, 4.0 s (including the 2 s wait for the rest of a report) and 5.0 s median.
 
 ## The story (`three_patients.json`)
 

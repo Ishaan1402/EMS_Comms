@@ -23,6 +23,7 @@ import array
 import io
 import json
 import math
+import statistics
 import sys
 import time
 import uuid
@@ -115,6 +116,19 @@ def clip_duration_ms(data: bytes) -> int:
             return int(clip.getnframes() * 1000 / clip.getframerate())
     except (wave.Error, EOFError):
         return SEGMENT_SECONDS * 1000
+
+
+def seconds_between(start: str, end: str) -> float:
+    def parse(value):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return (parse(end) - parse(start)).total_seconds()
+
+
+def spread(values: list):
+    """Median and worst case in seconds, or None when nothing was measured."""
+    if not values:
+        return None
+    return {"median_s": round(statistics.median(values), 1), "max_s": round(max(values), 1), "n": len(values)}
 
 
 def validate(scenario: dict) -> None:
@@ -356,6 +370,37 @@ class Replay:
             "cost_usd": None if any(a["cost_usd"] is None for a in answered) else sum(a["cost_usd"] for a in answered),
         }
 
+    def speed(self) -> dict:
+        """
+        Real seconds, whatever the replay speed, from information reaching the server to the
+        doctor having it: a radio clip's transcript, and the AI assessment and patient information
+        extraction that read the newest information. Re-assessments after an acknowledgment are
+        left out: they answer "what changed since you looked", not "how fast".
+        """
+        doctor = self.scenario["doctor"]
+        transcript, assessed, extracted = [], [], []
+        for case_id in self.cases.values():
+            arrived = {1: self.call("GET", f"/api/cases/{case_id}", doctor)["started_at"]}
+            for segment in self.call("GET", f"/api/cases/{case_id}/segments", doctor):
+                if segment["status"] == "completed" and segment["transcribed_at"]:
+                    transcript.append(seconds_between(segment["created_at"], segment["transcribed_at"]))
+                    if segment["info_version"]:
+                        arrived[segment["info_version"]] = segment["created_at"]
+            for update in self.call("GET", f"/api/cases/{case_id}/updates", doctor):
+                if update["kind"] != "eta":  # an ETA change isn't new information to assess
+                    arrived[update["info_version"]] = update["created_at"]
+            first = {}
+            for attempt in self.call("GET", f"/api/cases/{case_id}/assessments", doctor):
+                version = attempt["based_on_version"]
+                if attempt["status"] in ("completed", "needs_review") and version in arrived:
+                    took = seconds_between(arrived[version], attempt["completed_at"])
+                    first[version] = min(first.get(version, took), took)
+            assessed += first.values()
+            for attempt in self.call("GET", f"/api/cases/{case_id}/extractions", doctor):
+                if attempt["status"] == "completed" and attempt["to_version"] in arrived:
+                    extracted.append(seconds_between(arrived[attempt["to_version"]], attempt["completed_at"]))
+        return {"transcript": spread(transcript), "assessment": spread(assessed), "extraction": spread(extracted)}
+
     def finish(self) -> None:
         """Hand-over: mark each patient arrived and close the case."""
         for source_case_id, case_id in self.cases.items():
@@ -376,6 +421,16 @@ def print_summary(cases: list, usage: dict) -> None:
     print(f"\nModel: {usage['assessments']} assessments + {usage['extractions']} extractions, "
           f"{usage['input_tokens']} input + {usage['output_tokens']} output tokens, {cost} "
           "(list price; transcription not included)")
+
+
+def print_speed(speed: dict) -> None:
+    labels = {"transcript": "radio clip -> transcript on screen", "assessment": "new information -> AI assessment",
+              "extraction": "new information -> patient information"}
+    print("\nTime to the doctor (real seconds, median / worst):")
+    for key, label in labels.items():
+        value = speed[key]
+        print(f"  {label}: " + ("not measured" if value is None else
+                                f"{value['median_s']} s / {value['max_s']} s (n={value['n']})"))
 
 
 def print_queue(queue: dict) -> None:
@@ -400,11 +455,14 @@ def main():
                         seconds_per_minute=args.seconds_per_minute)
         try:
             replay.run()
+            replay.wait_until_settled()
+            usage, speed = replay.model_usage(), replay.speed()
             DEFAULT_RUNS_DIR.mkdir(exist_ok=True)
             manifest_path = DEFAULT_RUNS_DIR / f"{replay.run_id}.json"
-            manifest_path.write_text(json.dumps(replay.manifest(), indent=2) + "\n")
-            replay.wait_until_settled()
-            print_summary(replay.summary(), replay.model_usage())
+            manifest_path.write_text(json.dumps({**replay.manifest(), "model_usage": usage, "speed": speed},
+                                                indent=2) + "\n")
+            print_summary(replay.summary(), usage)
+            print_speed(speed)
             print_queue(replay.queue_order())
             print(f"\nRun {replay.run_id} saved to {manifest_path}")
             if args.finish:
