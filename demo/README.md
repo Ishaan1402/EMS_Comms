@@ -28,6 +28,48 @@ Export that run for SAS with the same setting: `ASCLEPIUS_DB_PATH=demo.db python
 - Without `OPENAI_API_KEY`, transcription and scoring fail. The dashboards show this as Needs Review with the reason, which is the intended behavior, but you won't see AI assessments.
 - The summary ends with the run's model usage (assessments and extractions, tokens, list-price cost; transcription isn't included, about $0.0045 a minute of audio) and the **time to the doctor** in real seconds, whatever the replay speed: radio clip → transcript on screen, and new information → AI assessment and → extracted patient information. Both are also saved in `demo/runs/<run_id>.json`. A real-model run on Oct 11: 0.9 s, 4.0 s (including the 2 s wait for the rest of a report) and 5.0 s median.
 
+## Presenting it (run sheet)
+
+**Once:**
+- Python packages in `.venv`: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`. The system `python3` usually lacks them.
+- Audio in `demo/audio/`: `python3 demo/make_audio.py`.
+- A built client in `client/build/`, so one process serves everything. `npm ci` fails while `package-lock.json` is out of sync with `package.json`, so build in a copy and bring the build back:
+  ```bash
+  rm -rf /tmp/asclepius-client && cp -R client /tmp/asclepius-client && (cd /tmp/asclepius-client && npm install && npm run build) && rm -rf client/build && cp -R /tmp/asclepius-client/build client/build
+  ```
+
+**Each rehearsal**, from the repo root:
+
+```bash
+rm -f demo.db && ASCLEPIUS_DB_PATH=demo.db SEED_DEMO_USERS=1 SAS_SYNC_ENABLED=0 NODE_ENV=production PORT=5001 .venv/bin/python main.py
+```
+
+- **Port 5001:** on macOS, port 5000 belongs to AirPlay Receiver (Control Center).
+- **`SAS_SYNC_ENABLED=0`:** keeps the SAS push quiet even if `.env` turns it on.
+- **A fresh `demo.db`** keeps the doctor's list clean.
+
+1. **Doctor:** open http://localhost:5001 and log in as `dr.smith`.
+2. **EMT:** open a **private window or another browser** and log in as `emt.wilson`. Logins are per browser profile, so one window can't be both. The EMT screen picks up the case when the replay opens it.
+3. **Run the story:**
+   ```bash
+   .venv/bin/python demo/replay.py --base-url http://localhost:5001 --seconds-per-minute 10
+   ```
+   It takes about 2½ minutes. Let the replay do the acknowledging. Opening cases to show them is fine.
+
+| Real time | What to point at |
+|---|---|
+| 0:00–0:25 | Three crews open cases (Medic 8, 2, 10). Radio text reaches the doctor about 1 s after each clip. Vitals and findings fill in from the radio (hover a value for the medic's words). Cases go "Assessing…" → a category. The queue orders them, with "Why here". |
+| 0:30 | The doctor acknowledges. Mike Wilson's screen shows "Seen by John Smith". |
+| 0:40 | Messages between the doctor and Medic 10. |
+| 1:10–1:20 | **Visible failure.** Medic 8's radio drops out: red "1 transcript segment failed", and Medic 8 jumps to the top (↑). The crew re-sends the update as text, and the AI moves Medic 8 to Prepare now (HR 118→128, BP 110/70→92/58, temp 39.1). The crew marks the lost clip handled, and it stays on record. |
+| 1:30, 1:50 | Medic 2 and Medic 10 get worse on the radio. Rows show "↑ from #3" and what changed. Open one: the AI handoff compares with what the doctor acknowledged, and **NEW** tags mark exactly what arrived since. Medic 10, 11 min out, ends up first. |
+| 2:00 | The doctor acknowledges everything. The EMT sees the toast. |
+| end | The terminal prints the cost (about $0.002) and the time to the doctor (about 1 s for the transcript, 4 s for the assessment), and writes `demo/runs/<run_id>.json` and `<run_id>-predictions.json`. |
+
+**If asked:**
+- **A first report sometimes comes back "Cannot assess"** (fever without a temperature). The AI says what's missing instead of guessing. Once the doctor acknowledges it, it ranks below known Prepare-now patients but above Can wait (queue rule draft-2, still to be agreed with the clinician).
+- **The queue order comes from a rule, not the model.** The model only labels each patient.
+
 ## The story (`three_patients.json`)
 
 The three patients are the clinician's **Queue exercise group Q02** (`SYN002`, `SYN008`, `SYN010`), all going to General Hospital. The order the app produces can therefore be compared with the clinician's ranking.
