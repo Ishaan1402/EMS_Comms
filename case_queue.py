@@ -3,10 +3,12 @@
 The order is decided here, on the server, so every screen and export shows the same queue.
 DRAFT rule until the clinician agrees to it (QUEUE_RULE_VERSION):
 
-1. Cases that need a person now: processing needs review (a failure, or the AI couldn't
-   assess) or new information the hospital hasn't acknowledged.
+1. Cases that need a person now: new information the hospital hasn't acknowledged, or a
+   processing failure (lost audio, a failed assessment) that nobody has fixed yet.
 2. Preparation category: Prepare now, then not yet known (no assessment, or Cannot assess),
    then Can wait, then Routine. Unknown sits above Can wait because unknown is not low risk.
+   A "Cannot assess" the hospital has acknowledged stays here, with the unknowns: the clinician
+   has looked, so it no longer outranks a known Prepare now (draft-2).
 3. Sooner ETA first; a case without an ETA after those with one.
 4. Earlier case first, so the order is stable.
 
@@ -15,9 +17,9 @@ Cases that have arrived or are closed leave the queue; their history stays.
 from datetime import datetime
 from typing import Optional
 
-QUEUE_RULE_VERSION = "draft-1"
-QUEUE_RULE = ("Draft rule: needs review or unacknowledged information first, then Prepare now, "
-              "not yet known, Can wait, Routine, then sooner ETA.")
+QUEUE_RULE_VERSION = "draft-2"
+QUEUE_RULE = ("Draft rule: unacknowledged information or a processing failure first, then Prepare now, "
+              "not yet known (including acknowledged Cannot assess), Can wait, Routine, then sooner ETA.")
 
 CATEGORY_RANK = {"Prepare now": 0, None: 1, "Cannot assess": 1, "Can wait": 2, "Routine": 3}
 

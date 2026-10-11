@@ -6,7 +6,12 @@ from pathlib import Path
 import bcrypt
 from contextlib import contextmanager
 
-DB_PATH = Path(__file__).parent / "asclepius.db"
+def configured_db_path() -> Path:
+    """ASCLEPIUS_DB_PATH (e.g. a separate database for demo runs), else asclepius.db next to this file."""
+    return Path(os.getenv("ASCLEPIUS_DB_PATH") or Path(__file__).parent / "asclepius.db")
+
+
+DB_PATH = configured_db_path()
 
 
 def to_iso(moment: datetime) -> str:

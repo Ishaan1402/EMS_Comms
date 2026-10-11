@@ -188,7 +188,8 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
         <OperationalBadge status={liveCase.operational_status} />
-        <ProcessingBadge processing={processing} />
+        {/* Nothing left to do is the normal state; the category badge says what the AI found. */}
+        {processing?.status !== 'completed' && <ProcessingBadge processing={processing} />}
         <CategoryBadge liveCase={liveCase} />
         <span className="flex items-center gap-1"><MapPin className="h-4 w-4" />{liveCase.destination_hospital_name || 'No destination set'}</span>
         {liveCase.ems_unit && <span className="flex items-center gap-1"><Truck className="h-4 w-4" />{liveCase.ems_unit}</span>}

@@ -165,6 +165,12 @@ def processing_summary(case: dict, latest: Optional[dict]) -> dict:
     else:
         assessment = latest["status"]
 
+    # "Cannot assess" asks a clinician to judge for themselves. Acknowledging the information it
+    # was based on is that review, so it stops needing review. Failures still do until fixed.
+    ack = case["acknowledgment"]
+    if assessment == "needs_review" and ack and ack["info_version"] >= latest["based_on_version"]:
+        assessment = "completed"
+
     reasons = []
     if failed:
         reasons.append(f"{failed} transcript segment(s) failed to transcribe")

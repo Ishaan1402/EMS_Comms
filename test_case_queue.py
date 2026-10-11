@@ -86,7 +86,7 @@ def test_order_follows_the_draft_rule(monkeypatch):
     assert [c["id"] for c in body["cases"]] == [now, wait, routine]
     assert [c["queue_position"] for c in body["cases"]] == [1, 2, 3]
     assert body["cases"][0]["queue_reasons"] == ["Prepare now", "ETA 30 min"]
-    assert body["rule_version"] == "draft-1"
+    assert body["rule_version"] == "draft-2"
 
 
 def test_unacknowledged_information_comes_before_category(monkeypatch):
@@ -107,9 +107,39 @@ def test_unknown_category_ranks_above_can_wait(monkeypatch):
     acknowledge(wait)
     acknowledge(unsure)
     body = queue()
-    # "Cannot assess" needs review, so it is first; it would rank above Can wait regardless.
     assert [c["id"] for c in body["cases"]] == [unsure, wait]
-    assert body["cases"][0]["queue_reasons"][0].startswith("Needs review: ")
+    assert body["cases"][0]["queue_reasons"] == ["Cannot assess", "ETA 5 min"]
+
+
+def test_cannot_assess_needs_review_until_acknowledged(monkeypatch):
+    score_as(monkeypatch, {"now": "Prepare now", "unsure": "Unsure"})
+    now = open_case("emt.wilson", "now patient", eta=30)
+    unsure = open_case("emt.garcia", "unsure patient", eta=5)
+    acknowledge(now)
+    body = queue()
+    assert [c["id"] for c in body["cases"]] == [unsure, now]
+    assert body["cases"][0]["queue_reasons"][0] == "Needs review: Insufficient information to assess preparation needs."
+    assert body["counts"]["needs_review"] == 1
+
+    # The doctor has read it: an unknown no longer outranks a known Prepare now.
+    acknowledge(unsure)
+    body = queue()
+    assert [c["id"] for c in body["cases"]] == [now, unsure]
+    assert body["counts"]["needs_review"] == 0
+    case = client.get(f"/api/cases/{unsure}", headers=auth(DOCTOR)).json()
+    assert case["preparation_category"] == "Cannot assess"
+    assert case["processing"]["status"] == "completed" and case["processing"]["reasons"] == []
+
+
+def test_acknowledging_does_not_clear_a_processing_failure(monkeypatch):
+    async def failing_score(inputs):
+        raise RuntimeError("outage")
+    monkeypatch.setattr(case_assessment, "score", failing_score)
+    failed = open_case("emt.wilson", "any patient", eta=30)
+    acknowledge(failed)
+    case = queue()["cases"][0]
+    assert case["id"] == failed and case["processing"]["needs_review"]
+    assert case["queue_reasons"][0] == "Needs review: Assessment failed: unexpected error"
 
 
 def test_sooner_eta_first_and_missing_eta_last(monkeypatch):
