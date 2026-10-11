@@ -16,6 +16,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
 from main import app
 import case_assessment
+import case_extraction
 import database
 import sas_sync
 from database import init_database, insert_sample_data, query, run
@@ -53,12 +54,21 @@ def fakes(temp_database, tmp_path_factory):
     async def fake_score(inputs):
         return SCORED, {"input_tokens": 1000, "output_tokens": 200, "latency_ms": 900}
 
+    async def fake_extract(info):
+        """A vital from the opening summary, with free text that must not be exported."""
+        opened = [{"name": "rr", "value": 28, "qualifier": "on room air", "item": "case-opened", "quote": "lives alone"}]
+        found = [{"text": "lives alone", "status": "present", "item": "case-opened", "quote": "lives alone"}]
+        is_first = any(item["id"] == "case-opened" for item in info["new"])
+        return {"chief_complaint": [], "vitals": opened if is_first else [], "findings": found if is_first else [],
+                "treatments": []}, {"input_tokens": 300, "output_tokens": 80, "latency_ms": 700}
+
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(recordings, "openai_client", None)
         patch.setattr(cases, "SEGMENT_DIR", tmp_path_factory.mktemp("segments"))
         patch.setattr(cases, "RETRY_DELAY_SECONDS", 0)
         patch.setattr(case_assessment, "SETTLE_SECONDS", 0)
         patch.setattr(case_assessment, "score", fake_score)
+        patch.setattr(case_extraction, "extract", fake_extract)
         yield
 
 
@@ -110,7 +120,8 @@ class TestTables:
         events = rows_of("EVENTS", story["id"])
         types = [e["EVENT_TYPE"] for e in events]
         for expected in ("case_started", "update_added", "assessment_completed", "acknowledged", "message_sent",
-                         "segment_uploaded", "segment_failed", "segment_dismissed", "case_arrived", "case_closed"):
+                         "segment_uploaded", "segment_failed", "segment_dismissed", "extraction_completed",
+                         "case_arrived", "case_closed"):
             assert expected in types, expected
         assert types[0] == "case_started" and types[-1] == "case_closed"
         assert [e["OCCURRED_DT"] for e in events] == sorted(e["OCCURRED_DT"] for e in events)
@@ -132,7 +143,12 @@ class TestTables:
         assessments = rows_of("ASSESSMENTS", story["id"])
         assert assessments and assessments[-1]["INPUT_TOKENS"] == 1000 and assessments[-1]["COST_USD"] is not None
         vitals = rows_of("VITALS", story["id"])
-        assert {(v["NAME"], v["VALUE"], v["UNIT"]) for v in vitals} == {("spo2", 89.0, "%"), ("hr", 126.0, "bpm")}
+        typed = {(v["NAME"], v["VALUE"], v["UNIT"]) for v in vitals if v["SOURCE"] == "typed vitals"}
+        assert typed == {("spo2", 89.0, "%"), ("hr", 126.0, "bpm")}
+        [extracted] = [v for v in vitals if v["SOURCE"] != "typed vitals"]
+        assert (extracted["SOURCE"], extracted["NAME"], extracted["VALUE"]) == ("case opened", "rr", 28)
+        assert extracted["FINDING_ID"] is not None and extracted["READING_ID"] is None
+        assert [v["MEASURED_DT"] for v in vitals] == sorted(v["MEASURED_DT"] for v in vitals)
 
     def test_no_free_text_leaves_the_app(self, story):
         exported = b"".join(sas_sync.to_csv(name, rows) for name, rows in sas_sync.build_tables().items())

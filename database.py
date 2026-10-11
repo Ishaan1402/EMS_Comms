@@ -291,8 +291,34 @@ def init_database():
       FOREIGN KEY (case_id) REFERENCES cases (id)
     );
 
-    -- AI-extracted findings, each traceable to the transcript segment it came from.
-    -- Not populated yet; reserved for the findings-extraction feature.
+    -- Patient information extraction runs (case_extraction.py): each reads the information in
+    -- versions (from_version, to_version] with earlier text as context. Failures are kept with
+    -- their reason; the next run re-reads everything since the last completed one.
+    CREATE TABLE IF NOT EXISTS extraction_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      from_version INTEGER NOT NULL,
+      to_version INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('processing', 'completed', 'failed')),
+      error TEXT,
+      extractor_version TEXT NOT NULL,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      latency_ms INTEGER,
+      cost_usd REAL,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (case_id) REFERENCES cases (id)
+    );
+
+    -- AI-extracted patient information, each fact traceable to the transcript segment or typed
+    -- note it came from (segment_id / update_id; both NULL for the summary typed when the case
+    -- was opened) and the words it was taken from (source_text). finding_type is chief_complaint,
+    -- vital, finding or treatment; value is the text shown. detail is a finding's status
+    -- (present / absent / not assessed), a treatment's (given / planned), or a vital's qualifier
+    -- ("on room air"). Vitals also have vital_name (VITAL_SIGNS) and vital_value.
+    -- recorded_at is when the source was spoken or typed.
     CREATE TABLE IF NOT EXISTS case_findings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       case_id INTEGER NOT NULL,
@@ -301,6 +327,12 @@ def init_database():
       value TEXT NOT NULL,
       source_text TEXT,
       created_at TEXT NOT NULL,
+      run_id INTEGER REFERENCES extraction_runs (id),
+      update_id INTEGER REFERENCES case_updates (id),
+      detail TEXT,
+      vital_name TEXT,
+      vital_value REAL,
+      recorded_at TEXT,
       FOREIGN KEY (case_id) REFERENCES cases (id),
       FOREIGN KEY (segment_id) REFERENCES transcript_segments (id)
     );
@@ -313,6 +345,8 @@ def init_database():
     CREATE INDEX IF NOT EXISTS idx_cases_emt_id ON cases(emt_id);
     CREATE INDEX IF NOT EXISTS idx_cases_destination ON cases(destination_hospital_id, status);
     CREATE INDEX IF NOT EXISTS idx_case_findings_segment_id ON case_findings(segment_id);
+    CREATE INDEX IF NOT EXISTS idx_case_findings_case ON case_findings(case_id, recorded_at);
+    CREATE INDEX IF NOT EXISTS idx_extraction_runs_case ON extraction_runs(case_id, id);
     CREATE INDEX IF NOT EXISTS idx_case_updates_case ON case_updates(case_id, id);
     -- A retried update with the same client_id returns the stored row instead of a duplicate.
     CREATE UNIQUE INDEX IF NOT EXISTS idx_case_updates_client_id ON case_updates(case_id, client_id) WHERE client_id IS NOT NULL;
@@ -367,6 +401,14 @@ ADDED_COLUMNS = {
         ("dismissed_at", "TEXT"),
         ("dismissed_by", "INTEGER REFERENCES users (id)"),
         ("failed_at", "TEXT"),
+    ],
+    "case_findings": [
+        ("run_id", "INTEGER REFERENCES extraction_runs (id)"),
+        ("update_id", "INTEGER REFERENCES case_updates (id)"),
+        ("detail", "TEXT"),
+        ("vital_name", "TEXT"),
+        ("vital_value", "REAL"),
+        ("recorded_at", "TEXT"),
     ],
     "risk_assessments": [
         ("baseline_version", "INTEGER"),

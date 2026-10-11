@@ -11,6 +11,7 @@ import math
 import uuid
 import openai
 import case_assessment
+import case_extraction
 import case_queue
 from case_assessment import ASSESSMENT_COLUMNS, VITAL_SIGNS
 from database import get_db, query, run, to_iso, utc_now_iso
@@ -278,6 +279,23 @@ def publish_case_changed(case_id: int) -> None:
 case_assessment.runner.on_change = publish_case_changed
 
 
+def publish_findings_changed(case_id: int) -> None:
+    """Extracted patient information changed (or its step started/failed): send the case's full set."""
+    case = get_case(case_id)
+    if case:
+        broker.publish("findings.updated", {"case_id": case_id, "findings": case_extraction.case_findings(case_id)},
+                       owner_id=case["emt_id"], hospital_id=case["destination_hospital_id"])
+
+
+case_extraction.runner.on_change = publish_findings_changed
+
+
+def request_processing(background_tasks: BackgroundTasks, case_id: int) -> None:
+    """New information: the assessment and the patient information extraction each run on it."""
+    background_tasks.add_task(case_assessment.runner.request, case_id)
+    background_tasks.add_task(case_extraction.runner.request, case_id)
+
+
 def user_hospital_id(user: dict) -> Optional[int]:
     """The hospital a doctor works at (users.hospital_id); None for EMTs and unassigned doctors."""
     rows = query("SELECT hospital_id FROM users WHERE id = ?", (user["id"],))
@@ -425,7 +443,7 @@ async def start_case(
         raise APIError(409, "You already have an active case")
     case = get_case(result["id"])
     publish_case("case.opened", case)
-    background_tasks.add_task(case_assessment.runner.request, case["id"])
+    request_processing(background_tasks, case["id"])
     return case
 
 
@@ -651,7 +669,7 @@ async def add_update(
                    owner_id=case["emt_id"], hospital_id=case["destination_hospital_id"])
     publish_case("case.updated", get_case(case["id"]))
     if kind != "eta":
-        background_tasks.add_task(case_assessment.runner.request, case["id"])
+        request_processing(background_tasks, case["id"])
     return update
 
 
@@ -694,6 +712,34 @@ async def retry_assessment(
         raise APIError(409, "Only a failed assessment can be retried")
     background_tasks.add_task(case_assessment.runner.request, case["id"], True)
     return case
+
+
+@router.get("/{case_id}/findings")
+async def get_findings(case_id: str, current_user: dict = Depends(require_role(["emt", "doctor"]))):
+    """Patient information extracted from the reports, each fact with the clip or note it came from."""
+    case = get_case_for_user(case_id, current_user)
+    return case_extraction.case_findings(case["id"])
+
+
+@router.get("/{case_id}/extractions")
+async def list_extractions(case_id: str, current_user: dict = Depends(require_role(["emt", "doctor"]))):
+    """Every extraction attempt, newest first, including failed ones, with tokens and cost."""
+    case = get_case_for_user(case_id, current_user)
+    return case_extraction.list_runs(case["id"])
+
+
+@router.post("/{case_id}/findings/retry", status_code=202)
+async def retry_extraction(
+    case_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(require_role(["emt", "doctor"])),
+):
+    """Re-run a failed patient information extraction."""
+    case = get_case_for_user(case_id, current_user)
+    if not case_extraction.case_findings(case["id"])["can_retry"]:
+        raise APIError(409, "Only a failed extraction can be retried")
+    background_tasks.add_task(case_extraction.runner.request, case["id"], True)
+    return case_extraction.case_findings(case["id"])
 
 
 @hospitals_router.get("")
@@ -972,7 +1018,8 @@ async def transcribe_segment(segment_id: int):
     publish_segment("segment.updated", get_segment(segment_id), segment)
     publish_case("case.updated", get_case(segment["case_id"]))
     if text:
-        await case_assessment.runner.request(segment["case_id"])
+        await asyncio.gather(case_assessment.runner.request(segment["case_id"]),
+                             case_extraction.runner.request(segment["case_id"]))
 
 
 async def run_transcription(segment: dict):

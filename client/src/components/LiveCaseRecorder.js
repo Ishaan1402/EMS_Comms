@@ -7,6 +7,7 @@ import useSegmentRecorder, { getMicrophone } from '../hooks/useSegmentRecorder';
 import useSegmentUploads from '../hooks/useSegmentUploads';
 import { mergeNewer, upsertNewer } from '../utils/liveRows';
 import useCaseDetails from '../hooks/useCaseDetails';
+import useCaseFindings from '../hooks/useCaseFindings';
 import LiveTranscript from './LiveTranscript';
 import CaseOverview from './CaseOverview';
 import CaseUpdateForm from './CaseUpdateForm';
@@ -95,6 +96,8 @@ const LiveCaseRecorder = () => {
 
   const details = useCaseDetails(activeCase?.id);
   const { addUpdate: addCaseUpdate, reload: reloadCaseUpdates } = details;
+  const extracted = useCaseFindings(activeCase?.id);
+  const { apply: applyFindings, reload: reloadFindings } = extracted;
 
   const handleEvent = useCallback((type, data) => {
     const current = caseRef.current;
@@ -108,14 +111,17 @@ const LiveCaseRecorder = () => {
         .then((response) => setActiveCase((c) => (c && c.updated_at >= response.data.updated_at ? c : response.data)))
         .catch((error) => console.error('Error re-syncing case:', error));
       reloadCaseUpdates();
+      reloadFindings();
     } else if ((type === 'segment.created' || type === 'segment.updated') && data.case_id === current.id) {
       addSegment(data.segment);
     } else if (type === 'case.updated' && data.case.id === current.id) {
       setActiveCase((c) => (c && c.updated_at >= data.case.updated_at ? c : data.case));
     } else if (type === 'update.created') {
       addCaseUpdate(data.update);
+    } else if (type === 'findings.updated') {
+      applyFindings(data);
     }
-  }, [addSegment, addCaseUpdate, reloadCaseUpdates]);
+  }, [addSegment, addCaseUpdate, reloadCaseUpdates, applyFindings, reloadFindings]);
 
   const connection = useCaseEvents(handleEvent, !!activeCase);
 
@@ -380,7 +386,9 @@ const LiveCaseRecorder = () => {
             liveCase={activeCase}
             updates={details.updates}
             vitals={details.vitals}
+            findings={extracted.findings}
             onRetryAssessment={isOpen ? retryAssessment : undefined}
+            onRetryFindings={isOpen ? extracted.retry : undefined}
           />
           {isOpen && <CaseUpdateForm caseId={activeCase.id} onAdded={addCaseUpdate} />}
         </div>

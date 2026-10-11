@@ -152,7 +152,10 @@ TABLES = {
         ("COST_USD", "num", "Estimated cost (USD, list price)"),
     ] + _time_columns("STARTED", "Started") + _time_columns("COMPLETED", "Completed"),
     "VITALS": [("READING_ID", "num", "Reading ID")] + CASE_KEYS + [
+        ("SOURCE", "char", "Source (typed vitals / radio / typed note / case opened)"),
         ("UPDATE_ID", "num", "Update ID"),
+        ("SEGMENT_ID", "num", "Transcript segment ID"),
+        ("FINDING_ID", "num", "Extracted fact ID"),
         ("NAME", "char", "Vital sign"),
         ("LABEL", "char", "Vital sign label"),
         ("UNIT", "char", "Unit"),
@@ -260,6 +263,11 @@ def build_tables() -> dict:
         event(f"ack:{row['id']}", row["case_id"], "acknowledged", row["acknowledged_at"], row["info_version"], row["role"])
     for row in query("SELECT id, case_id, sender_role, created_at FROM messages WHERE case_id IS NOT NULL"):
         event(f"message:{row['id']}", row["case_id"], "message_sent", row["created_at"], actor_role=row["sender_role"])
+    for row in query("""SELECT r.id, r.case_id, r.to_version, r.status, r.error, r.latency_ms, r.completed_at,
+                               (SELECT COUNT(*) FROM case_findings f WHERE f.run_id = r.id) AS facts
+                        FROM extraction_runs r WHERE r.completed_at IS NOT NULL"""):
+        event(f"extraction:{row['id']}", row["case_id"], f"extraction_{row['status']}", row["completed_at"],
+              row["to_version"], detail=row["error"] or f"{row['facts']} facts", value=row["latency_ms"])
     events.sort(key=lambda e: (e["OCCURRED_DT"] if e["OCCURRED_DT"] is not None else 0, e["EVENT_ID"]))
 
     assessment_rows = [with_times({
@@ -280,15 +288,26 @@ def build_tables() -> dict:
     }, started=row["started_at"], completed=row["completed_at"])
         for row in query("SELECT * FROM risk_assessments ORDER BY id") if row["case_id"] in keys]
 
+    # Typed vitals and vitals extracted from the reports (case_extraction.py), in time order.
+    # The extracted ones carry their source but not the spoken words or qualifier (no free text).
+    readings = [(row["measured_at"], row["case_id"], row["name"], row["value"],
+                 {"READING_ID": row["id"], "SOURCE": "typed vitals", "UPDATE_ID": row["update_id"]})
+                for row in query("SELECT id, case_id, update_id, name, value, measured_at FROM vital_readings")]
+    readings += [(row["recorded_at"], row["case_id"], row["vital_name"], row["vital_value"],
+                  {"SOURCE": "radio" if row["segment_id"] else "typed note" if row["update_id"] else "case opened",
+                   "UPDATE_ID": row["update_id"], "SEGMENT_ID": row["segment_id"], "FINDING_ID": row["id"]})
+                 for row in query("""SELECT id, case_id, segment_id, update_id, vital_name, vital_value, recorded_at
+                                     FROM case_findings WHERE finding_type = 'vital' AND run_id IS NOT NULL""")]
+    readings.sort(key=lambda r: (r[0] or "", r[1]))
     vital_rows = []
-    for row in query("SELECT id, case_id, update_id, name, value, measured_at FROM vital_readings ORDER BY id"):
-        if row["case_id"] not in keys:
+    for measured_at, case_id, name, value, ids in readings:
+        if case_id not in keys:
             continue
-        label, unit, _, _ = VITAL_SIGNS.get(row["name"], (row["name"], "", 0, 0))
+        label, unit, _, _ = VITAL_SIGNS.get(name, (name, "", 0, 0))
         vital_rows.append(with_times({
-            "READING_ID": row["id"], **keys[row["case_id"]], "UPDATE_ID": row["update_id"],
-            "NAME": row["name"], "LABEL": label, "UNIT": unit, "VALUE": row["value"],
-        }, measured=row["measured_at"]))
+            "READING_ID": None, **keys[case_id], "UPDATE_ID": None, "SEGMENT_ID": None, "FINDING_ID": None, **ids,
+            "NAME": name, "LABEL": label, "UNIT": unit, "VALUE": value,
+        }, measured=measured_at))
 
     return {"CASES": case_rows, "EVENTS": events, "ASSESSMENTS": assessment_rows, "VITALS": vital_rows}
 

@@ -16,6 +16,7 @@ from middleware.auth import APIError
 from routes import auth, recordings, doctors, notifications, messages, cases, sas
 from database import init_database, insert_sample_data
 import case_assessment
+import case_extraction
 import sas_sync
 
 @asynccontextmanager
@@ -31,6 +32,9 @@ async def lifespan(app: FastAPI):
     case_assessment.fail_interrupted_assessments()
     for case_id in case_assessment.unassessed_open_cases():
         case_assessment.runner.start(case_id, force=True)
+    case_extraction.fail_interrupted_extractions()
+    for case_id in case_extraction.unextracted_open_cases():
+        case_extraction.runner.start(case_id, force=True)
     if os.getenv("SEED_DEMO_USERS", "").lower() in ("1", "true", "yes"):
         insert_sample_data()
     # Off unless SAS_SYNC_ENABLED is set; failures stay inside the sync and never reach requests.
