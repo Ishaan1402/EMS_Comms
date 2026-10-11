@@ -188,4 +188,15 @@ def test_rows_say_which_vitals_changed_typed_or_from_the_radio(monkeypatch):
                                       created_at)
            VALUES (?, ?, 'vital', 'HR 131 bpm', 'hr', 131, ?, ?)""", (case_id, run_id, now, now))
     [case] = queue()["cases"]
-    assert case["vital_changes"][0] == {"name": "hr", "label": "HR", "from": "125", "to": "131", "unit": "bpm"}
+    assert case["vital_changes"][0] == {"name": "hr", "label": "HR", "from": "125", "to": "131", "unit": "bpm",
+                                        "from_qualifier": None, "to_qualifier": None}
+
+    # Saturation on room air then on oxygen: the conditions are part of the change.
+    for value, qualifier in ((89, "on room air"), (92, "on 4 liters oxygen")):
+        run("""INSERT INTO case_findings (case_id, run_id, finding_type, value, detail, vital_name, vital_value,
+                                          recorded_at, created_at)
+               VALUES (?, ?, 'vital', 'SpO2', ?, 'spo2', ?, ?, ?)""",
+            (case_id, run_id, qualifier, value, database.utc_now_iso(), now))
+    spo2 = next(v for v in queue()["cases"][0]["vital_changes"] if v["name"] == "spo2")
+    assert (spo2["from"], spo2["from_qualifier"], spo2["to"], spo2["to_qualifier"]) == \
+        ("89", "on room air", "92", "on 4 liters oxygen")

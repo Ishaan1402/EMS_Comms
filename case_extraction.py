@@ -309,6 +309,8 @@ def describe_fact(row: dict) -> dict:
         "id": row["id"], "type": row["finding_type"], "text": row["value"], "status": row["detail"],
         "recorded_at": row["recorded_at"], "quote": row["source_text"],
         "source": {"kind": source, "segment_id": row["segment_id"], "update_id": row["update_id"]},
+        # The case info_version its report created, so screens can tell what arrived after an acknowledgment.
+        "source_version": row["source_version"],
     }
     if row["finding_type"] == "vital":
         label, unit, _, _ = VITAL_SIGNS.get(row["vital_name"], (row["vital_name"], "", 0, 0))
@@ -319,17 +321,30 @@ def describe_fact(row: dict) -> dict:
 
 def case_findings(case_id: int) -> dict:
     """What the hospital and EMT screens show: the extracted facts in spoken order, and the step's state."""
+    columns = ", ".join(f"f.{column.strip()}" for column in FINDING_COLUMNS.split(","))
     facts = [describe_fact(row) for row in query(
-        f"SELECT {FINDING_COLUMNS} FROM case_findings WHERE case_id = ? AND run_id IS NOT NULL "
-        "ORDER BY recorded_at, id", (case_id,))]
+        f"""SELECT {columns},
+                   CASE WHEN f.segment_id IS NOT NULL THEN s.info_version
+                        WHEN f.update_id IS NOT NULL THEN u.info_version ELSE 1 END AS source_version
+            FROM case_findings f
+            LEFT JOIN transcript_segments s ON s.id = f.segment_id
+            LEFT JOIN case_updates u ON u.id = f.update_id
+            WHERE f.case_id = ? AND f.run_id IS NOT NULL ORDER BY f.recorded_at, f.id""", (case_id,))]
     latest = latest_run(case_id)
     complaints = [f for f in facts if f["type"] == "chief_complaint"]
+    complaint = complaints[-1] if complaints else None
+    if complaint:
+        # A report that repeats the complaint ("update on our adult with breathing trouble") doesn't
+        # make it new: first_stated_version is when this complaint was first given.
+        same = [f for f in complaints if f["text"].strip().lower() == complaint["text"].strip().lower()]
+        complaint = {**complaint, "first_stated_version": min(
+            (f["source_version"] for f in same if f["source_version"] is not None), default=None)}
     return {
         "case_id": case_id,
         "status": latest["status"] if latest else "none",
         "error": latest["error"] if latest and latest["status"] == "failed" else None,
         "can_retry": bool(latest) and latest["status"] == "failed",
-        "chief_complaint": complaints[-1] if complaints else None,
+        "chief_complaint": complaint,
         "vitals": [f for f in facts if f["type"] == "vital"],
         "findings": [f for f in facts if f["type"] == "finding"],
         "treatments": [f for f in facts if f["type"] == "treatment"],
@@ -352,35 +367,41 @@ TREND_ORDER = ("hr", "bp", "rr", "spo2", "temp_c", "gcs", "glucose")
 def vital_changes(case_ids: list) -> dict:
     """
     For each case, the vital signs whose two latest readings differ, typed or extracted, for a
-    queue row: [{"name": "spo2", "label": "SpO2", "from": "94", "to": "89", "unit": "%"}].
+    queue row: [{"name": "spo2", "label": "SpO2", "from": "89", "to": "92", "unit": "%",
+    "from_qualifier": "on room air", "to_qualifier": "on oxygen"}]. Different conditions count as
+    a change and are shown, so 89 on room air -> 92 on oxygen doesn't read as an improvement.
     """
     if not case_ids:
         return {}
     marks = ",".join("?" * len(case_ids))
     rows = query(
-        f"""SELECT case_id, name, value, measured_at AS at FROM vital_readings WHERE case_id IN ({marks})
+        f"""SELECT case_id, name, value, NULL AS qualifier, measured_at AS at FROM vital_readings
+            WHERE case_id IN ({marks})
             UNION ALL
-            SELECT case_id, vital_name, vital_value, recorded_at FROM case_findings
+            SELECT case_id, vital_name, vital_value, detail, recorded_at FROM case_findings
             WHERE finding_type = 'vital' AND run_id IS NOT NULL AND case_id IN ({marks})
             ORDER BY at""",
         tuple(case_ids) * 2,
     )
     series = {}
     for row in rows:
-        series.setdefault((row["case_id"], row["name"]), []).append(str(_number(row["value"])))
+        series.setdefault((row["case_id"], row["name"]), []).append((str(_number(row["value"])), row["qualifier"]))
     changes = {}
     for case_id in case_ids:
         found = []
         for name in TREND_ORDER:
             if name == "bp":
                 sbp, dbp = series.get((case_id, "sbp"), []), series.get((case_id, "dbp"), [])
-                values = [f"{s}/{d}" for s, d in zip(sbp[-2:], dbp[-2:])] if len(sbp) >= 2 and len(dbp) >= 2 else []
+                readings = [(f"{s[0]}/{d[0]}", None) for s, d in zip(sbp[-2:], dbp[-2:])] \
+                    if len(sbp) >= 2 and len(dbp) >= 2 else []
                 label, unit = "BP", "mmHg"
             else:
-                values = series.get((case_id, name), [])
+                readings = series.get((case_id, name), [])
                 label, unit, _, _ = VITAL_SIGNS[name]
-            if len(values) >= 2 and values[-1] != values[-2]:
-                found.append({"name": name, "label": label, "from": values[-2], "to": values[-1], "unit": unit})
+            if len(readings) >= 2 and readings[-1] != readings[-2]:
+                (before, before_q), (after, after_q) = readings[-2], readings[-1]
+                found.append({"name": name, "label": label, "from": before, "to": after, "unit": unit,
+                              "from_qualifier": before_q, "to_qualifier": after_q})
         changes[case_id] = found
     return changes
 

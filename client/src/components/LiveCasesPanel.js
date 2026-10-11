@@ -37,6 +37,13 @@ const etaText = (etaAt, serverNow) => {
   return `ETA passed ${-minutes} min ago (${clockTime(etaAt)})`;
 };
 
+// "SpO2 94→89", with the conditions when they differ: "SpO2 89 (on room air)→92 (on 4 liters oxygen)".
+const vitalChange = (v) => {
+  const conditions = v.from_qualifier !== v.to_qualifier;
+  const value = (number, qualifier) => (conditions && qualifier ? `${number} (${qualifier})` : number);
+  return `${v.label} ${value(v.from, v.from_qualifier)}→${value(v.to, v.to_qualifier)}`;
+};
+
 const MoveCue = ({ move }) => (move.to < move.from ? (
   <span className="px-2 py-0.5 text-xs font-bold text-white bg-amber-500 rounded-full">↑ from #{move.from}</span>
 ) : (
@@ -100,7 +107,7 @@ const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move
       <p className="text-sm text-gray-700 truncate">{c.patient_info || 'No patient info'}</p>
       {c.vital_changes?.length > 0 && (
         <p className="text-xs font-medium text-gray-800 mt-0.5">
-          {c.vital_changes.map((v) => `${v.label} ${v.from}→${v.to}`).join(' · ')}
+          {c.vital_changes.map(vitalChange).join(' · ')}
         </p>
       )}
       {c.queue_reasons && (
@@ -368,6 +375,7 @@ const LiveCasesPanel = () => {
                     findings={extracted.findings}
                     onRetryAssessment={retryAssessment}
                     onRetryFindings={extracted.retry}
+                    markNew
                   />
                 </div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-2">Transcript</h4>
@@ -375,6 +383,7 @@ const LiveCasesPanel = () => {
                   segments={segments}
                   caseStartedAt={selected.started_at}
                   onDismiss={dismissSegment}
+                  newSinceVersion={selected.acknowledgment?.info_version ?? null}
                   emptyText={selected.status === 'active' ? 'Waiting for the EMT\'s first audio update…' : 'No transcript was recorded for this case.'}
                 />
                 <CaseChat caseId={selected.id} className="mt-6" />

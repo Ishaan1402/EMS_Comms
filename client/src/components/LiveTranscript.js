@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Loader2, RotateCw, UploadCloud } from 'lucide-react';
+import { NewTag } from './CaseOverview';
 
 // Past this, a pending segment is flagged as delayed rather than just "transcribing".
 const SLOW_AFTER_MS = 20000;
@@ -18,8 +19,10 @@ const formatOffset = (iso, startIso) => {
  * Chronological transcript for one case.
  * segments: server segments plus (EMT side only) local entries with status
  * 'uploading' or 'upload_failed' for audio not yet accepted by the server.
+ * newSinceVersion (hospital side): text that arrived after this acknowledged version is tagged new.
  */
-const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText = 'No transcript yet.' }) => {
+const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText = 'No transcript yet.',
+  newSinceVersion = null }) => {
   const scrollRef = useRef(null);
   const stickToBottom = useRef(true);
   const [now, setNow] = useState(Date.now());
@@ -60,6 +63,7 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText
           if (!pendingSince.current.has(pendingKey)) pendingSince.current.set(pendingKey, Date.now());
           waitedMs = now - pendingSince.current.get(pendingKey);
         }
+        const isNew = newSinceVersion != null && segment.info_version != null && segment.info_version > newSinceVersion;
         return (
           <div key={key} className="flex gap-3 text-sm">
             <div className="w-28 shrink-0 text-right whitespace-nowrap">
@@ -68,10 +72,10 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText
                 <div className="font-mono text-xs text-gray-400">{formatOffset(segment.recorded_at, caseStartedAt)}</div>
               )}
             </div>
-            <div className="flex-1 border-l-2 pl-3 pb-1 border-gray-200">
+            <div className={`flex-1 border-l-2 pl-3 pb-1 ${isNew ? 'border-blue-500' : 'border-gray-200'}`}>
               {segment.status === 'completed' && (
                 segment.text
-                  ? <p className="text-gray-900 leading-relaxed">{segment.text}</p>
+                  ? <p className="text-gray-900 leading-relaxed">{segment.text}{isNew && <NewTag />}</p>
                   : <p className="text-gray-400 italic">(no speech detected)</p>
               )}
 
