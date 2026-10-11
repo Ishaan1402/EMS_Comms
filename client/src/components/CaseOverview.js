@@ -49,6 +49,14 @@ const CATEGORY_STYLES = {
 
 export const CategoryBadge = ({ liveCase }) => {
   const category = liveCase.preparation_category;
+  const assessing = ['pending', 'processing'].includes(liveCase.processing?.assessment?.status);
+  if (!category && assessing) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border bg-blue-50 text-blue-700 border-blue-200">
+        <Loader2 className="h-3 w-3 animate-spin" /> Assessing…
+      </span>
+    );
+  }
   return (
     <span className={`px-2 py-0.5 text-xs font-bold rounded-full border ${CATEGORY_STYLES[category] || CATEGORY_STYLES['Cannot assess']}`}>
       {category || 'Assessment unavailable'}
@@ -78,7 +86,9 @@ const VitalsTrend = ({ vitals, spoken }) => {
           const latest = row.readings[row.readings.length - 1];
           return (
             <tr key={row.name}>
-              <td className="pr-3 py-0.5 font-medium text-gray-700 whitespace-nowrap align-top">{row.label}</td>
+              <td className="pr-3 py-0.5 font-medium text-gray-700 whitespace-nowrap align-top">
+                {row.label} {row.unit && <span className="text-xs font-normal text-gray-500">{row.unit}</span>}
+              </td>
               <td className="pr-3 py-0.5 text-gray-900">
                 {row.readings.map((r, index) => (
                   <React.Fragment key={r.id}>
@@ -89,7 +99,7 @@ const VitalsTrend = ({ vitals, spoken }) => {
                       <SourceIcon source={r.source} />
                     </span>
                   </React.Fragment>
-                ))} {row.unit}
+                ))}
               </td>
               <td className="py-0.5 text-xs text-gray-500 align-top">{formatTime(latest.at)}</td>
             </tr>

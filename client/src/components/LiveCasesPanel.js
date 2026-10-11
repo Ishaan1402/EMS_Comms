@@ -77,11 +77,13 @@ const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move
       className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-blue-50 transition-colors ${selected ? 'bg-blue-50' : ''} ${move && move.to < move.from ? 'ring-2 ring-inset ring-amber-300' : ''}`}
     >
       <div className="flex items-start justify-between gap-2 mb-1">
-        <span className="text-gray-900">
-          {c.queue_position && <span className="mr-2 font-semibold text-gray-400">#{c.queue_position}</span>}
-          <span className="font-semibold">{c.ems_unit || `Case #${c.id}`}</span>
+        <span className="flex flex-wrap items-baseline gap-x-2 text-gray-900">
+          <span className="font-semibold whitespace-nowrap">
+            {c.queue_position && <span className="mr-2 text-gray-400">#{c.queue_position}</span>}
+            {c.ems_unit || `Case #${c.id}`}
+          </span>
           {c.status === 'active' && !c.arrived_at && (
-            <span className="ml-2 text-sm text-gray-600 whitespace-nowrap">{etaText(c.eta_at, serverNow)}</span>
+            <span className="text-sm text-gray-600 whitespace-nowrap">{etaText(c.eta_at, serverNow)}</span>
           )}
         </span>
         <div className="flex items-center gap-2 shrink-0">
@@ -308,8 +310,8 @@ const LiveCasesPanel = () => {
             : 'No inbound cases. They appear here as soon as an EMT routes one to your hospital.'}
         </p>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3">
-          <ul className="border-r border-gray-200 max-h-[32rem] overflow-y-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-5">
+          <ul className="lg:col-span-2 border-r border-gray-200 max-h-[48rem] overflow-y-auto">
             {queued.map((c) => (
               <CaseListItem key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
                             unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]} />
@@ -325,12 +327,12 @@ const LiveCasesPanel = () => {
             ))}
           </ul>
 
-          <div className="lg:col-span-2 p-6">
+          <div className="lg:col-span-3 p-6">
             {selected ? (
               <>
                 <div className="mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">
-                    Case #{selected.id} — EMT {selected.emt_first_name} {selected.emt_last_name}
+                    {selected.ems_unit && `${selected.ems_unit} · `}Case #{selected.id} — EMT {selected.emt_first_name} {selected.emt_last_name}
                   </h3>
                   <p className="text-sm text-gray-600">{selected.patient_info || 'No patient info provided'}</p>
                   <p className="text-xs text-gray-500 mt-1">
