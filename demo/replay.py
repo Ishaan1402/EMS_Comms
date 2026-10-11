@@ -333,6 +333,10 @@ class Replay:
     def summary(self) -> list:
         return [self.call("GET", f"/api/cases/{case_id}", self.scenario["doctor"]) for case_id in self.cases.values()]
 
+    def queue_order(self) -> dict:
+        """The doctor's hospital queue as the server orders it (case_queue.py)."""
+        return self.call("GET", "/api/cases/queue", self.scenario["doctor"])
+
     def model_usage(self) -> dict:
         """Tokens and estimated cost of every assessment in this run (cost is None if any is unpriced)."""
         attempts = [a for case_id in self.cases.values()
@@ -366,6 +370,12 @@ def print_summary(cases: list, usage: dict) -> None:
           f"{usage['output_tokens']} output tokens, {cost} (list price; transcription not included)")
 
 
+def print_queue(queue: dict) -> None:
+    print(f"\nHospital queue ({queue['rule_version']}): {queue['rule']}")
+    for case in queue["cases"]:
+        print(f"  {case['queue_position']}. {case['source_case_id'] or case['id']}: {' · '.join(case['queue_reasons'])}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base-url", default="http://localhost:5000")
@@ -387,6 +397,7 @@ def main():
             manifest_path.write_text(json.dumps(replay.manifest(), indent=2) + "\n")
             replay.wait_until_settled()
             print_summary(replay.summary(), replay.model_usage())
+            print_queue(replay.queue_order())
             print(f"\nRun {replay.run_id} saved to {manifest_path}")
             if args.finish:
                 replay.finish()

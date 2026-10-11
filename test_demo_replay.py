@@ -162,6 +162,12 @@ class TestThreePatientReplay:
         assert {c["operational_status"] for c in run.summary()} == {"closed"}
         assert all(c["arrived_at"] for c in run.summary())
 
+    def test_final_queue_lists_every_patient_in_server_order(self, scenario, audio_dir):
+        run, _ = run_replay(scenario, audio_dir)
+        queue = run.queue_order()
+        assert sorted(c["source_case_id"] for c in queue["cases"]) == ["SYN002", "SYN008", "SYN010"]
+        assert [c["queue_position"] for c in queue["cases"]] == [1, 2, 3]
+
     def test_model_usage_adds_up_the_run(self, scenario, audio_dir):
         run, _ = run_replay(scenario, audio_dir)
         usage = run.model_usage()
