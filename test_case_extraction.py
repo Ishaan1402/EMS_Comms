@@ -198,6 +198,8 @@ class TestExtractionRuns:
         result = findings(case["id"])
         assert result["status"] == "completed" and result["chief_complaint"]["text"] == "Breathing trouble"
         assert result["chief_complaint"]["source"]["kind"] == "case opened"
+        assert result["chief_complaint"]["source_version"] == result["chief_complaint"]["first_stated_version"] == 1
+        assert {f["source_version"] for f in result["vitals"]} == {update["info_version"]}
         spo2 = next(v for v in result["vitals"] if v["name"] == "spo2")
         assert (spo2["value"], spo2["unit"], spo2["qualifier"]) == (89, "%", "on room air")
         assert spo2["source"] == {"kind": "typed", "segment_id": None, "update_id": update["id"]}
@@ -208,12 +210,21 @@ class TestExtractionRuns:
         assert runs[0]["input_tokens"] == 400 and runs[0]["cost_usd"] is not None
         assert runs[0]["extractor_version"] == case_extraction.extractor_version()
 
+    def test_a_repeated_complaint_keeps_when_it_was_first_given(self, monkeypatch):
+        use_extractor(monkeypatch, answer(chief=[(0, "Breathing trouble")]), answer(chief=[(0, "breathing trouble")]))
+        case = start_case()
+        update = add_note(case["id"], "Update on our adult with breathing trouble.")
+        complaint = findings(case["id"])["chief_complaint"]
+        assert complaint["source_version"] == update["info_version"] and complaint["first_stated_version"] == 1
+
     def test_radio_facts_point_at_their_clip_and_when_it_was_spoken(self, monkeypatch):
         use_extractor(monkeypatch, answer(), answer(vitals=[(0, "hr", 132, "")]))
         case = start_case()
         segment = radio(case["id"], 0, "Pulse 132, BP 90 over 60.", "2026-10-11T18:05:00.000Z")
         hr = findings(case["id"])["vitals"][0]
         assert hr["source"]["kind"] == "radio" and hr["source"]["segment_id"] == segment
+        assert hr["source_version"] == query("SELECT info_version FROM transcript_segments WHERE id = ?",
+                                             (segment,))[0]["info_version"]
         assert hr["recorded_at"] == "2026-10-11T18:05:00.000Z"
 
     def test_a_failure_is_visible_retryable_and_leaves_the_assessment_alone(self, monkeypatch):

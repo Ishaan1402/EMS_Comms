@@ -17,9 +17,9 @@ const byTime = (a, b) => (a.at || '').localeCompare(b.at || '');
 export const buildVitalRows = (typed, spoken) => {
   const readings = [
     ...typed.map((r) => ({ id: `t${r.id}`, name: r.name, label: r.label, unit: r.unit, value: r.value,
-      at: r.measured_at, source: 'typed vitals', qualifier: null, quote: null })),
+      at: r.measured_at, source: 'typed vitals', qualifier: null, quote: null, version: r.info_version })),
     ...spoken.map((f) => ({ id: `f${f.id}`, name: f.name, label: f.label, unit: f.unit, value: f.value,
-      at: f.recorded_at, source: f.source.kind, qualifier: f.qualifier, quote: f.quote })),
+      at: f.recorded_at, source: f.source.kind, qualifier: f.qualifier, quote: f.quote, version: f.source_version })),
   ].sort(byTime);
   const byName = new Map();
   readings.forEach((r) => {

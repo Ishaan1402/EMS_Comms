@@ -32,3 +32,9 @@ test('qualifiers and decimals are kept', () => {
   expect(rows.map((r) => [r.name, r.readings[0].value, r.readings[0].qualifier]))
     .toEqual([['spo2', 89, 'on room air'], ['temp_c', '39.1', null]]);
 });
+
+test('each reading keeps the version of the report it came from', () => {
+  const rows = buildVitalRows([{ ...typed(1, 'hr', 128, '2026-10-11T18:08:00.000Z'), info_version: 5 }],
+    [spoken(2, 'hr', 118, '2026-10-11T18:01:00.000Z', { source_version: 2 })]);
+  expect(rows[0].readings.map((r) => r.version)).toEqual([2, 5]);
+});

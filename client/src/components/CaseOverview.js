@@ -65,6 +65,21 @@ export const CategoryBadge = ({ liveCase }) => {
   );
 };
 
+// Marks information that arrived after the hospital's last acknowledgment.
+export const NewTag = () => (
+  <span className="ml-1 px-1 text-[10px] font-bold uppercase tracking-wide text-white bg-blue-600 rounded align-middle">new</span>
+);
+
+// isNew(version): did this arrive after the last acknowledgment? Before any acknowledgment
+// everything is new, so nothing is marked. isNew.since(time) is the same test by time, for an
+// ETA change, which doesn't create a new information version.
+const newSince = (liveCase, enabled) => {
+  const ack = enabled ? liveCase.acknowledgment : null;
+  const isNew = (version) => Boolean(ack && version != null && version > ack.info_version);
+  isNew.since = (time) => Boolean(ack && time && time > ack.acknowledged_at);
+  return isNew;
+};
+
 const SOURCE_LABELS = { radio: 'Said on the radio', typed: 'Typed by the crew', 'case opened': 'Typed when the case was opened' };
 
 // Where a value or fact came from, for its tooltip: "Said on the radio at 14:02: “Heart rate 118”".
@@ -76,7 +91,7 @@ const SourceIcon = ({ source }) => (source === 'radio'
   : <Keyboard className="inline h-3 w-3 ml-0.5 text-gray-400" aria-label="typed" />);
 
 /** One row per vital sign, oldest value first, each marked with where it came from (hover for the words). */
-const VitalsTrend = ({ vitals, spoken }) => {
+const VitalsTrend = ({ vitals, spoken, isNew }) => {
   const rows = buildVitalRows(vitals, spoken);
   if (rows.length === 0) return <p className="text-sm text-gray-500 italic">No vitals reported yet.</p>;
   return (
@@ -97,6 +112,7 @@ const VitalsTrend = ({ vitals, spoken }) => {
                       {r.value}
                       {r.qualifier && <span className="text-xs text-gray-500"> ({r.qualifier})</span>}
                       <SourceIcon source={r.source} />
+                      {isNew(r.version) && <NewTag />}
                     </span>
                   </React.Fragment>
                 ))}
@@ -112,7 +128,7 @@ const VitalsTrend = ({ vitals, spoken }) => {
 
 const FACT_STATUS = { absent: 'absent', 'not assessed': 'not assessed', planned: 'planned, not yet given', given: 'given' };
 
-const FactList = ({ title, facts }) => facts.length > 0 && (
+const FactList = ({ title, facts, isNew }) => facts.length > 0 && (
   <div>
     <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{title}</p>
     <ul className="text-sm space-y-0.5">
@@ -127,6 +143,7 @@ const FactList = ({ title, facts }) => facts.length > 0 && (
           )}
           <SourceIcon source={fact.source.kind} />
           <span className="text-xs text-gray-400"> {formatTime(fact.recorded_at)}</span>
+          {isNew(fact.source_version) && <NewTag />}
         </li>
       ))}
     </ul>
@@ -134,7 +151,7 @@ const FactList = ({ title, facts }) => facts.length > 0 && (
 );
 
 /** What the extraction step pulled out of the crew's reports (case_extraction.py), with its state. */
-const PatientInformation = ({ findings, onRetry }) => {
+const PatientInformation = ({ findings, onRetry, isNew }) => {
   if (!findings) return null;
   const empty = !findings.chief_complaint && findings.findings.length === 0 && findings.treatments.length === 0;
   return (
@@ -155,16 +172,17 @@ const PatientInformation = ({ findings, onRetry }) => {
       {findings.chief_complaint && (
         <p className="text-sm" title={sourceTitle(findings.chief_complaint.source.kind, findings.chief_complaint.recorded_at, findings.chief_complaint.quote)}>
           <span className="font-medium text-gray-700">Chief complaint:</span> {findings.chief_complaint.text}
+          {isNew(findings.chief_complaint.first_stated_version) && <NewTag />}
         </p>
       )}
-      <FactList title="Findings" facts={findings.findings} />
-      <FactList title="Treatment" facts={findings.treatments} />
+      <FactList title="Findings" facts={findings.findings} isNew={isNew} />
+      <FactList title="Treatment" facts={findings.treatments} isNew={isNew} />
       {empty && findings.status !== 'processing' && <p className="text-sm text-gray-500 italic">Nothing extracted yet.</p>}
     </div>
   );
 };
 
-const UpdatesTimeline = ({ updates }) => {
+const UpdatesTimeline = ({ updates, isNew }) => {
   if (updates.length === 0) return <p className="text-sm text-gray-500 italic">No typed updates yet.</p>;
   return (
     <ul className="space-y-1 text-sm max-h-48 overflow-y-auto">
@@ -179,6 +197,7 @@ const UpdatesTimeline = ({ updates }) => {
             {update.vitals?.length > 0 && update.vitals.map((v) => `${v.label} ${formatValue(v.value)} ${v.unit}`.trim()).join(', ')}
             {update.vitals?.length > 0 && update.body && ' — '}
             {update.body}
+            {(update.kind === 'eta' ? isNew.since(update.created_at) : isNew(update.info_version)) && <NewTag />}
           </span>
         </li>
       ))}
@@ -189,11 +208,14 @@ const UpdatesTimeline = ({ updates }) => {
 /**
  * Case header shared by the EMT and hospital views: routing, where the transport is,
  * what the AI processing is doing (with failures spelled out), the current risk, and
- * the vitals/update history.
+ * the vitals/update history. markNew (hospital view) tags what arrived since the last
+ * acknowledgment, so the clinician sees exactly what they are acknowledging.
  */
-const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, onRetryAssessment, onRetryFindings }) => {
+const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, onRetryAssessment, onRetryFindings,
+  markNew = false }) => {
   const { processing } = liveCase;
   const assessment = liveCase.current_assessment;
+  const isNew = newSince(liveCase, markNew);
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
@@ -211,7 +233,13 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
             <CheckCircle className="h-4 w-4" /> Seen by {liveCase.acknowledgment.user_name} at {formatTime(liveCase.acknowledgment.acknowledged_at)}
           </span>
         ) : (
-          liveCase.status === 'active' && <span className="text-orange-700">Latest information not yet acknowledged</span>
+          liveCase.status === 'active' && (
+            <span className="text-orange-700">
+              {markNew && liveCase.acknowledgment
+                ? <>New since {liveCase.acknowledgment.user_name} acknowledged at {formatTime(liveCase.acknowledgment.acknowledged_at)}: marked <NewTag /> below</>
+                : 'Latest information not yet acknowledged'}
+            </span>
+          )
         )}
       </div>
 
@@ -256,19 +284,19 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <h4 className="text-sm font-semibold text-gray-700 mb-1">Vitals</h4>
-          <VitalsTrend vitals={vitals} spoken={findings?.vitals || []} />
+          <VitalsTrend vitals={vitals} spoken={findings?.vitals || []} isNew={isNew} />
         </div>
         <div>
           <h4 className="text-sm font-semibold text-gray-700 mb-1">
             Patient information <span className="font-normal text-xs text-gray-500">· AI-extracted from the crew's reports; hover for their words</span>
           </h4>
-          <PatientInformation findings={findings} onRetry={onRetryFindings} />
+          <PatientInformation findings={findings} onRetry={onRetryFindings} isNew={isNew} />
         </div>
       </div>
 
       <div>
         <h4 className="text-sm font-semibold text-gray-700 mb-1">Typed updates</h4>
-        <UpdatesTimeline updates={updates} />
+        <UpdatesTimeline updates={updates} isNew={isNew} />
       </div>
     </div>
   );

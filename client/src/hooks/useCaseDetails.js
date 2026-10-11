@@ -37,6 +37,7 @@ export default function useCaseDetails(caseId) {
     if (update.case_id === caseRef.current) setUpdates((current) => byId([...current, update]));
   }, []);
 
-  const vitals = updates.flatMap((update) => update.vitals || []);
+  // Each reading keeps the version its update created, to tell what arrived after an acknowledgment.
+  const vitals = updates.flatMap((update) => (update.vitals || []).map((v) => ({ ...v, info_version: update.info_version })));
   return { updates, vitals, error, reload, addUpdate };
 }
