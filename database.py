@@ -312,6 +312,39 @@ def init_database():
       FOREIGN KEY (case_id) REFERENCES cases (id)
     );
 
+    -- Queue position history (queue_history.py): each revision of a hospital's inbound order,
+    -- one row per case that entered, moved or left, with what committed the change (cause) and
+    -- whose case it was (cause_case_id; another patient's update can move this one). The moved
+    -- case's information version, category and attention flag are kept as they were then.
+    CREATE TABLE IF NOT EXISTS queue_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hospital_id INTEGER NOT NULL,
+      revision INTEGER NOT NULL,
+      case_id INTEGER NOT NULL,
+      change TEXT NOT NULL CHECK (change IN ('entered', 'moved', 'left')),
+      from_position INTEGER,
+      to_position INTEGER,
+      cause TEXT NOT NULL,
+      cause_case_id INTEGER,
+      info_version INTEGER,
+      preparation_category TEXT,
+      needs_attention INTEGER,
+      rule_version TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (hospital_id) REFERENCES hospitals (id),
+      FOREIGN KEY (case_id) REFERENCES cases (id)
+    );
+
+    -- The last recorded order per hospital (case ids as JSON), to compare the next one with.
+    CREATE TABLE IF NOT EXISTS queue_state (
+      hospital_id INTEGER PRIMARY KEY,
+      revision INTEGER NOT NULL,
+      case_ids TEXT NOT NULL,
+      rule_version TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (hospital_id) REFERENCES hospitals (id)
+    );
+
     -- AI-extracted patient information, each fact traceable to the transcript segment or typed
     -- note it came from (segment_id / update_id; both NULL for the summary typed when the case
     -- was opened) and the words it was taken from (source_text). finding_type is chief_complaint,
@@ -347,6 +380,8 @@ def init_database():
     CREATE INDEX IF NOT EXISTS idx_case_findings_segment_id ON case_findings(segment_id);
     CREATE INDEX IF NOT EXISTS idx_case_findings_case ON case_findings(case_id, recorded_at);
     CREATE INDEX IF NOT EXISTS idx_extraction_runs_case ON extraction_runs(case_id, id);
+    CREATE INDEX IF NOT EXISTS idx_queue_events_hospital ON queue_events(hospital_id, revision);
+    CREATE INDEX IF NOT EXISTS idx_queue_events_case ON queue_events(case_id, id);
     CREATE INDEX IF NOT EXISTS idx_case_updates_case ON case_updates(case_id, id);
     -- A retried update with the same client_id returns the stored row instead of a duplicate.
     CREATE UNIQUE INDEX IF NOT EXISTS idx_case_updates_client_id ON case_updates(case_id, client_id) WHERE client_id IS NOT NULL;

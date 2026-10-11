@@ -177,6 +177,18 @@ class TestThreePatientReplay:
         assert {c["operational_status"] for c in run.summary()} == {"closed"}
         assert all(c["arrived_at"] for c in run.summary())
 
+    def test_queue_changes_are_recorded_for_every_patient(self, scenario, audio_dir):
+        run, _ = run_replay(scenario, audio_dir)
+        changes = run.queue_changes()
+        assert {row["source_case_id"] for row in changes} == {"SYN002", "SYN008", "SYN010"}
+        assert all(row["change"] == "entered" for row in changes[:1])
+        final = run.queue_order()["cases"]
+        last = {}
+        for row in changes:
+            last[row["source_case_id"]] = row["to_position"]
+        # The recorded history ends where the screen's queue is.
+        assert last == {c["source_case_id"]: c["queue_position"] for c in final}
+
     def test_final_queue_lists_every_patient_in_server_order(self, scenario, audio_dir):
         run, _ = run_replay(scenario, audio_dir)
         queue = run.queue_order()
