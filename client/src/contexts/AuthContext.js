@@ -16,6 +16,30 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem('token'));
 
+  const logout = useCallback(() => {
+    localStorage.removeItem('token');
+    setToken(null);
+    setUser(null);
+    delete axios.defaults.headers.common['Authorization'];
+  }, []);
+
+  // Profiles, tokens and request bodies are never logged: the console shows up in screen recordings.
+  const fetchUser = useCallback(async () => {
+    try {
+      const response = await axios.get('/api/auth/profile');
+      setUser(response.data);
+      setLoading(false);
+    } catch (error) {
+      console.error('Could not load the profile:', error.response?.status ?? error.message);
+      // Only logout if it's an authentication error
+      if (error.response?.status === 401) {
+        logout();
+      } else {
+        setLoading(false);
+      }
+    }
+  }, [logout]);
+
   // Set up axios defaults
   useEffect(() => {
     if (token) {
@@ -24,31 +48,11 @@ export const AuthProvider = ({ children }) => {
     } else {
       setLoading(false);
     }
-  }, [token]);
-
-  const fetchUser = useCallback(async () => {
-    try {
-      console.log('Fetching user profile...');
-      const response = await axios.get('/api/auth/profile');
-      console.log('User profile response:', response.data);
-      setUser(response.data);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching user:', error);
-      // Only logout if it's an authentication error
-      if (error.response?.status === 401) {
-        logout();
-      } else {
-        setLoading(false);
-      }
-    }
-  }, []);
+  }, [token, fetchUser]);
 
   const login = async (username, password) => {
     try {
-      console.log('Attempting login...');
       const response = await axios.post('/api/auth/login', { username, password });
-      console.log('Login response:', response.data);
       
       const { token: newToken, user: userData } = response.data;
       
@@ -59,7 +63,8 @@ export const AuthProvider = ({ children }) => {
       
       return { success: true };
     } catch (error) {
-      console.error('Login error:', error);
+      // The error carries the request, password included: log only the status.
+      console.error('Login failed:', error.response?.status ?? error.message);
       return { 
         success: false, 
         error: error.response?.data?.error || 'Login failed' 
@@ -86,14 +91,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
-    console.log('Logging out...');
-    localStorage.removeItem('token');
-    setToken(null);
-    setUser(null);
-    delete axios.defaults.headers.common['Authorization'];
-  };
-
   const value = {
     user,
     loading,
@@ -104,8 +101,6 @@ export const AuthProvider = ({ children }) => {
     isEMT: user?.role === 'emt',
     isDoctor: user?.role === 'doctor'
   };
-
-  console.log('Auth context value:', value);
 
   return (
     <AuthContext.Provider value={value}>

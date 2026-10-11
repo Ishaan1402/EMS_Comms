@@ -11,8 +11,6 @@ import LoadingSpinner from './components/LoadingSpinner';
 function App() {
   const { user, loading, isAuthenticated } = useAuth();
 
-  console.log('App render - loading:', loading, 'user:', user, 'isAuthenticated:', isAuthenticated);
-
   if (loading) {
     return <LoadingSpinner />;
   }
