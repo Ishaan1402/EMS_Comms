@@ -18,7 +18,7 @@ import case_assessment
 import case_extraction
 import database
 from database import init_database, insert_sample_data, query
-from demo import replay
+from demo import pilot_scenario, replay
 from routes import cases, recordings
 
 SCENARIO_PATH = Path(replay.DEFAULT_SCENARIO)
@@ -266,6 +266,78 @@ class TestScenarioFile:
             initial = prior.split(": ", 1)[1]
             assert patient["reports"]["initial"] == initial[0].upper() + initial[1:]
             assert patient["initial_eta_minutes"] == eta + elapsed
+
+
+# Four fictional cases in the pilot dataset's shape: two single reports, two with an earlier report.
+PILOT_SAMPLE = [
+    ["SYN001", "E001", 1, 0, 12, "No earlier report provided.", "Adult short of breath. Heart rate 96."],
+    ["SYN002", "E002", 2, 8, 20, "Eight minutes earlier: heart rate 104, awake.", "Now speaking a few words. Heart rate 126."],
+    ["SYN004", "E004", 1, 0, 25, "No earlier report provided.", "New trouble speaking. Heart rate 88."],
+    ["SYN007", "E007", 2, 3, 15, "Three minutes earlier: ankle pain.", "Pain worse. Pulse 101."],
+]
+PILOT_QUEUES = [{"queue_id": "Q01", "case_ids": ["SYN001", "SYN004", "SYN007"]},
+                {"queue_id": "Q09", "case_ids": ["SYN002", "SYN999"]}]
+
+
+@pytest.fixture
+def pilot(tmp_path):
+    path = tmp_path / "pilot_cases.json"
+    path.write_text(json.dumps(PILOT_SAMPLE))
+    return pilot_scenario.build(pilot_scenario.load_cases(path), [row[0] for row in PILOT_SAMPLE], PILOT_QUEUES)
+
+
+class TestPilotScenario:
+    def test_cases_are_replayed_as_the_dataset_describes_them(self, pilot):
+        replay.validate(pilot)
+        patients = {p["source_case_id"]: p for p in pilot["patients"]}
+        assert patients["SYN002"]["reports"] == {"initial": "Heart rate 104, awake.",
+                                                 "update": "Now speaking a few words. Heart rate 126."}
+        assert patients["SYN002"]["initial_eta_minutes"] == 28 and patients["SYN002"]["patient_info"] is None
+        assert patients["SYN001"]["reports"] == {"update": "Adult short of breath. Heart rate 96."}
+        events = [(e["minute"], e["action"], e.get("patient")) for e in pilot["events"]]
+        # Queue group Q01 runs first, together, and is recorded a minute after its last report (SYN007's
+        # update, 3 minutes in). SYN002 runs after, its update 8 minutes after its acknowledged earlier report.
+        assert (4, "snapshot_queue", None) in events
+        start = next(m for m, action, p in events if action == "start_case" and p == "SYN002")
+        assert (start + 8, "audio_report", "SYN002") in events and (start + 0.5, "acknowledge", "SYN002") in events
+        # One open case per EMT: every case is finished before its EMT starts another.
+        assert len({p["emt"] for p in pilot["patients"]}) == 3
+
+    def test_the_run_exports_predictions_in_the_harness_format(self, pilot):
+        run, results = run_replay(pilot, None, typed=True)
+        predictions = run.predictions()
+        assert predictions["kind"] == "model_predictions" and predictions["dataset_version"] == "pilot_v1"
+        [config] = predictions["configs"]
+        assert config["config_id"] == f"app-replay-{run.run_id}" and config["repeats"] == 1
+        assert config["prompt_version"] == "awareness_v2" and config["input_contract_version"] == "app_replay_typed"
+        records = {r["case_id"]: r for r in predictions["records"]}
+        assert set(records) == {"SYN001", "SYN002", "SYN004", "SYN007"}
+        assert all(r["status"] == "ok" and set(r["output"]) == set(case_assessment.OUTPUT_FIELDS)
+                   for r in records.values())
+        assert records["SYN001"]["output"]["meaningful_change"] == "No earlier report"
+        assert records["SYN002"]["output"]["meaningful_change"] == "Yes"   # compared with the acknowledged report
+        assert predictions["app_run"]["cases"]["SYN002"]["baseline_version"] is not None
+        [queue] = predictions["queues"]
+        assert queue["queue_id"] == "Q01" and sorted(queue["order"].values()) == [1, 2, 3]
+        assert set(queue["order"]) == {"SYN001", "SYN004", "SYN007"}
+
+    def test_unsure_and_failures_use_the_harness_vocabulary(self, pilot, monkeypatch):
+        async def unsure_or_timeout(inputs):
+            if "SYN004" in inputs["input"]["case_id"]:
+                raise openai.APITimeoutError(request=None)
+            return {"summary": "s", "meaningful_change": "No earlier report", "change_explanation": "-",
+                    "missing_information": "Vital signs", "preparation_category": "Unsure"}, {}
+        monkeypatch.setattr(case_assessment, "score", unsure_or_timeout)
+        run, _ = run_replay(pilot, None, typed=True)
+        records = {r["case_id"]: r for r in run.predictions()["records"]}
+        assert records["SYN001"]["output"]["preparation_category"] == "Unsure"
+        assert records["SYN004"]["status"] == "timeout" and "output" not in records["SYN004"]
+
+
+def test_the_demo_replay_records_its_queue_exercise(scenario, audio_dir):
+    run, _ = run_replay(scenario, audio_dir)
+    [queue] = run.predictions()["queues"]
+    assert queue["queue_id"] == "Q02" and set(queue["order"]) == {"SYN002", "SYN008", "SYN010"}
 
 
 def test_cuts_land_in_pauses_not_mid_word():

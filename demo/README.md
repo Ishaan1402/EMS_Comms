@@ -45,6 +45,30 @@ Edit the `events` list to change the story; `replay.validate()` checks it.
 
 Every case stores its `source_case_id` (the evaluation datasets' `case_id`) and `source_run_id`, so exported app data joins with the evaluation datasets (KAN-13, KAN-29, KAN-32). Each run also writes `demo/runs/<run_id>.json` with its case IDs and `seconds_per_minute`, because the replay compresses scenario minutes and analysis over time needs the scale.
 
+## Scoring the app against the clinician (KAN-13)
+
+Every replay also writes `demo/runs/<run_id>-predictions.json`: the run in the evaluation harness's `model_predictions` format (`evals/README.md`). It has:
+- **One record per patient**, from the app's last AI assessment of the patient's final information. "Cannot assess" becomes the harness's "Unsure", and a failure becomes `error`, `timeout` or `refusal`.
+- **A queue order** for each `snapshot_queue` event. The demo scenario records group Q02 at the end.
+- **`app_run`**, describing how the inputs were made and each case's extracted patient information.
+
+To score all ten pilot cases, generate a scenario from the dataset and replay it:
+
+```bash
+python3 demo/pilot_scenario.py --pilot docs/clinician-annotation/pilot_cases.json --queues evals/queues.json --out demo/pilot_cases_scenario.json
+python3 demo/replay.py --scenario demo/pilot_cases_scenario.json --typed --seconds-per-minute 60
+python -m evals score --references evals/local/approved-references.json --predictions demo/runs/<run_id>-predictions.json --out evals/results/app-replay-01
+```
+
+`pilot_scenario.py` replays each case the way the dataset describes it:
+1. The earlier report is sent, and the doctor acknowledges it.
+2. The current report arrives `elapsed_minutes` later, with the case's ETA.
+3. Queue groups Q01 and Q02 each run together, and their order is recorded.
+
+The run takes about 30 minutes at `--seconds-per-minute 60`. That speed is what makes the model see the dataset's `elapsed_minutes`; faster runs compress it (`app_run` records the speed). `--typed` sends the dataset's text. Without it, the reports are spoken (`python3 demo/make_audio.py --scenario demo/pilot_cases_scenario.json`) and transcribed, which measures the whole pipeline including speech.
+
+The config's `input_contract_version` (`app_replay_typed` / `app_replay_speech`) marks that these are the app's inputs, not the dataset text sent straight to the model the way the harness's own runner does. Pilot cases are for development only.
+
 ## Who this serves
 
 | Ticket | Use |
