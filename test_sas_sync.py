@@ -30,6 +30,13 @@ SCORED = {"summary": "s", "meaningful_change": "No earlier report", "change_expl
           "missing_information": "None identified", "preparation_category": "Prepare now"}
 
 
+@pytest.fixture(autouse=True)
+def no_local_sas_settings(monkeypatch):
+    """Importing main loads the developer's .env; its SAS_* settings (e.g. a table prefix) mustn't leak in."""
+    for name in [n for n in os.environ if n.startswith("SAS_")]:
+        monkeypatch.delenv(name)
+
+
 @pytest.fixture(scope="module", autouse=True)
 def temp_database(tmp_path_factory):
     previous = database.DB_PATH

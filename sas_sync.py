@@ -555,8 +555,6 @@ async def check(settings: Settings) -> list:
 
 
 def main(argv: list) -> int:
-    from dotenv import load_dotenv
-    load_dotenv(Path(__file__).parent / ".env")
     settings = Settings.from_env()
     command = argv[1] if len(argv) > 1 else ""
     if command == "csv" and len(argv) == 3:
@@ -597,4 +595,6 @@ def main(argv: list) -> int:
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
     sys.exit(main(sys.argv))
