@@ -338,20 +338,24 @@ def latest_attempt(case_id: int) -> Optional[dict]:
     return rows[0] if rows else None
 
 
-class AssessmentRunner:
-    """At most one assessment per case at a time; information that arrives meanwhile is assessed next."""
+class CaseRunner:
+    """
+    At most one run per case at a time; information that arrives meanwhile is processed next.
+    Subclasses do the work in _run(case_id, force): AssessmentRunner here, and the extraction
+    step's runner in case_extraction.py, so each pipeline step queues and fails on its own.
+    """
 
     def __init__(self):
         self._active = set()
         self._queued = {}  # case_id -> force
         self._tasks = set()  # started by start(); referenced so they aren't garbage-collected
-        # Called with the case id after every stored change; routes/cases.py publishes the case.
+        # Called with the case id after every stored change; routes/cases.py publishes it.
         self.on_change: Callable[[int], None] = lambda case_id: None
 
     async def request(self, case_id: int, force: bool = False) -> None:
         """
-        Assess the case's current information unless an attempt already covers it.
-        force re-runs even if the latest attempt (a failure) covers the current version.
+        Process the case's current information unless a run already covers it.
+        force re-runs even if the latest run (a failure) covers the current version.
         """
         if case_id in self._active:
             self._queued[case_id] = self._queued.get(case_id, False) or force
@@ -361,11 +365,11 @@ class AssessmentRunner:
             await self._settle(case_id)
             # Anything that arrived while settling is read now; keep a retry's force flag.
             force = self._queued.pop(case_id, False) or force
-            await self._assess(case_id, force)
+            await self._run(case_id, force)
             while case_id in self._queued:
                 force = self._queued.pop(case_id) or force
                 await self._settle(case_id)
-                await self._assess(case_id, force)
+                await self._run(case_id, force)
         finally:
             self._active.discard(case_id)
             self._queued.pop(case_id, None)
@@ -383,6 +387,16 @@ class AssessmentRunner:
         task = asyncio.get_running_loop().create_task(self.request(case_id, force))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+
+    async def _run(self, case_id: int, force: bool) -> None:
+        raise NotImplementedError
+
+
+class AssessmentRunner(CaseRunner):
+    """At most one assessment per case at a time; information that arrives meanwhile is assessed next."""
+
+    async def _run(self, case_id: int, force: bool) -> None:
+        await self._assess(case_id, force)
 
     async def _assess(self, case_id: int, force: bool) -> None:
         inputs = read_inputs(case_id)

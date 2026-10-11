@@ -338,15 +338,22 @@ class Replay:
         return self.call("GET", "/api/cases/queue", self.scenario["doctor"])
 
     def model_usage(self) -> dict:
-        """Tokens and estimated cost of every assessment in this run (cost is None if any is unpriced)."""
-        attempts = [a for case_id in self.cases.values()
-                    for a in self.call("GET", f"/api/cases/{case_id}/assessments", self.scenario["doctor"])]
-        costs = [a["cost_usd"] for a in attempts if a["status"] != "processing"]
+        """
+        Tokens and estimated cost of every AI call in this run: assessments and patient information
+        extractions. A call that never got an answer costs nothing; cost is None if an answered
+        call's model is unpriced.
+        """
+        def attempts(kind):
+            return [a for case_id in self.cases.values()
+                    for a in self.call("GET", f"/api/cases/{case_id}/{kind}", self.scenario["doctor"])]
+        assessments, extractions = attempts("assessments"), attempts("extractions")
+        answered = [a for a in assessments + extractions if a["input_tokens"] is not None]
         return {
-            "assessments": len(attempts),
-            "input_tokens": sum(a["input_tokens"] or 0 for a in attempts),
-            "output_tokens": sum(a["output_tokens"] or 0 for a in attempts),
-            "cost_usd": None if any(c is None for c in costs) else sum(costs),
+            "assessments": len(assessments),
+            "extractions": len(extractions),
+            "input_tokens": sum(a["input_tokens"] for a in answered),
+            "output_tokens": sum(a["output_tokens"] or 0 for a in answered),
+            "cost_usd": None if any(a["cost_usd"] is None for a in answered) else sum(a["cost_usd"] for a in answered),
         }
 
     def finish(self) -> None:
@@ -366,8 +373,9 @@ def print_summary(cases: list, usage: dict) -> None:
               f"{c['processing']['status']:<13} {'yes' if c['latest_update_acknowledged'] else 'no':<6} "
               f"{'; '.join(c['processing']['reasons'])}")
     cost = "unknown" if usage["cost_usd"] is None else f"${usage['cost_usd']:.4f}"
-    print(f"\nModel: {usage['assessments']} assessments, {usage['input_tokens']} input + "
-          f"{usage['output_tokens']} output tokens, {cost} (list price; transcription not included)")
+    print(f"\nModel: {usage['assessments']} assessments + {usage['extractions']} extractions, "
+          f"{usage['input_tokens']} input + {usage['output_tokens']} output tokens, {cost} "
+          "(list price; transcription not included)")
 
 
 def print_queue(queue: dict) -> None:

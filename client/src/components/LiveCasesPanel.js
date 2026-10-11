@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import useCaseEvents from '../hooks/useCaseEvents';
 import { mergeNewer, upsertNewer } from '../utils/liveRows';
 import useCaseDetails from '../hooks/useCaseDetails';
+import useCaseFindings from '../hooks/useCaseFindings';
 import LiveTranscript from './LiveTranscript';
 import CaseOverview, { CategoryBadge, OperationalBadge, ProcessingBadge } from './CaseOverview';
 import CaseChat from './CaseChat';
@@ -97,6 +98,8 @@ const LiveCasesPanel = () => {
   selectedRef.current = selectedId;
   const details = useCaseDetails(selectedId);
   const { addUpdate: addCaseUpdate, reload: reloadUpdates } = details;
+  const extracted = useCaseFindings(selectedId);
+  const { apply: applyFindings, reload: reloadFindings } = extracted;
   // The hospital whose inbound cases this user sees; null if the account has none.
   const [hospital, setHospital] = useState(undefined);
   // Order, counts and reasons come from the server (GET /api/cases/queue); this view never re-sorts.
@@ -172,9 +175,12 @@ const LiveCasesPanel = () => {
       if (selectedRef.current) {
         fetchSegments(selectedRef.current);
         reloadUpdates();
+        reloadFindings();
       }
     } else if (type === 'update.created') {
       addCaseUpdate(data.update);
+    } else if (type === 'findings.updated') {
+      applyFindings(data);
     } else if (type === 'case.opened' || type === 'case.updated') {
       setCases((list) => upsertNewer(list, data.case));
       refreshQueueSoon();
@@ -189,7 +195,8 @@ const LiveCasesPanel = () => {
         setUnseen((u) => ({ ...u, [data.case_id]: (u[data.case_id] || 0) + 1 }));
       }
     }
-  }, [fetchCases, fetchQueue, refreshQueueSoon, fetchSegments, addCaseUpdate, reloadUpdates]);
+  }, [fetchCases, fetchQueue, refreshQueueSoon, fetchSegments, addCaseUpdate, reloadUpdates, applyFindings,
+    reloadFindings]);
 
   const connection = useCaseEvents(handleEvent);
   const byId = useMemo(() => new Map(cases.map((c) => [c.id, c])), [cases]);
@@ -311,7 +318,9 @@ const LiveCasesPanel = () => {
                     liveCase={selected}
                     updates={details.updates}
                     vitals={details.vitals}
+                    findings={extracted.findings}
                     onRetryAssessment={retryAssessment}
+                    onRetryFindings={extracted.retry}
                   />
                 </div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-2">Transcript</h4>

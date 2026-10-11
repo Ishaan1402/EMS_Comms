@@ -98,6 +98,18 @@ The case is the main object. One transport is one case, and everything about the
   - Every attempt is a row in `risk_assessments` with the `info_version` it read, its `baseline_version`, `input_tokens`, `output_tokens`, `latency_ms` and a list-price `cost_usd`. The case's `current_assessment` is the usable one with the highest version, so a slow result for older information never replaces a newer one. A failure keeps the previous assessment (`assessment_is_outdated: true`) and can be retried (`POST /api/cases/:id/assessments/retry`). `GET /api/cases/:id/assessments` lists every attempt.
   - Assessment waits 2 s first, so a report arriving as several segments is assessed once, whole; information arriving during a run is assessed once more afterwards. On startup, open cases whose current information has no usable assessment are re-assessed.
   - Models: `OPENAI_SCORING_MODEL` (default `gpt-6-luna`; `gpt-4` shuts down 2026-10-23) and `OPENAI_TRANSCRIPTION_MODEL` (default `gpt-transcribe`). The older single-recording flow still uses its own prompt and 0–10 risk scale.
+- **Patient information** (`case_extraction.py`, KAN-8) is its own pipeline step: audio → transcript → patient information, next to the assessment. It runs, fails and is retried on its own.
+  - **What it pulls out:** the chief complaint; vitals (sent to the case's vital sign trend next to typed ones, BP as 110/70, "on room air" kept); findings (present / absent / not assessed); treatments (given / planned).
+  - **Where each fact came from:** the radio clip or typed note (`segment_id` / `update_id`), with the exact words. Hover a value on the dashboard to see them.
+  - **What each run reads:** the information since the last completed run, with earlier text only as context.
+  - **Records:** `extraction_runs` (tokens, latency, cost, failure) and `case_findings`.
+  - **API:**
+    - `GET /api/cases/:id/findings`
+    - `GET /api/cases/:id/extractions` (every attempt)
+    - `POST /api/cases/:id/findings/retry`
+    - Changes are pushed as `findings.updated` events.
+  - **The assessment still reads the reports themselves.** That is the contract the evaluation measures; feeding it extracted facts would need its own evaluation first.
+  - **Model:** `OPENAI_EXTRACTION_MODEL`, defaulting to the scoring model.
 - **Messages**: each case has its own thread at `/api/cases/:id/messages` (same API as below).
 
 Existing databases are migrated on startup: new columns are added, and `messages` is rebuilt so a message can belong to a case or a recording.
@@ -109,9 +121,9 @@ Existing databases are migrated on startup: new columns are added, and `messages
 | Table (`SAS_CASLIB`, default `Public`) | One row per |
 |---|---|
 | `ASC_CASES` | case, current state (transport status, AI processing, category, acknowledgment) |
-| `ASC_EVENTS` | thing that happened: case started/arrived/closed, update, segment uploaded/transcribed/failed/dismissed, assessment, acknowledgment, message |
+| `ASC_EVENTS` | thing that happened: case started/arrived/closed, update, segment uploaded/transcribed/failed/dismissed, assessment, patient information extraction, acknowledgment, message |
 | `ASC_ASSESSMENTS` | AI assessment attempt, with tokens, latency and cost |
-| `ASC_VITALS` | vital sign reading |
+| `ASC_VITALS` | vital sign reading, typed or extracted from a report (`SOURCE`: typed vitals / radio / typed note / case opened) |
 
 Rows carry `CASE_ID`, `SOURCE_CASE_ID` and `SOURCE_RUN_ID`, so they join with the evaluation datasets. Each timestamp comes as `*_AT` (ISO UTC text) and `*_DT` (SAS datetime). No free text leaves the app: transcripts, notes, messages and AI summaries stay in SQLite.
 
@@ -158,7 +170,7 @@ Messaging is implemented in the Python backend only.
 ## 🏗️ Architecture
 
 ```
-EMT Phone → Audio Recording → Backend API → Transcription → AI Assessment → Hospital Dashboard
+EMT Phone → Audio Recording → Backend API → Transcription → Patient info + AI Assessment → Hospital Dashboard
     ↓              ↓              ↓              ↓              ↓              ↓
 Web Interface → File Upload → SQLite Database → Transcription → Medical Summary → SMS/Email
 ```

@@ -15,6 +15,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
 from main import app
 import case_assessment
+import case_extraction
 import database
 from database import init_database, insert_sample_data, query
 from demo import replay
@@ -68,6 +69,19 @@ async def fake_scorer(inputs):
         {"input_tokens": 1000, "output_tokens": 200, "latency_ms": 900}
 
 
+async def fake_extractor(info):
+    """Every heart rate spoken in the new items, the way the model would cite them."""
+    vitals = []
+    for item in info["new"]:
+        words = item["text"].replace(",", "").split()
+        for index, word in enumerate(words[:-1]):
+            if word.lower() in ("rate", "pulse") and words[index + 1].isdigit():
+                vitals.append({"name": "hr", "value": int(words[index + 1]), "qualifier": "", "item": item["id"],
+                               "quote": f"{word} {words[index + 1]}"})
+    return {"chief_complaint": [], "vitals": vitals, "findings": [], "treatments": []}, \
+        {"input_tokens": 300, "output_tokens": 80, "latency_ms": 700}
+
+
 @pytest.fixture
 def scenario():
     return json.loads(SCENARIO_PATH.read_text())
@@ -87,6 +101,7 @@ def fakes(monkeypatch, tmp_path):
     monkeypatch.setattr(cases, "SEGMENT_DIR", tmp_path / "segments")
     monkeypatch.setattr(cases, "transcribe_segment_sync", fake_whisper)
     monkeypatch.setattr(case_assessment, "score", fake_scorer)
+    monkeypatch.setattr(case_extraction, "extract", fake_extractor)
     monkeypatch.setattr(case_assessment, "SETTLE_SECONDS", 0)
 
 
@@ -171,9 +186,15 @@ class TestThreePatientReplay:
     def test_model_usage_adds_up_the_run(self, scenario, audio_dir):
         run, _ = run_replay(scenario, audio_dir)
         usage = run.model_usage()
-        assert usage["assessments"] > 0
-        assert usage["input_tokens"] == 1000 * usage["assessments"]
+        assert usage["assessments"] > 0 and usage["extractions"] > 0
+        assert usage["input_tokens"] == 1000 * usage["assessments"] + 300 * usage["extractions"]
         assert usage["cost_usd"] is None or usage["cost_usd"] > 0
+
+    def test_heart_rates_spoken_on_the_radio_are_extracted_into_the_trend(self, scenario, audio_dir):
+        run, results = run_replay(scenario, audio_dir)
+        syn010 = by_source(results)["SYN010"]
+        heart_rates = client.get(f"/api/cases/{syn010['id']}/findings", headers=run._headers("dr.smith")).json()["vitals"]
+        assert [(v["value"], v["source"]["kind"]) for v in heart_rates if v["name"] == "hr"] == [(106, "radio"), (132, "radio")]
 
     def test_replay_stops_instead_of_acting_on_pending_transcripts(self, scenario, audio_dir, monkeypatch):
         run, _ = run_replay(scenario, audio_dir)

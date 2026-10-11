@@ -43,7 +43,7 @@ Every case stores its `source_case_id` (the evaluation datasets' `case_id`) and 
 |---|---|
 | KAN-6 Product delivery | The repeatable three-patient scenario |
 | KAN-24 / KAN-25 Messaging, live transcription | End-to-end test with real speech through Whisper |
-| KAN-8 Extraction | Transcripts whose facts are known (vitals are in the scripts) |
+| KAN-8 Extraction | Transcripts whose facts are known (vitals are in the scripts), so the extracted vitals and findings can be checked |
 | KAN-10 / KAN-31 Queue | Three cases at one hospital, plus the clinician's Q02 ranking to compare against |
 | KAN-15 Security | `dr.jones` works at a different hospital (Northside), for "Hospital B can't see Hospital A" |
 | KAN-29 / KAN-32 Export, SAS | Run the replay, then export |

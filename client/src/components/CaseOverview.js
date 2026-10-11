@@ -1,5 +1,6 @@
 import React from 'react';
-import { AlertTriangle, CheckCircle, Clock, Loader2, MapPin, RotateCw, Truck } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Clock, Keyboard, Loader2, MapPin, Radio, RotateCw, Truck } from 'lucide-react';
+import { buildVitalRows, formatValue } from '../utils/vitalsTrend';
 
 const OPERATIONAL = {
   inbound: { label: 'Inbound', className: 'bg-blue-100 text-blue-800' },
@@ -19,8 +20,6 @@ const PROCESSING = {
 const UPDATE_LABELS = { note: 'Update', vitals: 'Vitals', correction: 'Correction', eta: 'ETA change' };
 
 const formatTime = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
-
-const formatValue = (value) => (Number.isInteger(value) ? value : Number(value).toFixed(1));
 
 export const OperationalBadge = ({ status }) => {
   const { label, className } = OPERATIONAL[status] || OPERATIONAL.inbound;
@@ -58,30 +57,100 @@ export const CategoryBadge = ({ liveCase }) => {
   );
 };
 
-const VitalsTrend = ({ vitals }) => {
-  const byName = new Map();
-  vitals.forEach((reading) => {
-    if (!byName.has(reading.name)) byName.set(reading.name, []);
-    byName.get(reading.name).push(reading);
-  });
-  if (byName.size === 0) return <p className="text-sm text-gray-500 italic">No vitals entered yet.</p>;
+const SOURCE_LABELS = { radio: 'Said on the radio', typed: 'Typed by the crew', 'case opened': 'Typed when the case was opened' };
+
+// Where a value or fact came from, for its tooltip: "Said on the radio at 14:02: “Heart rate 118”".
+const sourceTitle = (source, at, quote) =>
+  `${SOURCE_LABELS[source] || 'Typed by the crew'} at ${formatTime(at)}${quote ? `: “${quote}”` : ''}`;
+
+const SourceIcon = ({ source }) => (source === 'radio'
+  ? <Radio className="inline h-3 w-3 ml-0.5 text-gray-400" aria-label="from the radio" />
+  : <Keyboard className="inline h-3 w-3 ml-0.5 text-gray-400" aria-label="typed" />);
+
+/** One row per vital sign, oldest value first, each marked with where it came from (hover for the words). */
+const VitalsTrend = ({ vitals, spoken }) => {
+  const rows = buildVitalRows(vitals, spoken);
+  if (rows.length === 0) return <p className="text-sm text-gray-500 italic">No vitals reported yet.</p>;
   return (
     <table className="text-sm">
       <tbody>
-        {[...byName.values()].map((readings) => {
-          const latest = readings[readings.length - 1];
+        {rows.map((row) => {
+          const latest = row.readings[row.readings.length - 1];
           return (
-            <tr key={latest.name}>
-              <td className="pr-3 py-0.5 font-medium text-gray-700 whitespace-nowrap">{latest.label}</td>
+            <tr key={row.name}>
+              <td className="pr-3 py-0.5 font-medium text-gray-700 whitespace-nowrap align-top">{row.label}</td>
               <td className="pr-3 py-0.5 text-gray-900">
-                {readings.map((r) => formatValue(r.value)).join(' → ')} {latest.unit}
+                {row.readings.map((r, index) => (
+                  <React.Fragment key={r.id}>
+                    {index > 0 && ' → '}
+                    <span title={sourceTitle(r.source === 'typed vitals' ? 'typed' : r.source, r.at, r.quote)}>
+                      {r.value}
+                      {r.qualifier && <span className="text-xs text-gray-500"> ({r.qualifier})</span>}
+                      <SourceIcon source={r.source} />
+                    </span>
+                  </React.Fragment>
+                ))} {row.unit}
               </td>
-              <td className="py-0.5 text-xs text-gray-500">{formatTime(latest.measured_at)}</td>
+              <td className="py-0.5 text-xs text-gray-500 align-top">{formatTime(latest.at)}</td>
             </tr>
           );
         })}
       </tbody>
     </table>
+  );
+};
+
+const FACT_STATUS = { absent: 'absent', 'not assessed': 'not assessed', planned: 'planned, not yet given', given: 'given' };
+
+const FactList = ({ title, facts }) => facts.length > 0 && (
+  <div>
+    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{title}</p>
+    <ul className="text-sm space-y-0.5">
+      {facts.map((fact) => (
+        <li key={fact.id} title={sourceTitle(fact.source.kind, fact.recorded_at, fact.quote)}
+            className={fact.status === 'absent' ? 'text-gray-600' : 'text-gray-900'}>
+          {fact.text}
+          {fact.status && fact.status !== 'present' && (
+            <span className={fact.status === 'not assessed' || fact.status === 'planned' ? ' text-orange-700' : ' text-gray-500'}>
+              {' '}— {FACT_STATUS[fact.status]}
+            </span>
+          )}
+          <SourceIcon source={fact.source.kind} />
+          <span className="text-xs text-gray-400"> {formatTime(fact.recorded_at)}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+);
+
+/** What the extraction step pulled out of the crew's reports (case_extraction.py), with its state. */
+const PatientInformation = ({ findings, onRetry }) => {
+  if (!findings) return null;
+  const empty = !findings.chief_complaint && findings.findings.length === 0 && findings.treatments.length === 0;
+  return (
+    <div className="space-y-2">
+      {findings.status === 'processing' && (
+        <p className="flex items-center gap-1 text-xs text-blue-700"><Loader2 className="h-3 w-3 animate-spin" /> Reading the latest report…</p>
+      )}
+      {findings.status === 'failed' && (
+        <div className="flex items-center gap-2 text-xs text-red-700">
+          <AlertTriangle className="h-3 w-3 shrink-0" /> Couldn't extract the latest report: {findings.error}
+          {onRetry && (
+            <button onClick={onRetry} className="flex items-center gap-1 px-2 py-0.5 border border-red-300 rounded hover:bg-red-50">
+              <RotateCw className="h-3 w-3" /> Retry
+            </button>
+          )}
+        </div>
+      )}
+      {findings.chief_complaint && (
+        <p className="text-sm" title={sourceTitle(findings.chief_complaint.source.kind, findings.chief_complaint.recorded_at, findings.chief_complaint.quote)}>
+          <span className="font-medium text-gray-700">Chief complaint:</span> {findings.chief_complaint.text}
+        </p>
+      )}
+      <FactList title="Findings" facts={findings.findings} />
+      <FactList title="Treatment" facts={findings.treatments} />
+      {empty && findings.status !== 'processing' && <p className="text-sm text-gray-500 italic">Nothing extracted yet.</p>}
+    </div>
   );
 };
 
@@ -112,7 +181,7 @@ const UpdatesTimeline = ({ updates }) => {
  * what the AI processing is doing (with failures spelled out), the current risk, and
  * the vitals/update history.
  */
-const CaseOverview = ({ liveCase, updates = [], vitals = [], onRetryAssessment }) => {
+const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, onRetryAssessment, onRetryFindings }) => {
   const { processing } = liveCase;
   const assessment = liveCase.current_assessment;
   return (
@@ -176,12 +245,19 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], onRetryAssessment }
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <h4 className="text-sm font-semibold text-gray-700 mb-1">Vitals</h4>
-          <VitalsTrend vitals={vitals} />
+          <VitalsTrend vitals={vitals} spoken={findings?.vitals || []} />
         </div>
         <div>
-          <h4 className="text-sm font-semibold text-gray-700 mb-1">Updates</h4>
-          <UpdatesTimeline updates={updates} />
+          <h4 className="text-sm font-semibold text-gray-700 mb-1">
+            Patient information <span className="font-normal text-xs text-gray-500">· AI-extracted from the crew's reports; hover for their words</span>
+          </h4>
+          <PatientInformation findings={findings} onRetry={onRetryFindings} />
         </div>
+      </div>
+
+      <div>
+        <h4 className="text-sm font-semibold text-gray-700 mb-1">Typed updates</h4>
+        <UpdatesTimeline updates={updates} />
       </div>
     </div>
   );
