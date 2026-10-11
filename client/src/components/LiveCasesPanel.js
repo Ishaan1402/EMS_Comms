@@ -18,11 +18,10 @@ const OFFLINE_LABELS = {
   unauthorized: 'Session expired — log in again for live updates',
 };
 
-const sortCases = (cases) =>
-  [...cases].sort((a, b) => {
-    if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
-    return b.started_at.localeCompare(a.started_at);
-  });
+const newestFirst = (cases) => [...cases].sort((a, b) => b.started_at.localeCompare(a.started_at));
+
+// Wait this long after a change before re-fetching the queue, so a burst of events is one request.
+const QUEUE_REFRESH_MS = 300;
 
 const ConnectionBadge = ({ status }) =>
   status === 'live' ? (
@@ -39,6 +38,7 @@ const CaseStatusBadge = ({ liveCase, serverNow }) => {
   if (liveCase.status !== 'active') {
     return <span className="px-2 py-0.5 text-xs text-gray-600 bg-gray-200 rounded-full">Closed</span>;
   }
+  if (liveCase.arrived_at) return null;  // the Arrived badge says it; it's no longer live
   const idleMs = serverNow - Date.parse(liveCase.last_segment_at || liveCase.started_at);
   if (idleMs > IDLE_AFTER_MS) {
     return (
@@ -49,6 +49,41 @@ const CaseStatusBadge = ({ liveCase, serverNow }) => {
   }
   return <span className="px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full animate-pulse">LIVE</span>;
 };
+
+const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow }) => (
+  <li>
+    <button
+      onClick={() => onSelect(c.id)}
+      className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-blue-50 ${selected ? 'bg-blue-50' : ''}`}
+    >
+      <div className="flex items-center justify-between mb-1">
+        <span className="font-medium text-gray-900">
+          {c.queue_position && <span className="mr-2 text-gray-400">#{c.queue_position}</span>}
+          Case #{c.id}
+        </span>
+        <div className="flex items-center gap-2">
+          {unseen > 0 && <span className="px-2 text-xs font-bold text-white bg-blue-600 rounded-full">{unseen} new</span>}
+          <CaseStatusBadge liveCase={c} serverNow={serverNow} />
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1 mb-1">
+        {c.status === 'active' && <OperationalBadge status={c.operational_status} />}
+        <CategoryBadge liveCase={c} />
+        {c.processing?.needs_review && <ProcessingBadge processing={c.processing} />}
+      </div>
+      <p className="text-sm text-gray-700 truncate">{c.patient_info || 'No patient info'}</p>
+      {c.queue_reasons && (
+        <p className="text-xs text-gray-600 mt-0.5 truncate" title={c.queue_reasons.join(' · ')}>
+          Why here: {c.queue_reasons.join(' · ')}
+        </p>
+      )}
+      <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+        <Clock className="h-3 w-3" />
+        {new Date(c.started_at).toLocaleTimeString()} · EMT {c.emt_first_name} {c.emt_last_name} · {c.segment_count || 0} segments
+      </p>
+    </button>
+  </li>
+);
 
 const LiveCasesPanel = () => {
   const [cases, setCases] = useState([]);
@@ -64,6 +99,26 @@ const LiveCasesPanel = () => {
   const { addUpdate: addCaseUpdate, reload: reloadUpdates } = details;
   // The hospital whose inbound cases this user sees; null if the account has none.
   const [hospital, setHospital] = useState(undefined);
+  // Order, counts and reasons come from the server (GET /api/cases/queue); this view never re-sorts.
+  const [queue, setQueue] = useState({ cases: [], counts: null, rule: '' });
+  const queueTimer = useRef(null);
+
+  const fetchQueue = useCallback(async () => {
+    try {
+      const response = await axios.get('/api/cases/queue');
+      setQueue(response.data);
+      setSelectedId((current) => current ?? response.data.cases[0]?.id ?? null);
+    } catch (error) {
+      console.error('Error fetching queue:', error);
+    }
+  }, []);
+
+  const refreshQueueSoon = useCallback(() => {
+    clearTimeout(queueTimer.current);
+    queueTimer.current = setTimeout(fetchQueue, QUEUE_REFRESH_MS);
+  }, [fetchQueue]);
+
+  useEffect(() => () => clearTimeout(queueTimer.current), []);
 
   useEffect(() => {
     axios.get('/api/hospitals/mine')
@@ -80,7 +135,6 @@ const LiveCasesPanel = () => {
     try {
       const response = await axios.get('/api/cases');
       setCases((current) => mergeNewer(current, response.data));
-      setSelectedId((current) => current ?? sortCases(response.data)[0]?.id ?? null);
     } catch (error) {
       console.error('Error fetching cases:', error);
     }
@@ -99,7 +153,8 @@ const LiveCasesPanel = () => {
   // Load even if the event stream can't connect; merging makes the overlap with `ready` harmless.
   useEffect(() => {
     fetchCases();
-  }, [fetchCases]);
+    fetchQueue();
+  }, [fetchCases, fetchQueue]);
 
   useEffect(() => {
     setSegments([]);
@@ -113,6 +168,7 @@ const LiveCasesPanel = () => {
     if (type === 'ready') {
       setClockOffsetMs(Date.parse(data.server_time) - Date.now());
       fetchCases();
+      fetchQueue();
       if (selectedRef.current) {
         fetchSegments(selectedRef.current);
         reloadUpdates();
@@ -121,6 +177,7 @@ const LiveCasesPanel = () => {
       addCaseUpdate(data.update);
     } else if (type === 'case.opened' || type === 'case.updated') {
       setCases((list) => upsertNewer(list, data.case));
+      refreshQueueSoon();
       if (type === 'case.opened') {
         toast(`New live case from ${data.case.emt_first_name} ${data.case.emt_last_name}`, { icon: '🚑' });
         setSelectedId((current) => current ?? data.case.id);
@@ -132,11 +189,16 @@ const LiveCasesPanel = () => {
         setUnseen((u) => ({ ...u, [data.case_id]: (u[data.case_id] || 0) + 1 }));
       }
     }
-  }, [fetchCases, fetchSegments, addCaseUpdate, reloadUpdates]);
+  }, [fetchCases, fetchQueue, refreshQueueSoon, fetchSegments, addCaseUpdate, reloadUpdates]);
 
   const connection = useCaseEvents(handleEvent);
-  const sortedCases = useMemo(() => sortCases(cases), [cases]);
-  const selected = cases.find((c) => c.id === selectedId);
+  const byId = useMemo(() => new Map(cases.map((c) => [c.id, c])), [cases]);
+  // Queue entries show the freshest copy of each case, in the server's order.
+  const queued = queue.cases.map((entry) => ({ ...entry, ...(byId.get(entry.id) || {}),
+    queue_position: entry.queue_position, queue_reasons: entry.queue_reasons }));
+  const queuedIds = new Set(queued.map((c) => c.id));
+  const others = newestFirst(cases.filter((c) => !queuedIds.has(c.id)));
+  const selected = byId.get(selectedId) || queued.find((c) => c.id === selectedId);
   const serverNow = now + clockOffsetMs;
 
   const dismissSegment = async (segment) => {
@@ -152,6 +214,7 @@ const LiveCasesPanel = () => {
     try {
       const response = await axios.post(`/api/cases/${selected.id}/${path}`, body);
       if (response.data?.id) setCases((list) => upsertNewer(list, response.data));
+      refreshQueueSoon();
     } catch (error) {
       console.error(`Error on ${path}:`, error);
       toast.error(error.response?.data?.error || failure);
@@ -176,6 +239,16 @@ const LiveCasesPanel = () => {
         <ConnectionBadge status={connection} />
       </div>
 
+      {queue.counts && (
+        <div className="px-6 py-3 border-b border-gray-200 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+          <span><span className="font-bold text-gray-900">{queue.counts.inbound}</span> inbound</span>
+          <span className="text-purple-700"><span className="font-bold">{queue.counts.needs_review}</span> need review</span>
+          <span className="text-orange-700"><span className="font-bold">{queue.counts.unacknowledged}</span> not acknowledged</span>
+          <span className="text-red-700"><span className="font-bold">{queue.counts.prepare_now}</span> prepare now</span>
+          <span className="text-xs text-gray-500 ml-auto" title={queue.rule}>Order: draft rule</span>
+        </div>
+      )}
+
       {cases.length === 0 ? (
         <p className="p-6 text-sm text-gray-500">
           {hospital === null
@@ -184,40 +257,19 @@ const LiveCasesPanel = () => {
         </p>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3">
-          <ul className="border-r border-gray-200 max-h-[28rem] overflow-y-auto">
-            {sortedCases.map((c) => (
-              <li key={c.id}>
-                <button
-                  onClick={() => setSelectedId(c.id)}
-                  className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-blue-50 ${c.id === selectedId ? 'bg-blue-50' : ''}`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-medium text-gray-900">Case #{c.id}</span>
-                    <div className="flex items-center gap-2">
-                      {unseen[c.id] > 0 && (
-                        <span className="px-2 text-xs font-bold text-white bg-blue-600 rounded-full">{unseen[c.id]} new</span>
-                      )}
-                      <CaseStatusBadge liveCase={c} serverNow={serverNow} />
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-1 mb-1">
-                    {c.status === 'active' && <OperationalBadge status={c.operational_status} />}
-                    <CategoryBadge liveCase={c} />
-                    {c.processing?.needs_review && <ProcessingBadge processing={c.processing} />}
-                  </div>
-                  <p className="text-sm text-gray-700 truncate">{c.patient_info || 'No patient info'}</p>
-                  {(c.destination_hospital_name || c.eta_at) && (
-                    <p className="text-xs text-gray-500 truncate">
-                      {c.destination_hospital_name}
-                      {c.eta_at && !c.arrived_at && ` · ETA ${new Date(c.eta_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
-                    </p>
-                  )}
-                  <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    {new Date(c.started_at).toLocaleTimeString()} · EMT {c.emt_first_name} {c.emt_last_name} · {c.segment_count || 0} segments
-                  </p>
-                </button>
+          <ul className="border-r border-gray-200 max-h-[32rem] overflow-y-auto">
+            {queued.map((c) => (
+              <CaseListItem key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
+                            unseen={unseen[c.id]} serverNow={serverNow} />
+            ))}
+            {others.length > 0 && (
+              <li className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-100">
+                Arrived &amp; closed
               </li>
+            )}
+            {others.map((c) => (
+              <CaseListItem key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
+                            unseen={unseen[c.id]} serverNow={serverNow} />
             ))}
           </ul>
 
