@@ -10,7 +10,7 @@ from sendgrid.helpers.mail import Mail
 from datetime import datetime
 from database import query, run, get_db
 from middleware.auth import get_current_user, require_role, APIError
-from routes.recordings import slow_executor
+from thread_pools import slow_executor
 
 router = APIRouter()
 

@@ -12,6 +12,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 from main import app
 import database
 from database import query, run, get_db, init_database, insert_sample_data
+import openai_config
 from routes import recordings, notifications
 
 REAL_DB_PATH = Path(database.__file__).parent / "asclepius.db"
@@ -34,7 +35,7 @@ def temp_database(tmp_path_factory):
 @pytest.fixture(autouse=True)
 def no_external_services(monkeypatch, tmp_path):
     """Run with no OpenAI/Twilio/SendGrid clients and write uploads to a temp dir."""
-    monkeypatch.setattr(recordings, "openai_client", None)
+    monkeypatch.setattr(openai_config, "openai_client", None)
     monkeypatch.setattr(notifications, "twilio_client", None)
     monkeypatch.setattr(notifications, "sendgrid_client", None)
     monkeypatch.setattr(recordings, "UPLOAD_DIR", tmp_path)
@@ -588,7 +589,7 @@ class TestRecordingProcessing:
 
         def outage(**kwargs):
             raise RuntimeError("model outage")
-        monkeypatch.setattr(recordings, "openai_client", SimpleNamespace(
+        monkeypatch.setattr(openai_config, "openai_client", SimpleNamespace(
             chat=SimpleNamespace(completions=SimpleNamespace(create=outage))
         ))
         recording_id = self._process(monkeypatch)
@@ -804,7 +805,7 @@ class TestSecurityFixes:
         # This tests that login doesn't block on slow processing
         # We can't easily test the actual thread pool behavior in unit tests,
         # but we can verify the code structure is correct
-        from routes.recordings import fast_executor, slow_executor
+        from thread_pools import fast_executor, slow_executor
         
         # Verify separate executors exist
         assert fast_executor is not None

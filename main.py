@@ -20,6 +20,7 @@ from database import init_database, insert_sample_data, utc_now_iso
 import case_assessment
 import case_extraction
 import case_queue
+import openai_config
 import sas_sync
 
 
@@ -45,7 +46,7 @@ def build_info() -> dict:
         "client_build_sha256": hashlib.sha256(bundle.read_bytes()).hexdigest() if bundle.exists() else None,
         "scorer_version": case_assessment.scorer_version(),
         "extractor_version": case_extraction.extractor_version(),
-        "transcription_model": recordings.TRANSCRIPTION_MODEL,
+        "transcription_model": openai_config.TRANSCRIPTION_MODEL,
         "queue_rule_version": case_queue.QUEUE_RULE_VERSION,
         "server_started_at": utc_now_iso(),
     }

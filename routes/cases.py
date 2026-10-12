@@ -14,12 +14,13 @@ import openai
 import case_assessment
 import case_extraction
 import case_queue
+import openai_config
 import queue_history
 from case_assessment import ASSESSMENT_COLUMNS, VITAL_SIGNS
 from database import get_db, query, run, to_iso, utc_now_iso
 from middleware.auth import require_role, APIError
 from realtime import broker, format_sse
-from routes import recordings
+from thread_pools import fast_executor
 
 router = APIRouter()
 hospitals_router = APIRouter()
@@ -30,6 +31,11 @@ MAX_SEGMENT_BYTES = 10 * 1024 * 1024
 MAX_SEQ = 1_000_000
 MAX_DURATION_MS = 10 * 60 * 1000
 ALLOWED_SEGMENT_EXTENSIONS = {".webm", ".ogg", ".mp4", ".m4a", ".wav", ".mp3", ".aac"}
+# Also checked by the older recording upload (routes/recordings.py). audio/mpeg is deliberately not accepted.
+ALLOWED_AUDIO_TYPES = [
+    "audio/mp3", "audio/wav", "audio/m4a", "audio/x-m4a",
+    "audio/aac", "audio/x-aac", "audio/ogg", "audio/webm", "audio/mp4"
+]
 
 TRANSCRIPTION_TIMEOUT_SECONDS = 45
 # Transient failures (timeouts, network, rate limits, 5xx) are retried before giving up.
@@ -862,6 +868,15 @@ async def list_segments(case_id: str, current_user: dict = Depends(require_role(
     )
 
 
+def is_audio_type_allowed(content_type: str) -> bool:
+    """Check if audio MIME type is allowed, handling parameters like codecs."""
+    if not content_type:
+        return False
+    # Parse base MIME type (before semicolon) to handle parameterized types
+    base_type = content_type.split(';')[0].strip()
+    return base_type in ALLOWED_AUDIO_TYPES
+
+
 def parse_bounded_int(value: Optional[str], name: str, maximum: int) -> int:
     try:
         number = float(value)
@@ -919,7 +934,7 @@ async def upload_segment(
 
     if audio is None:
         raise APIError(400, "audio file is required")
-    if not recordings.is_audio_type_allowed(audio.content_type):
+    if not is_audio_type_allowed(audio.content_type):
         raise APIError(400, "Unsupported audio type")
     content = await audio.read()
     if not content:
@@ -933,7 +948,7 @@ async def upload_segment(
         extension = ".webm"
     SEGMENT_DIR.mkdir(parents=True, exist_ok=True)
     audio_path = SEGMENT_DIR / f"case-{case['id']}-seg-{seq_value}-{uuid.uuid4().hex}{extension}"
-    await asyncio.get_running_loop().run_in_executor(recordings.fast_executor, audio_path.write_bytes, content)
+    await asyncio.get_running_loop().run_in_executor(fast_executor, audio_path.write_bytes, content)
 
     now = utc_now_iso()
     try:
@@ -1022,14 +1037,14 @@ async def dismiss_segment(case_id: str, segment_id: str, current_user: dict = De
 
 
 def transcribe_segment_sync(audio_path: str, prompt: Optional[str]) -> str:
-    client = recordings.openai_client
+    client = openai_config.openai_client
     if not client:
         raise TranscriptionUnavailable()
     kwargs = {"prompt": prompt} if prompt else {}
     with open(audio_path, "rb") as audio_file:
         return client.audio.transcriptions.create(
             file=audio_file,
-            model=recordings.TRANSCRIPTION_MODEL,
+            model=openai_config.TRANSCRIPTION_MODEL,
             response_format="text",
             timeout=TRANSCRIPTION_TIMEOUT_SECONDS,
             **kwargs,

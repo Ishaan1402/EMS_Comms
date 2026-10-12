@@ -1,40 +1,16 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from pathlib import Path
-import os
 import time
 import json
 import asyncio
-import concurrent.futures
-from openai import OpenAI
+import openai_config
 from database import query, run, get_db
 from middleware.auth import get_current_user, require_role, APIError
+from routes.cases import is_audio_type_allowed
+from thread_pools import fast_executor, slow_executor
 
 router = APIRouter()
-
-# None when OPENAI_API_KEY is unset; processing then marks recordings as error.
-openai_api_key = os.getenv("OPENAI_API_KEY")
-# One SDK retry at most: with the default two, a call could outlast the caller's own timeout
-# and keep a worker thread busy after the caller gave up. Transcription retries on its own.
-OPENAI_MAX_RETRIES = 1
-openai_client = OpenAI(api_key=openai_api_key, max_retries=OPENAI_MAX_RETRIES) if openai_api_key else None
-# gpt-4 shuts down 2026-10-23. gpt-6-luna is the cheapest current model and the one evals/ uses.
-SCORING_MODEL = os.getenv("OPENAI_SCORING_MODEL", "gpt-6-luna")
-# whisper-1 is deprecated and misheard short live segments ("awake and" -> "Awaken");
-# gpt-transcribe got them right in a side-by-side test and costs less per minute.
-TRANSCRIPTION_MODEL = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "gpt-transcribe")
-# Sent only when set: models without reasoning reject the parameter. Blank it for those.
-SCORING_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "none")
-# A hung call would otherwise hold a worker for the client's 10-minute default.
-SCORING_REQUEST_TIMEOUT_SECONDS = 40
-
-
-def scoring_extra_body() -> dict:
-    """Newer models take max_completion_tokens and a reasoning effort, not temperature/max_tokens."""
-    body = {"max_completion_tokens": 1000}
-    if SCORING_REASONING_EFFORT:
-        body["reasoning_effort"] = SCORING_REASONING_EFFORT
-    return body
 
 
 def bounded_int(value, low: int, high: int):
@@ -49,24 +25,6 @@ def bounded_int(value, low: int, high: int):
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
-
-# audio/mpeg is deliberately not accepted.
-ALLOWED_AUDIO_TYPES = [
-    "audio/mp3", "audio/wav", "audio/m4a", "audio/x-m4a",
-    "audio/aac", "audio/x-aac", "audio/ogg", "audio/webm", "audio/mp4"
-]
-
-def is_audio_type_allowed(content_type: str) -> bool:
-    """Check if audio MIME type is allowed, handling parameters like codecs."""
-    if not content_type:
-        return False
-    # Parse base MIME type (before semicolon) to handle parameterized types
-    base_type = content_type.split(';')[0].strip()
-    return base_type in ALLOWED_AUDIO_TYPES
-
-# Separate pools: fast ops (auth, file writes) vs slow external calls (OpenAI, notifications)
-fast_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="fast")
-slow_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="slow")
 
 # The recording's EMT and the doctors notified about it; anyone else gets the same 404 as a missing one.
 VISIBLE_RECORDING = """ AND (r.emt_id = ? OR EXISTS (
@@ -271,14 +229,14 @@ async def process_recording(recording_id: int, audio_file_path: str):
 
 def transcribe_audio_sync(audio_file_path: str) -> str:
     """Sync version of transcribe for thread pool execution."""
-    if not openai_client:
+    if not openai_config.openai_client:
         raise Exception("OpenAI API key not configured")
     
     try:
         with open(audio_file_path, "rb") as audio_file:
-            transcription = openai_client.audio.transcriptions.create(
+            transcription = openai_config.openai_client.audio.transcriptions.create(
                 file=audio_file,
-                model=TRANSCRIPTION_MODEL,
+                model=openai_config.TRANSCRIPTION_MODEL,
                 response_format="text"
             )
         return transcription
@@ -297,7 +255,7 @@ async def analyze_with_llm(transcription: str, patient_info: str = "") -> dict:
     Raises on a missing key or model failure so the recording is marked error
     instead of storing a fake assessment and notifying doctors.
     """
-    if not openai_client:
+    if not openai_config.openai_client:
         raise Exception("OpenAI API key not configured")
     
     try:
@@ -355,12 +313,12 @@ Return ONLY the JSON object with no additional text."""
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             slow_executor,
-            lambda: openai_client.chat.completions.create(
-                model=SCORING_MODEL,
+            lambda: openai_config.openai_client.chat.completions.create(
+                model=openai_config.SCORING_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
-                extra_body=scoring_extra_body(),
-                timeout=SCORING_REQUEST_TIMEOUT_SECONDS,
+                extra_body=openai_config.scoring_extra_body(),
+                timeout=openai_config.SCORING_REQUEST_TIMEOUT_SECONDS,
             )
         )
 

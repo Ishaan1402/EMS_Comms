@@ -26,10 +26,10 @@ from typing import Optional
 from case_assessment import (VITAL_SIGNS, CaseRunner, ScoringRefused, ScoringUnavailable, UNREADABLE_ERROR,
                              assessment_executor, describe_error, estimate_cost)
 from database import get_db, query, run, utc_now_iso
-from routes import recordings
+import openai_config
 
 PROMPT_VERSION = "extraction_v3"
-EXTRACTION_MODEL = os.getenv("OPENAI_EXTRACTION_MODEL") or recordings.SCORING_MODEL
+EXTRACTION_MODEL = os.getenv("OPENAI_EXTRACTION_MODEL") or openai_config.SCORING_MODEL
 # Same bound as an assessment: longer than the request timeout times its attempts.
 EXTRACTION_TIMEOUT_SECONDS = 90
 # Earlier items sent as context (to complete a value split across clips); older ones aren't needed.
@@ -195,7 +195,7 @@ def model_input(info: dict) -> dict:
 
 async def extract(info: dict):
     """Call the model. Returns (parsed output or None if unreadable, usage). Raises on any failure."""
-    client = recordings.openai_client
+    client = openai_config.openai_client
     if not client:
         raise ScoringUnavailable()
     started = time.monotonic()
@@ -209,8 +209,8 @@ async def extract(info: dict):
             ],
             response_format={"type": "json_schema",
                              "json_schema": {"name": "patient_information", "strict": True, "schema": OUTPUT_SCHEMA}},
-            extra_body=recordings.scoring_extra_body(),
-            timeout=recordings.SCORING_REQUEST_TIMEOUT_SECONDS,
+            extra_body=openai_config.scoring_extra_body(),
+            timeout=openai_config.SCORING_REQUEST_TIMEOUT_SECONDS,
         ),
     )
     usage = {
