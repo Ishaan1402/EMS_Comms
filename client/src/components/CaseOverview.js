@@ -47,6 +47,11 @@ const CATEGORY_STYLES = {
   'Cannot assess': 'bg-purple-50 text-purple-700 border-purple-200',
 };
 
+// There is no end-of-report marker in the microphone stream. Silence between clips
+// cannot establish completeness, so keep inbound audio handoffs provisional.
+const isProvisional = (liveCase) => liveCase.status === 'active'
+  && !liveCase.arrived_at && liveCase.segment_count > 0;
+
 export const CategoryBadge = ({ liveCase }) => {
   const category = liveCase.preparation_category;
   const assessing = ['pending', 'processing'].includes(liveCase.processing?.assessment?.status);
@@ -61,6 +66,7 @@ export const CategoryBadge = ({ liveCase }) => {
     <span className={`px-2 py-0.5 text-xs font-bold rounded-full border ${CATEGORY_STYLES[category] || CATEGORY_STYLES['Cannot assess']}`}>
       {category || 'Assessment unavailable'}
       {category && liveCase.assessment_is_outdated && ' · earlier info'}
+      {category && isProvisional(liveCase) && ' · provisional'}
     </span>
   );
 };
@@ -262,8 +268,14 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
       {assessment?.summary && (
         <div className="text-sm space-y-1">
           <p className="font-medium text-gray-700">
-            AI handoff {liveCase.assessment_is_outdated && <span className="text-orange-700 font-normal">(based on earlier information)</span>}
+            AI handoff {liveCase.assessment_is_outdated && <span className="text-orange-700 font-normal">(based on earlier information or ETA)</span>}
           </p>
+          {assessment.completed_at && <p className="text-xs text-gray-500">Assessed at {formatTime(assessment.completed_at)} · current arrival time shown above</p>}
+          {isProvisional(liveCase) && (
+            <p className="text-sm text-orange-800 bg-orange-50 border border-orange-200 rounded px-3 py-2">
+              Provisional handoff — based on received clips; the radio report may still be incomplete.
+            </p>
+          )}
           <p className="text-gray-900">{assessment.summary}</p>
           {assessment.meaningful_change && assessment.meaningful_change !== 'No earlier report' && (
             <p className="text-gray-700">
