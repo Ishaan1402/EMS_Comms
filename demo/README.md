@@ -14,13 +14,13 @@ python3 demo/replay.py                                   # ~25 s; --seconds-per-
 
 Open the Doctor dashboard as `dr.smith` and an EMT dashboard as `emt.wilson`, `emt.garcia` or `emt.lee` (password `password123`) to watch.
 
-For a clean screen (no closed cases from earlier runs in the doctor's list), run the server on its own database and delete it between rehearsals; your usual `asclepius.db` is untouched:
+For a clean screen (no closed cases from earlier runs in the doctor's list), give each rehearsal a new database and retain it with that run's evidence:
 
 ```bash
-rm -f demo.db && ASCLEPIUS_DB_PATH=demo.db SEED_DEMO_USERS=1 python3 main.py
+ASCLEPIUS_DB_PATH=demo-rehearsal-01.db SEED_DEMO_USERS=1 python3 main.py
 ```
 
-Export that run for SAS with the same setting: `ASCLEPIUS_DB_PATH=demo.db python -m sas_sync csv sas_export/`.
+Export that run for SAS with the same database setting: `ASCLEPIUS_DB_PATH=demo-rehearsal-01.db python -m sas_sync csv sas_export/`.
 
 - `--typed` sends every report as a typed note: no audio files and no Whisper needed.
 - `--finish` marks every patient arrived and closes the cases afterwards.
@@ -38,20 +38,25 @@ Export that run for SAS with the same setting: `ASCLEPIUS_DB_PATH=demo.db python
 **Once:**
 - Python packages in `.venv`: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`. The system `python3` usually lacks them.
 - Audio in `demo/audio/`: `python3 demo/make_audio.py`.
-- A built client in `client/build/`, so one process serves everything. `npm ci` fails while `package-lock.json` is out of sync with `package.json`, so build in a copy and bring the build back:
+- A built client in `client/build/`, so one process serves everything. The lockfile was fixed in PR #19; use the locked install:
   ```bash
-  rm -rf /tmp/asclepius-client && cp -R client /tmp/asclepius-client && (cd /tmp/asclepius-client && npm install && npm run build) && rm -rf client/build && cp -R /tmp/asclepius-client/build client/build
+  cd client
+  npm ci
+  CI=true npm test -- --watchAll=false --runInBand
+  CI=true npm run build
+  cd ..
   ```
 
 **Each rehearsal**, from the repo root:
 
 ```bash
-rm -f demo.db && ASCLEPIUS_DB_PATH=demo.db SEED_DEMO_USERS=1 SAS_SYNC_ENABLED=0 NODE_ENV=production PORT=5001 .venv/bin/python main.py
+ASCLEPIUS_DB_PATH=demo-rehearsal-01.db SEED_DEMO_USERS=1 SAS_SYNC_ENABLED=0 NODE_ENV=production PORT=5001 .venv/bin/python main.py
 ```
 
 - **Port 5001:** on macOS, port 5000 belongs to AirPlay Receiver (Control Center).
 - **`SAS_SYNC_ENABLED=0`:** keeps the SAS push quiet even if `.env` turns it on.
-- **A fresh `demo.db`** keeps the doctor's list clean.
+- **A fresh database name per rehearsal** keeps the doctor's list clean and preserves previous run evidence.
+- **Log in fresh before presenting:** the live feed ends when a login expires (after 24 hours).
 
 1. **Doctor:** open http://localhost:5001 and log in as `dr.smith`.
 2. **EMT:** open a **private window or another browser** and log in as `emt.wilson`. Logins are per browser profile, so one window can't be both. The EMT screen picks up the case when the replay opens it.
@@ -72,6 +77,10 @@ rm -f demo.db && ASCLEPIUS_DB_PATH=demo.db SEED_DEMO_USERS=1 SAS_SYNC_ENABLED=0 
 | end | The terminal prints the model cost (about $0.002), the transcription estimate, and the time on the server: about 1 s from a clip arriving to its transcript being pushed, about 4 s to the assessment. Say "on the server" if you quote it. It also writes `demo/runs/<run_id>.json` and `<run_id>-predictions.json`. |
 
 **If asked:**
+- **"Why does it say provisional?"** The app can't tell when the crew has finished a radio report, and a pause doesn't mean they're done, so a handoff built from audio stays provisional until the patient arrives.
+- **"What happens when the ETA changes?"** The AI re-assesses with the new ETA (prompt `awareness_v3`), and the doctor doesn't need to acknowledge again, because no new patient information came in. Until the new handoff is ready, the old one is marked "earlier info". The handoff shows when it was assessed; the live ETA is shown separately. Because the model reads the ETA, an ETA change alone can change the category; that's on the list for the clinician.
+- **"How do you know the extracted facts are real?"** Each fact quotes the crew's own words, and the app checks that the quote really is in the clip or note it cites (hover a fact to see it). A bad quote fails that extraction visibly, with a retry, and earlier facts stay. It proves where a fact came from, not that the AI read it right.
+- **Hospital setting (KAN-34):** "Arrival highlight" above the queue sets how early a patient is flagged "Arriving soon", per hospital: 1 to 60 minutes, default 5. It only changes the badge, never the AI or the order. To show it, set General to 15 as `dr.smith`; Northside (`dr.jones`) keeps its own value.
 - **A first report sometimes comes back "Cannot assess"** (fever without a temperature). The AI says what's missing instead of guessing. Once the doctor acknowledges it, it ranks below known Prepare-now patients but above Can wait (queue rule draft-3, still to be agreed with the clinician).
 - **"Why did that patient move when the doctor acknowledged?"** Under the draft rule, unacknowledged information comes first, so acknowledging a patient lets the others' new information go ahead of it. Every move is recorded with its cause, and the terminal prints each patient's path at the end. Whether acknowledgment should reorder the board at all is an open question for the clinician.
 - **The queue order comes from a rule, not the model.** The model only labels each patient.
