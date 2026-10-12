@@ -320,7 +320,12 @@ def describe_fact(row: dict) -> dict:
 
 
 def case_findings(case_id: int) -> dict:
-    """What the hospital and EMT screens show: the extracted facts in spoken order, and the step's state."""
+    """
+    What the hospital and EMT screens show: the extracted facts in spoken order, and the step's
+    state. as_of orders snapshots: a fetch can be answered after a newer pushed one, and screens
+    keep the latest (server timestamps never repeat, and it is taken before reading).
+    """
+    as_of = utc_now_iso()
     columns = ", ".join(f"f.{column.strip()}" for column in FINDING_COLUMNS.split(","))
     facts = [describe_fact(row) for row in query(
         f"""SELECT {columns},
@@ -348,6 +353,7 @@ def case_findings(case_id: int) -> dict:
             (f["source_version"] for f in same if f["source_version"] is not None), default=None)}
     return {
         "case_id": case_id,
+        "as_of": as_of,
         "status": status,
         "error": latest["error"] if latest and latest["status"] == "failed" else None,
         "can_retry": bool(latest) and latest["status"] == "failed",

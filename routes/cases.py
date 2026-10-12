@@ -488,11 +488,14 @@ async def hospital_queue(current_user: dict = Depends(require_role(["doctor"])))
         CASE_SELECT + " WHERE c.destination_hospital_id = ? AND c.status = 'active' AND c.arrived_at IS NULL",
         (hospital_id,),
     ) if hospital_id is not None else []
+    as_of = utc_now_iso()  # before reading, so a later snapshot always carries a later as_of
     ordered = case_queue.order(describe_cases(rows), datetime.now(timezone.utc))
     changes = case_extraction.vital_changes([case["id"] for case in ordered])
     for case in ordered:
         case["vital_changes"] = changes[case["id"]]
     return {
+        # Responses can arrive out of order; screens keep the snapshot with the latest as_of.
+        "as_of": as_of,
         "rule_version": case_queue.QUEUE_RULE_VERSION,
         "rule": case_queue.QUEUE_RULE,
         "counts": case_queue.counts(ordered),
@@ -1045,13 +1048,20 @@ async def run_transcription(segment: dict):
 
 
 def fail_interrupted_segments() -> None:
-    """Called at startup: transcriptions in flight when the server stopped will never finish on their own."""
+    """
+    Called at startup: transcriptions in flight when the server stopped will never finish on their
+    own. Their cases' updated_at moves too: screens only replace a case row with a newer one, and
+    the case's processing state has changed.
+    """
     now = utc_now_iso()
-    result = run(
-        """UPDATE transcript_segments SET status = 'failed', error = 'interrupted by a server restart',
-               failed_at = ?, updated_at = ?
-           WHERE status = 'pending'""",
-        (now, now),
-    )
-    if result["changes"]:
-        print(f"⚠️  Marked {result['changes']} interrupted transcript segment(s) as failed")
+    with get_db() as conn:
+        changed = conn.execute(
+            """UPDATE transcript_segments SET status = 'failed', error = 'interrupted by a server restart',
+                   failed_at = ?, updated_at = ?
+               WHERE status = 'pending' RETURNING case_id""",
+            (now, now),
+        ).fetchall()
+        affected = {row["case_id"] for row in changed}
+        conn.executemany("UPDATE cases SET updated_at = ? WHERE id = ?", [(now, case_id) for case_id in affected])
+    if changed:
+        print(f"⚠️  Marked {len(changed)} interrupted transcript segment(s) as failed")
