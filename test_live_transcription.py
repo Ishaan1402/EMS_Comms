@@ -320,6 +320,41 @@ class TestSegments:
 
 
 class TestBroker:
+    @pytest.mark.parametrize("change", ["expired", "hospital", "role"])
+    def test_open_stream_stops_before_delivering_after_authorization_changes(self, monkeypatch, change):
+        """Exercise the production stream iterator after it has already authenticated and connected."""
+        user = query("SELECT id, role, hospital_id FROM users WHERE username = ?", (DOCTOR,))[0]
+        user["exp"] = time.time() + 3600
+        monkeypatch.setattr(cases, "HEARTBEAT_SECONDS", 0.001)
+
+        async def scenario():
+            response = await cases.case_events(user)
+            stream = response.body_iterator
+            try:
+                assert "retry:" in await anext(stream)
+                assert "event: ready" in await anext(stream)
+                if change == "expired":
+                    user["exp"] = 0  # token crosses its expiry after connection
+                elif change == "hospital":
+                    database.run("UPDATE users SET hospital_id = NULL WHERE id = ?", (user["id"],))
+                else:
+                    database.run("UPDATE users SET role = 'emt' WHERE id = ?", (user["id"],))
+                cases.broker.publish("case.updated", {"patient_info": "must not reach this session"},
+                                     hospital_id=user["hospital_id"])
+                message = await anext(stream)
+                assert "event: auth.expired" in message
+                assert "patient_info" not in message
+                with pytest.raises(StopAsyncIteration):
+                    await anext(stream)
+            finally:
+                await stream.aclose()
+                database.run("UPDATE users SET role = ?, hospital_id = ? WHERE id = ?",
+                             (user["role"], user["hospital_id"], user["id"]))
+
+        count = cases.broker.subscriber_count
+        asyncio.run(scenario())
+        assert cases.broker.subscriber_count == count
+
     def test_events_are_filtered_by_owner(self):
         async def scenario():
             broker = EventBroker()

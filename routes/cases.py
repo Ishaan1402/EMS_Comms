@@ -8,6 +8,7 @@ import concurrent.futures
 import json
 import sqlite3
 import math
+import time
 import uuid
 import openai
 import case_assessment
@@ -387,18 +388,33 @@ async def case_events(current_user: dict = Depends(require_role(["emt", "doctor"
     re-fetch state, since events sent while disconnected are not replayed.
     """
     accepts = event_filter(current_user)
+    connected_hospital = user_hospital_id(current_user)
+
+    def still_authorized():
+        if time.time() >= float(current_user.get("exp", 0)):
+            return False
+        users = query("SELECT role, hospital_id FROM users WHERE id = ?", (current_user["id"],))
+        return bool(users and users[0]["role"] == current_user["role"]
+                    and users[0]["hospital_id"] == connected_hospital)
 
     async def stream():
         sub = broker.subscribe(accepts)
         try:
+            if not still_authorized():
+                yield format_sse("auth.expired", {})
+                return
             yield "retry: 3000\n\n"
             yield format_sse("ready", {"server_time": utc_now_iso()})
             while True:
                 try:
                     message = await asyncio.wait_for(sub.queue.get(), timeout=HEARTBEAT_SECONDS)
                 except asyncio.TimeoutError:
-                    yield ": ping\n\n"
-                    continue
+                    message = ": ping\n\n"
+                # A long-lived stream must recheck access before every delivery, including
+                # queued events after expiry or a change of role/hospital while connected.
+                if not still_authorized():
+                    yield format_sse("auth.expired", {})
+                    return
                 if message is None:
                     return
                 yield message
