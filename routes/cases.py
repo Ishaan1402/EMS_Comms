@@ -1045,13 +1045,20 @@ async def run_transcription(segment: dict):
 
 
 def fail_interrupted_segments() -> None:
-    """Called at startup: transcriptions in flight when the server stopped will never finish on their own."""
+    """
+    Called at startup: transcriptions in flight when the server stopped will never finish on their
+    own. Their cases' updated_at moves too: screens only replace a case row with a newer one, and
+    the case's processing state has changed.
+    """
     now = utc_now_iso()
-    result = run(
-        """UPDATE transcript_segments SET status = 'failed', error = 'interrupted by a server restart',
-               failed_at = ?, updated_at = ?
-           WHERE status = 'pending'""",
-        (now, now),
-    )
-    if result["changes"]:
-        print(f"⚠️  Marked {result['changes']} interrupted transcript segment(s) as failed")
+    with get_db() as conn:
+        changed = conn.execute(
+            """UPDATE transcript_segments SET status = 'failed', error = 'interrupted by a server restart',
+                   failed_at = ?, updated_at = ?
+               WHERE status = 'pending' RETURNING case_id""",
+            (now, now),
+        ).fetchall()
+        affected = {row["case_id"] for row in changed}
+        conn.executemany("UPDATE cases SET updated_at = ? WHERE id = ?", [(now, case_id) for case_id in affected])
+    if changed:
+        print(f"⚠️  Marked {len(changed)} interrupted transcript segment(s) as failed")
