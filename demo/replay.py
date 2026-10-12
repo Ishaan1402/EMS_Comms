@@ -555,13 +555,20 @@ def print_speed(speed: dict) -> None:
                                 f"{value['median_s']} s / {value['max_s']} s (n={value['n']})"))
 
 
-def print_queue_changes(rows: list) -> None:
-    """Each patient's path through the queue: position after each change, and what caused it."""
+def print_queue_changes(rows: list, cases: dict) -> None:
+    """
+    Each patient's path through the queue: position after each change and what caused it, naming
+    the other patient when someone else's change moved this one ("transcription_failed: SYN008").
+    """
     print(f"\nQueue changes ({len({row['revision'] for row in rows})} revisions, recorded on the server):")
+    names = {case_id: source for source, case_id in cases.items()}
     paths = {}
     for row in rows:
         step = f"#{row['to_position']}" if row["to_position"] else "left"
-        paths.setdefault(row["source_case_id"] or row["case_id"], []).append(f"{step} ({row['cause']})")
+        cause = row["cause"]
+        if row["cause_case_id"] not in (None, row["case_id"]):
+            cause += f": {names.get(row['cause_case_id'], row['cause_case_id'])}"
+        paths.setdefault(row["source_case_id"] or row["case_id"], []).append(f"{step} ({cause})")
     for patient, steps in paths.items():
         print(f"  {patient}: " + " -> ".join(steps))
 
@@ -598,7 +605,7 @@ def main():
             predictions_path.write_text(json.dumps(replay.predictions(), indent=2) + "\n")
             print_summary(replay.summary(), usage)
             print_speed(speed)
-            print_queue_changes(queue_changes)
+            print_queue_changes(queue_changes, replay.cases)
             print_queue(replay.queue_order())
             print(f"\nRun {replay.run_id} saved to {manifest_path}")
             print(f"Predictions for the evaluation harness: {predictions_path}")
