@@ -448,16 +448,22 @@ runner = AssessmentRunner()
 
 
 def fail_interrupted_assessments() -> None:
-    """Called at startup: assessments in flight when the server stopped will never finish on their own."""
+    """
+    Called at startup: assessments in flight when the server stopped will never finish on their own.
+    Their cases' updated_at moves too, so screens replace the rows they hold (still "Processing…").
+    """
     now = utc_now_iso()
-    result = run(
-        """UPDATE risk_assessments SET status = 'failed', error = 'interrupted by a server restart',
-               completed_at = ?, updated_at = ?
-           WHERE status = 'processing'""",
-        (now, now),
-    )
-    if result["changes"]:
-        print(f"⚠️  Marked {result['changes']} interrupted risk assessment(s) as failed")
+    with get_db() as conn:
+        changed = conn.execute(
+            """UPDATE risk_assessments SET status = 'failed', error = 'interrupted by a server restart',
+                   completed_at = ?, updated_at = ?
+               WHERE status = 'processing' RETURNING case_id""",
+            (now, now),
+        ).fetchall()
+        affected = {row["case_id"] for row in changed}
+        conn.executemany("UPDATE cases SET updated_at = ? WHERE id = ?", [(now, case_id) for case_id in affected])
+    if changed:
+        print(f"⚠️  Marked {len(changed)} interrupted risk assessment(s) as failed")
 
 
 def unassessed_open_cases() -> list:

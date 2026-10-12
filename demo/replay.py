@@ -20,10 +20,12 @@ client_id and timestamps, so this exercises the real live-transcription path.
 """
 import argparse
 import array
+import hashlib
 import io
 import json
 import math
 import statistics
+import subprocess
 import sys
 import time
 import uuid
@@ -45,6 +47,8 @@ MAX_CLIP_BYTES = 9 * 1024 * 1024
 TRANSCRIPT_WAIT_SECONDS = 120
 # Password of the seeded demo accounts (database.insert_sample_data).
 DEMO_PASSWORD = "password123"
+# List price per audio minute, checked 2026-10-07 (with case_assessment.PRICES_PER_MILLION).
+TRANSCRIPTION_USD_PER_MINUTE = {"gpt-transcribe": 0.0045}
 ACTIONS = {"start_case", "audio_report", "typed_report", "garbled_audio", "dismiss_failed", "eta", "message",
            "acknowledge", "acknowledge_all", "finish_case", "snapshot_queue"}
 # The app stores "Cannot assess" for the evaluation contract's "Unsure".
@@ -119,6 +123,22 @@ def clip_duration_ms(data: bytes) -> int:
             return int(clip.getnframes() * 1000 / clip.getframerate())
     except (wave.Error, EOFError):
         return SEGMENT_SECONDS * 1000
+
+
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def code_revision() -> dict:
+    """This replay's own checkout, recorded next to the server's (GET /api/version)."""
+    def git(*args):
+        try:
+            result = subprocess.run(["git", *args], cwd=DEMO_DIR, capture_output=True, text=True, timeout=5)
+            return result.stdout.strip() if result.returncode == 0 else None
+        except (OSError, subprocess.SubprocessError):
+            return None
+    status = git("status", "--porcelain", "--untracked-files=no")
+    return {"git_sha": git("rev-parse", "HEAD"), "git_dirty": None if status is None else bool(status)}
 
 
 def seconds_between(start: str, end: str) -> float:
@@ -206,6 +226,7 @@ class Replay:
         if not matches:
             raise ReplayError(f"No hospital with code {self.scenario['hospital_code']!r}")
         self.hospital_id = matches[0]
+        self.server = self.call("GET", "/api/version", self.scenario["doctor"])
 
     def run(self) -> list:
         if not self.typed and self.missing_audio():
@@ -362,10 +383,13 @@ class Replay:
                 return False
             self.sleep(1)
 
-    @staticmethod
-    def _settled(case: dict) -> bool:
-        return case["processing"]["transcription"]["pending"] == 0 \
-            and case["processing"]["assessment"]["status"] not in ("processing", "pending")
+    def _settled(self, case: dict) -> bool:
+        """No transcription, assessment or patient information extraction still to come."""
+        if case["processing"]["transcription"]["pending"] \
+                or case["processing"]["assessment"]["status"] in ("processing", "pending"):
+            return False
+        findings = self.call("GET", f"/api/cases/{case['id']}/findings", self.scenario["doctor"])
+        return findings["status"] not in ("processing", "pending")
 
     def wait_until_settled(self, timeout: float = 120.0) -> None:
         """Real transcription and scoring run after the requests return, including queued re-assessments."""
@@ -374,7 +398,16 @@ class Replay:
             self.log("still processing after the timeout; showing the current state")
 
     def manifest(self) -> dict:
-        """What analysis needs to line this run up with the scenario: which cases, and the time scale."""
+        """
+        What analysis needs to line this run up with the scenario (which cases, the time scale) and
+        to reproduce it: the server's build (code, client bundle, models, prompts, queue rule), this
+        replay's code, and hashes of the scenario and the audio it sent.
+        """
+        audio = {} if self.typed else {
+            path.name: sha256(path.read_bytes())
+            for path in sorted({self.audio_file(e["patient"], e["report"]) for e in self.scenario["events"]
+                                if e["action"] == "audio_report"})
+        }
         return {
             "run_id": self.run_id,
             "scenario_id": self.scenario["scenario_id"],
@@ -383,6 +416,10 @@ class Replay:
             "seconds_per_minute": self.seconds_per_minute,
             "typed": self.typed,
             "cases": self.cases,
+            "server": getattr(self, "server", None),
+            "replay_code": code_revision(),
+            "scenario_sha256": sha256(json.dumps(self.scenario, sort_keys=True).encode()),
+            "audio_sha256": audio,
         }
 
     def summary(self) -> list:
@@ -409,20 +446,31 @@ class Replay:
                     for a in self.call("GET", f"/api/cases/{case_id}/{kind}", self.scenario["doctor"])]
         assessments, extractions = attempts("assessments"), attempts("extractions")
         answered = [a for a in assessments + extractions if a["input_tokens"] is not None]
+        # Transcription is billed per audio minute: every clip times the calls made for it (failed
+        # calls may not be billed, so this is an upper bound).
+        clips = [s for case_id in self.cases.values()
+                 for s in self.call("GET", f"/api/cases/{case_id}/segments", self.scenario["doctor"])]
+        audio_minutes = sum((s["duration_ms"] or 0) * s["attempts"] for s in clips) / 60000
+        rate = TRANSCRIPTION_USD_PER_MINUTE.get((getattr(self, "server", None) or {}).get("transcription_model"))
         return {
             "assessments": len(assessments),
             "extractions": len(extractions),
+            # No usage was returned (failure before an answer); not assumed free, just not counted.
+            "attempts_without_usage": len(assessments) + len(extractions) - len(answered),
             "input_tokens": sum(a["input_tokens"] for a in answered),
             "output_tokens": sum(a["output_tokens"] or 0 for a in answered),
             "cost_usd": None if any(a["cost_usd"] is None for a in answered) else sum(a["cost_usd"] for a in answered),
+            "transcription_audio_minutes": round(audio_minutes, 3),
+            "transcription_cost_usd": None if rate is None else round(audio_minutes * rate, 5),
         }
 
     def speed(self) -> dict:
         """
-        Real seconds, whatever the replay speed, from information reaching the server to the
-        doctor having it: a radio clip's transcript, and the AI assessment and patient information
-        extraction that read the newest information. Re-assessments after an acknowledgment are
-        left out: they answer "what changed since you looked", not "how fast".
+        Real seconds on the server, whatever the replay speed, from information reaching it to the
+        result being stored and pushed to the screens: a radio clip's transcript, and the AI assessment
+        and patient information extraction that read the newest information. Excludes recording a
+        clip before upload and the browser's receive/render time. Re-assessments after an
+        acknowledgment are left out: they answer "what changed since you looked", not "how fast".
         """
         doctor = self.scenario["doctor"]
         transcript, assessed, extracted = [], [], []
@@ -540,15 +588,21 @@ def print_summary(cases: list, usage: dict) -> None:
               f"{c['processing']['status']:<13} {'yes' if c['latest_update_acknowledged'] else 'no':<6} "
               f"{'; '.join(c['processing']['reasons'])}")
     cost = "unknown" if usage["cost_usd"] is None else f"${usage['cost_usd']:.4f}"
-    print(f"\nModel: {usage['assessments']} assessments + {usage['extractions']} extractions, "
-          f"{usage['input_tokens']} input + {usage['output_tokens']} output tokens, {cost} "
-          "(list price; transcription not included)")
+    unknown = f", {usage['attempts_without_usage']} without usage reported" if usage["attempts_without_usage"] else ""
+    print(f"\nModel: {usage['assessments']} assessments + {usage['extractions']} extractions{unknown}, "
+          f"{usage['input_tokens']} input + {usage['output_tokens']} output tokens, {cost} (list price)")
+    speech = "unpriced" if usage["transcription_cost_usd"] is None else f"about ${usage['transcription_cost_usd']:.4f}"
+    print(f"Transcription: {usage['transcription_audio_minutes']} audio minutes sent, {speech} "
+          "(list price per minute; an upper bound, failed calls may not be billed)")
 
 
 def print_speed(speed: dict) -> None:
-    labels = {"transcript": "radio clip -> transcript on screen", "assessment": "new information -> AI assessment",
-              "extraction": "new information -> patient information"}
-    print("\nTime to the doctor (real seconds, median / worst):")
+    labels = {"transcript": "clip received -> transcript stored and pushed",
+              "assessment": "new information stored -> AI assessment stored and pushed",
+              "extraction": "new information stored -> patient information stored and pushed"}
+    # Server timestamps: the clip's recording time before upload and the browser's receive/render
+    # time after the push are not included.
+    print("\nTime on the server (real seconds, median / worst; excludes recording and the browser):")
     for key, label in labels.items():
         value = speed[key]
         print(f"  {label}: " + ("not measured" if value is None else

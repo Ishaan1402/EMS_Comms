@@ -145,10 +145,14 @@ const LiveCasesPanel = () => {
   // Cases that just changed position: id -> { from, to }, cleared after MOVE_CUE_MS.
   const [moves, setMoves] = useState({});
   const positions = useRef(null);
+  // Overlapping fetches can be answered out of order: keep the snapshot with the latest server as_of.
+  const queueAsOf = useRef('');
 
   const fetchQueue = useCallback(async () => {
     try {
       const response = await axios.get('/api/cases/queue');
+      if (response.data.as_of <= queueAsOf.current) return;
+      queueAsOf.current = response.data.as_of;
       const next = Object.fromEntries(response.data.cases.map((c) => [c.id, c.queue_position]));
       const moved = positions.current ? Object.entries(next)
         .filter(([id, position]) => positions.current[id] && positions.current[id] !== position)
