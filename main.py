@@ -1,6 +1,8 @@
 import os
+import hashlib
+import subprocess
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
@@ -12,12 +14,44 @@ import json
 
 load_dotenv()
 
-from middleware.auth import APIError
+from middleware.auth import APIError, require_role
 from routes import auth, recordings, doctors, notifications, messages, cases, sas
-from database import init_database, insert_sample_data
+from database import init_database, insert_sample_data, utc_now_iso
 import case_assessment
 import case_extraction
+import case_queue
 import sas_sync
+
+
+def build_info() -> dict:
+    """
+    What this server is running, for run records and evidence manifests: code revision (and whether
+    tracked files differ from it), the client bundle served, and the AI and queue rule versions.
+    """
+    root = pathlib.Path(__file__).parent
+
+    def git(*args):
+        try:
+            result = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, timeout=5)
+            return result.stdout.strip() if result.returncode == 0 else None
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    status_output = git("status", "--porcelain", "--untracked-files=no")
+    bundle = root / "client" / "build" / "asset-manifest.json"
+    return {
+        "git_sha": git("rev-parse", "HEAD"),
+        "git_dirty": None if status_output is None else bool(status_output),
+        "client_build_sha256": hashlib.sha256(bundle.read_bytes()).hexdigest() if bundle.exists() else None,
+        "scorer_version": case_assessment.scorer_version(),
+        "extractor_version": case_extraction.extractor_version(),
+        "transcription_model": recordings.TRANSCRIPTION_MODEL,
+        "queue_rule_version": case_queue.QUEUE_RULE_VERSION,
+        "server_started_at": utc_now_iso(),
+    }
+
+
+BUILD_INFO = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -27,6 +61,7 @@ async def lifespan(app: FastAPI):
     if missing_vars:
         print(f"⚠️  Missing environment variables: {', '.join(missing_vars)}. Routes that need them will fail.")
 
+    BUILD_INFO.update(build_info())
     init_database()
     cases.fail_interrupted_segments()
     case_assessment.fail_interrupted_assessments()
@@ -127,6 +162,12 @@ app.include_router(notifications.router, prefix="/api/notifications", tags=["not
 app.include_router(cases.router, prefix="/api/cases", tags=["cases"])
 app.include_router(messages.case_router, prefix="/api/cases", tags=["messages"])
 app.include_router(cases.hospitals_router, prefix="/api/hospitals", tags=["hospitals"])
+
+
+@app.get("/api/version")
+async def version(current_user: dict = Depends(require_role(["emt", "doctor"]))):
+    """The running build (build_info), so a demo or evaluation run can record exactly what it ran against."""
+    return BUILD_INFO or build_info()
 app.include_router(sas.router, prefix="/api/sas", tags=["sas"])
 
 # Serve React app in production

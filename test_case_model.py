@@ -975,3 +975,12 @@ class TestDatabasePath:
         assert database.configured_db_path() == tmp_path / "demo.db"
         monkeypatch.delenv("ASCLEPIUS_DB_PATH")
         assert database.configured_db_path() == Path(database.__file__).parent / "asclepius.db"
+
+
+class TestBuildInfo:
+    def test_signed_in_users_can_see_what_the_server_runs(self):
+        assert client.get("/api/version").status_code == 401
+        info = client.get("/api/version", headers=auth(DOCTOR)).json()
+        assert info["scorer_version"] == case_assessment.scorer_version()
+        assert info["queue_rule_version"] and info["transcription_model"] == recordings.TRANSCRIPTION_MODEL
+        assert {"git_sha", "git_dirty", "client_build_sha256", "extractor_version", "server_started_at"} <= set(info)
