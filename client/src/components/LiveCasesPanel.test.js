@@ -68,3 +68,14 @@ test('an older queue answer arriving last does not undo a newer order', async ()
 
   expect(rowOrder(container)).toEqual(['Medic 2', 'Medic 1']);
 });
+
+test('a delayed hospital fetch cannot undo a newer setting received by the stream', async () => {
+  await act(async () => root.render(<LiveCasesPanel />));
+  await act(() => mockHandler('hospital.updated', { hospital: {
+    id: 1, name: 'General', arrival_highlight_minutes: 15, settings_version: 2,
+  } }));
+  await resolve(pendingFor('/api/hospitals/mine')[0], {
+    id: 1, name: 'General', arrival_highlight_minutes: 5, settings_version: 1,
+  });
+  expect(container.textContent).toContain('Arrival highlight · 15 min');
+});

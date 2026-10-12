@@ -795,8 +795,39 @@ async def list_hospitals():
 async def my_hospital(current_user: dict = Depends(require_role(["emt", "doctor"]))):
     """The hospital whose cases this user sees; null for EMTs and unassigned hospital users."""
     hospital_id = user_hospital_id(current_user)
-    rows = query("SELECT id, code, name FROM hospitals WHERE id = ?", (hospital_id,)) if hospital_id else []
+    rows = query("""SELECT id, code, name, arrival_highlight_minutes, settings_version, settings_updated_at
+                    FROM hospitals WHERE id = ?""", (hospital_id,)) if hospital_id else []
     return rows[0] if rows else None
+
+
+@hospitals_router.patch("/mine")
+async def update_hospital_settings(request: Request, current_user: dict = Depends(require_role(["doctor"]))):
+    """One display setting for the signed-in hospital; never changes scoring or queue order."""
+    hospital_id = user_hospital_id(current_user)
+    if hospital_id is None:
+        raise APIError(403, "Your account is not linked to a hospital")
+    body = await read_json_body(request)
+    if set(body) != {"arrival_highlight_minutes", "expected_version"}:
+        raise APIError(400, "Provide arrival_highlight_minutes and expected_version only")
+    minutes, version = body["arrival_highlight_minutes"], body["expected_version"]
+    if type(minutes) is not int or not 1 <= minutes <= 60:
+        raise APIError(400, "Arrival highlight must be a whole number from 1 to 60 minutes")
+    if type(version) is not int or version < 1:
+        raise APIError(400, "Invalid settings version")
+    changed = False
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        hospital = dict(conn.execute("SELECT * FROM hospitals WHERE id = ?", (hospital_id,)).fetchone())
+        if hospital["settings_version"] != version:
+            raise APIError(409, "This setting changed. Reload it before saving again.")
+        if hospital["arrival_highlight_minutes"] != minutes:
+            conn.execute("""UPDATE hospitals SET arrival_highlight_minutes = ?, settings_version = settings_version + 1,
+                            settings_updated_at = ? WHERE id = ?""", (minutes, utc_now_iso(), hospital_id))
+            changed = True
+        hospital = dict(conn.execute("SELECT * FROM hospitals WHERE id = ?", (hospital_id,)).fetchone())
+    if changed:
+        broker.publish("hospital.updated", {"hospital": hospital}, hospital_id=hospital_id)
+    return hospital
 
 
 @router.get("/{case_id}/segments")
