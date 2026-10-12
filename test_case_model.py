@@ -725,6 +725,47 @@ class TestStartupRecovery:
         assert get_case(case["id"])["preparation_category"] == "Prepare now"
 
 
+class TestRestartRecoveryRefreshesScreens:
+    """
+    Screens keep a case row unless the server's copy has a later updated_at (client liveRows.js),
+    so recovery that changes a case's processing state must also bump it, or a screen that
+    reconnects after a restart keeps showing "Processing…" for good.
+    """
+
+    def test_interrupted_transcription(self, monkeypatch):
+        use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        now = database.utc_now_iso()
+        run("""INSERT INTO transcript_segments (case_id, seq, client_id, recorded_at, audio_file_path, status,
+                                                created_at, updated_at)
+               VALUES (?, 0, 'clip-0', ?, 'x.webm', 'pending', ?, ?)""", (case["id"], now, now, now))
+        before = get_case(case["id"])
+        assert before["processing"]["transcription"]["status"] == "processing"
+        cases.fail_interrupted_segments()
+        after = get_case(case["id"])
+        assert after["processing"]["transcription"]["status"] == "failed"
+        assert after["updated_at"] > before["updated_at"]
+
+    def test_interrupted_assessment(self, monkeypatch):
+        use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        run("UPDATE risk_assessments SET status = 'processing' WHERE case_id = ?", (case["id"],))
+        before = get_case(case["id"])
+        assert before["processing"]["status"] == "processing"
+        case_assessment.fail_interrupted_assessments()
+        after = get_case(case["id"])
+        assert after["processing"]["status"] == "failed"
+        assert after["updated_at"] > before["updated_at"]
+
+    def test_cases_without_interrupted_work_are_untouched(self, monkeypatch):
+        use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        before = get_case(case["id"])["updated_at"]
+        cases.fail_interrupted_segments()
+        case_assessment.fail_interrupted_assessments()
+        assert get_case(case["id"])["updated_at"] == before
+
+
 class TestScoringRequest:
     def capture(self, monkeypatch):
         sent = {}
@@ -934,3 +975,12 @@ class TestDatabasePath:
         assert database.configured_db_path() == tmp_path / "demo.db"
         monkeypatch.delenv("ASCLEPIUS_DB_PATH")
         assert database.configured_db_path() == Path(database.__file__).parent / "asclepius.db"
+
+
+class TestBuildInfo:
+    def test_signed_in_users_can_see_what_the_server_runs(self):
+        assert client.get("/api/version").status_code == 401
+        info = client.get("/api/version", headers=auth(DOCTOR)).json()
+        assert info["scorer_version"] == case_assessment.scorer_version()
+        assert info["queue_rule_version"] and info["transcription_model"] == recordings.TRANSCRIPTION_MODEL
+        assert {"git_sha", "git_dirty", "client_build_sha256", "extractor_version", "server_started_at"} <= set(info)

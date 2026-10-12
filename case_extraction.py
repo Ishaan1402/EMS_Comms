@@ -320,7 +320,12 @@ def describe_fact(row: dict) -> dict:
 
 
 def case_findings(case_id: int) -> dict:
-    """What the hospital and EMT screens show: the extracted facts in spoken order, and the step's state."""
+    """
+    What the hospital and EMT screens show: the extracted facts in spoken order, and the step's
+    state. as_of orders snapshots: a fetch can be answered after a newer pushed one, and screens
+    keep the latest (server timestamps never repeat, and it is taken before reading).
+    """
+    as_of = utc_now_iso()
     columns = ", ".join(f"f.{column.strip()}" for column in FINDING_COLUMNS.split(","))
     facts = [describe_fact(row) for row in query(
         f"""SELECT {columns},
@@ -331,6 +336,13 @@ def case_findings(case_id: int) -> dict:
             LEFT JOIN case_updates u ON u.id = f.update_id
             WHERE f.case_id = ? AND f.run_id IS NOT NULL ORDER BY f.recorded_at, f.id""", (case_id,))]
     latest = latest_run(case_id)
+    # pending: text arrived that no run has read yet (a run starts after a short pause for the rest
+    # of a report), so "everything done" can be told apart from "nothing started yet".
+    if latest and latest["status"] in ("processing", "failed"):
+        status = latest["status"]
+    else:
+        info = read_new_information(case_id)
+        status = "pending" if info and info["new"] else (latest["status"] if latest else "none")
     complaints = [f for f in facts if f["type"] == "chief_complaint"]
     complaint = complaints[-1] if complaints else None
     if complaint:
@@ -341,7 +353,8 @@ def case_findings(case_id: int) -> dict:
             (f["source_version"] for f in same if f["source_version"] is not None), default=None)}
     return {
         "case_id": case_id,
-        "status": latest["status"] if latest else "none",
+        "as_of": as_of,
+        "status": status,
         "error": latest["error"] if latest and latest["status"] == "failed" else None,
         "can_retry": bool(latest) and latest["status"] == "failed",
         "chief_complaint": complaint,

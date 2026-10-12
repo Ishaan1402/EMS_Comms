@@ -151,6 +151,18 @@ TABLES = {
         ("LATENCY_MS", "num", "Model latency (ms)"),
         ("COST_USD", "num", "Estimated cost (USD, list price)"),
     ] + _time_columns("STARTED", "Started") + _time_columns("COMPLETED", "Completed"),
+    "QUEUE": [("QUEUE_EVENT_ID", "num", "Queue change ID")] + CASE_KEYS + [
+        ("REVISION", "num", "Queue revision (per hospital)"),
+        ("CHANGE", "char", "entered / moved / left"),
+        ("FROM_POSITION", "num", "Position before"),
+        ("TO_POSITION", "num", "Position after"),
+        ("CAUSE", "char", "What committed the change"),
+        ("CAUSE_CASE_ID", "num", "Case whose change caused it"),
+        ("INFO_VERSION", "num", "Information version then"),
+        ("PREPARATION_CATEGORY", "char", "Preparation category then"),
+        ("NEEDS_ATTENTION", "num", "Needed attention then (1/0)"),
+        ("RULE_VERSION", "char", "Queue rule"),
+    ] + _time_columns("OCCURRED", "Occurred"),
     "VITALS": [("READING_ID", "num", "Reading ID")] + CASE_KEYS + [
         ("SOURCE", "char", "Source (typed vitals / radio / typed note / case opened)"),
         ("UPDATE_ID", "num", "Update ID"),
@@ -271,6 +283,11 @@ def _build_tables() -> dict:
         event(f"ack:{row['id']}", row["case_id"], "acknowledged", row["acknowledged_at"], row["info_version"], row["role"])
     for row in query("SELECT id, case_id, sender_role, created_at FROM messages WHERE case_id IS NOT NULL"):
         event(f"message:{row['id']}", row["case_id"], "message_sent", row["created_at"], actor_role=row["sender_role"])
+    # Queue position changes (queue_history.py); DETAIL is the cause, VALUE the new position.
+    queue_rows = query("SELECT * FROM queue_events ORDER BY id")
+    for row in queue_rows:
+        event(f"queue:{row['id']}", row["case_id"], f"queue_{row['change']}", row["created_at"],
+              row["info_version"], detail=row["cause"], value=row["to_position"])
     for row in query("""SELECT r.id, r.case_id, r.to_version, r.status, r.error, r.latency_ms, r.completed_at,
                                (SELECT COUNT(*) FROM case_findings f WHERE f.run_id = r.id) AS facts
                         FROM extraction_runs r WHERE r.completed_at IS NOT NULL"""):
@@ -317,7 +334,17 @@ def _build_tables() -> dict:
             "NAME": name, "LABEL": label, "UNIT": unit, "VALUE": value,
         }, measured=measured_at))
 
-    return {"CASES": case_rows, "EVENTS": events, "ASSESSMENTS": assessment_rows, "VITALS": vital_rows}
+    queue_table = [with_times({
+        "QUEUE_EVENT_ID": row["id"], **keys[row["case_id"]],
+        "REVISION": row["revision"], "CHANGE": row["change"],
+        "FROM_POSITION": row["from_position"], "TO_POSITION": row["to_position"],
+        "CAUSE": row["cause"], "CAUSE_CASE_ID": row["cause_case_id"], "INFO_VERSION": row["info_version"],
+        "PREPARATION_CATEGORY": row["preparation_category"], "NEEDS_ATTENTION": row["needs_attention"],
+        "RULE_VERSION": row["rule_version"],
+    }, occurred=row["created_at"]) for row in queue_rows if row["case_id"] in keys]
+
+    return {"CASES": case_rows, "EVENTS": events, "ASSESSMENTS": assessment_rows, "QUEUE": queue_table,
+            "VITALS": vital_rows}
 
 
 def table_vars(name: str) -> list:

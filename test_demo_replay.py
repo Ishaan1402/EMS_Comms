@@ -177,6 +177,18 @@ class TestThreePatientReplay:
         assert {c["operational_status"] for c in run.summary()} == {"closed"}
         assert all(c["arrived_at"] for c in run.summary())
 
+    def test_queue_changes_are_recorded_for_every_patient(self, scenario, audio_dir):
+        run, _ = run_replay(scenario, audio_dir)
+        changes = run.queue_changes()
+        assert {row["source_case_id"] for row in changes} == {"SYN002", "SYN008", "SYN010"}
+        assert all(row["change"] == "entered" for row in changes[:1])
+        final = run.queue_order()["cases"]
+        last = {}
+        for row in changes:
+            last[row["source_case_id"]] = row["to_position"]
+        # The recorded history ends where the screen's queue is.
+        assert last == {c["source_case_id"]: c["queue_position"] for c in final}
+
     def test_final_queue_lists_every_patient_in_server_order(self, scenario, audio_dir):
         run, _ = run_replay(scenario, audio_dir)
         queue = run.queue_order()
@@ -189,6 +201,34 @@ class TestThreePatientReplay:
         assert usage["assessments"] > 0 and usage["extractions"] > 0
         assert usage["input_tokens"] == 1000 * usage["assessments"] + 300 * usage["extractions"]
         assert usage["cost_usd"] is None or usage["cost_usd"] > 0
+
+    def test_the_run_records_what_produced_it(self, scenario, audio_dir):
+        run, _ = run_replay(scenario, audio_dir)
+        manifest = run.manifest()
+        assert manifest["server"]["scorer_version"] == case_assessment.scorer_version()
+        assert manifest["server"]["queue_rule_version"] and "git_sha" in manifest["server"]
+        assert "git_sha" in manifest["replay_code"] and len(manifest["scenario_sha256"]) == 64
+        assert set(manifest["audio_sha256"]) == {f"{p}-{r}.wav" for p in ("SYN002", "SYN008", "SYN010")
+                                                 for r in ("initial", "update") if not (p == "SYN008" and r == "update")}
+
+    def test_transcription_is_counted_in_audio_minutes(self, scenario, audio_dir):
+        run, _ = run_replay(scenario, audio_dir)
+        usage = run.model_usage()
+        assert usage["transcription_audio_minutes"] > 0 and usage["attempts_without_usage"] == 0
+        assert usage["transcription_cost_usd"] == pytest.approx(usage["transcription_audio_minutes"] * 0.0045, abs=1e-5)
+
+    def test_settling_waits_for_patient_information_too(self, scenario, audio_dir):
+        run, results = run_replay(scenario, audio_dir)
+        case = by_source(results)["SYN002"]
+        assert run._settled(run.call("GET", f"/api/cases/{case['id']}", "dr.smith"))
+        # New text no extraction has read yet: not settled.
+        with database.get_db() as conn:
+            conn.execute("UPDATE cases SET info_version = info_version + 1 WHERE id = ?", (case["id"],))
+            conn.execute("""INSERT INTO case_updates (case_id, info_version, kind, body, author_id, created_at)
+                            SELECT id, info_version, 'note', 'Pulse 140', emt_id, ? FROM cases WHERE id = ?""",
+                         (database.utc_now_iso(), case["id"]))
+        assert run.call("GET", f"/api/cases/{case['id']}/findings", "dr.smith")["status"] == "pending"
+        assert not run._settled(run.call("GET", f"/api/cases/{case['id']}", "dr.smith"))
 
     def test_speed_measures_each_step_in_real_seconds(self, scenario, audio_dir):
         run, _ = run_replay(scenario, audio_dir)
