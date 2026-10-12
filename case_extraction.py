@@ -19,6 +19,7 @@ cost and any failure. A failed run's information is read again by the next run, 
 import asyncio
 import json
 import os
+import re
 import time
 from typing import Optional
 
@@ -27,7 +28,7 @@ from case_assessment import (VITAL_SIGNS, CaseRunner, ScoringRefused, ScoringUna
 from database import get_db, query, run, utc_now_iso
 from routes import recordings
 
-PROMPT_VERSION = "extraction_v1"
+PROMPT_VERSION = "extraction_v3"
 EXTRACTION_MODEL = os.getenv("OPENAI_EXTRACTION_MODEL") or recordings.SCORING_MODEL
 # Same bound as an assessment: longer than the request timeout times its attempts.
 EXTRACTION_TIMEOUT_SECONDS = 90
@@ -61,7 +62,44 @@ Return these lists, empty when nothing applies:
 For every entry, item is the id of the new item it comes from and quote is the exact words from
 that item. Do not add anything the items do not state, do not label values as normal or
 abnormal, and keep stated uncertainty ("about", "possibly") in the text.
+The application checks the quote against that item's text. Never paraphrase a quote or copy
+words from a different item into it, including earlier context.
 """
+
+SOURCE_QUOTE_ERROR = "An extracted source quote could not be verified. Review the report or retry extraction."
+
+
+class UnverifiedSourceQuote(ValueError):
+    """A claimed quotation is missing or is not in the item the model cites."""
+
+
+# Keep numeric punctuation/signs in one token: stripping all punctuation would turn
+# 37.5 into 375, -5 into 5, or 120/80 into 12080. Other punctuation separates words.
+QUOTE_TOKENS = re.compile(
+    r"(?:(?:[<>]=?|[≤≥+\-−])\s*)?(?:\d+(?:[.,:/]\d+)*|[.,]\d+)(?:\s*%)?"
+    r"|\w+(?:['‘’]\w+)*"
+)
+
+
+def verified_quote(quote, source: str) -> str:
+    """Match contiguous words/numbers, tolerating typography; retain the actual source span.
+
+    This proves quotation provenance, not that its clinical interpretation is supported.
+    """
+    if not isinstance(quote, str) or not quote.strip() or not isinstance(source, str):
+        raise UnverifiedSourceQuote(SOURCE_QUOTE_ERROR)
+
+    def normalized(match):
+        return re.sub(r"\s+", "", match.group()).casefold().translate(str.maketrans("‘’−", "''-"))
+
+    wanted = [normalized(match) for match in QUOTE_TOKENS.finditer(quote)]
+    spans = list(QUOTE_TOKENS.finditer(source))
+    available = [normalized(match) for match in spans]
+    if wanted:
+        for start in range(len(available) - len(wanted) + 1):
+            if available[start:start + len(wanted)] == wanted:
+                return source[spans[start].start():spans[start + len(wanted) - 1].end()][:MAX_QUOTE]
+    raise UnverifiedSourceQuote(SOURCE_QUOTE_ERROR)
 
 FINDING_STATUS = ("present", "absent", "not assessed")
 TREATMENT_STATUS = ("given", "planned")
@@ -197,6 +235,7 @@ def interpret(output, info: dict) -> Optional[list]:
     """
     Facts to store, or None if the answer doesn't have the expected shape. Entries that can't be
     traced to one of the new items, or with a vital sign out of range, are dropped, never guessed.
+    An unverified quote on an otherwise accepted fact fails the run; no partial batch is stored.
     """
     if not isinstance(output, dict) or set(output) != set(OUTPUT_SCHEMA["required"]) \
             or not all(isinstance(output[key], list) for key in output):
@@ -216,11 +255,11 @@ def interpret(output, info: dict) -> Optional[list]:
         if key in seen:
             return
         seen.add(key)
-        quote = entry.get("quote")
+        quote = verified_quote(entry.get("quote"), item.get("text"))
         facts.append({
             "finding_type": finding_type, "value": value, "detail": detail,
             "vital_name": vital_name, "vital_value": vital_value,
-            "source_text": quote.strip()[:MAX_QUOTE] if isinstance(quote, str) and quote.strip() else None,
+            "source_text": quote,
             "segment_id": item["segment_id"], "update_id": item["update_id"], "recorded_at": item["time"],
         })
 
@@ -278,6 +317,8 @@ class ExtractionRunner(CaseRunner):
             facts = interpret(output, info)
             if facts is None:
                 error = UNREADABLE_ERROR
+        except UnverifiedSourceQuote:
+            error = SOURCE_QUOTE_ERROR
         except Exception as exc:
             print(f"❌ Patient information extraction failed for case {case_id}: {exc!r}")
             error = describe_error(exc)

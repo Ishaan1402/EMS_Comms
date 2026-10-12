@@ -71,12 +71,13 @@ def answer(chief=(), vitals=(), findings=(), treatments=()):
     """A model answer whose entries cite the run's new items by position: (index, ...)."""
     def build(info):
         ids = [item["id"] for item in info["new"]]
+        quotes = [item["text"] for item in info["new"]]
         return {
-            "chief_complaint": [{"text": t, "item": ids[i], "quote": t} for i, t in chief],
-            "vitals": [{"name": n, "value": v, "qualifier": q, "item": ids[i], "quote": f"{n} {v}"}
+            "chief_complaint": [{"text": t, "item": ids[i], "quote": quotes[i]} for i, t in chief],
+            "vitals": [{"name": n, "value": v, "qualifier": q, "item": ids[i], "quote": quotes[i]}
                        for i, n, v, q in vitals],
-            "findings": [{"text": t, "status": s, "item": ids[i], "quote": t} for i, t, s in findings],
-            "treatments": [{"text": t, "status": s, "item": ids[i], "quote": t} for i, t, s in treatments],
+            "findings": [{"text": t, "status": s, "item": ids[i], "quote": quotes[i]} for i, t, s in findings],
+            "treatments": [{"text": t, "status": s, "item": ids[i], "quote": quotes[i]} for i, t, s in treatments],
         }
     return build
 
@@ -125,8 +126,10 @@ def radio(case_id, seq, text, recorded_at):
 
 class TestInterpret:
     INFO = {"new": [
-        {"id": "radio-7", "segment_id": 7, "update_id": None, "time": "2026-10-11T18:00:00.000Z"},
-        {"id": "note-3", "segment_id": None, "update_id": 3, "time": "2026-10-11T18:01:00.000Z"},
+        {"id": "radio-7", "text": "sat 89 percent. BP 100 over 64. pale.",
+         "segment_id": 7, "update_id": None, "time": "2026-10-11T18:00:00.000Z"},
+        {"id": "note-3", "text": "no external bleeding; fluids are planned.",
+         "segment_id": None, "update_id": 3, "time": "2026-10-11T18:01:00.000Z"},
     ]}
 
     def output(self, **lists):
@@ -177,8 +180,91 @@ class TestInterpret:
                 check(schema["items"])
         check(case_extraction.OUTPUT_SCHEMA)
 
+    @pytest.mark.parametrize("quote", ["", None, "Heart rate 70", "Pulse 12"])
+    def test_a_fact_with_an_unverified_quote_is_not_accepted(self, quote):
+        info = {"new": [{"id": "radio-1", "text": "Pulse 120. No external bleeding.",
+                         "segment_id": 1, "update_id": None, "time": "2026-10-11T18:00:00.000Z"}]}
+        output = self.output(vitals=[{"name": "hr", "value": 120, "qualifier": "",
+                                    "item": "radio-1", "quote": quote}])
+        with pytest.raises(ValueError, match="source quote"):
+            case_extraction.interpret(output, info)
+
+    def test_a_quote_must_match_its_own_item_and_not_another_report(self):
+        info = {"new": [
+            {"id": "radio-1", "text": "Pulse 120.", "segment_id": 1, "update_id": None, "time": "t1"},
+            {"id": "radio-2", "text": "No external bleeding.", "segment_id": 2, "update_id": None, "time": "t2"},
+        ]}
+        output = self.output(findings=[{"text": "External bleeding", "status": "absent",
+                                      "item": "radio-1", "quote": "No external bleeding"}])
+        with pytest.raises(ValueError, match="source quote"):
+            case_extraction.interpret(output, info)
+
+    def test_matching_normalizes_spacing_and_case_but_stores_original_words(self):
+        info = {"new": [{"id": "radio-1", "text": "Pulse   120. No external bleeding.",
+                         "segment_id": 1, "update_id": None, "time": "t1"}]}
+        output = self.output(vitals=[{"name": "hr", "value": 120, "qualifier": "",
+                                    "item": "radio-1", "quote": "pulse 120"}])
+        [fact] = case_extraction.interpret(output, info)
+        assert fact["source_text"] == "Pulse   120"
+
+
+class TestQuoteFormatting:
+    @pytest.mark.parametrize("quote, source, expected", [
+        ("BP 100 over 64,", "BP 100 over 64.", "BP 100 over 64"),
+        ("patient's awake", "The patient’s awake.", "patient’s awake"),
+        ("Pale, cool; clammy!", "Pale. Cool, clammy.", "Pale. Cool, clammy"),
+        ("“no bleeding”", "No bleeding.", "No bleeding"),
+        ("temp 37.5, BP 120/80", "Temp 37.5; BP 120/80.", "Temp 37.5; BP 120/80"),
+        ("change -5", "Change −5.", "Change −5"),
+    ])
+    def test_typographic_punctuation_keeps_the_original_source(self, quote, source, expected):
+        assert case_extraction.verified_quote(quote, source) == expected
+
+    @pytest.mark.parametrize("quote, source", [
+        ("temp 375", "temp 37.5"), ("dose 5", "dose .5"),
+        ("change 5", "change -5"), ("change -5", "change 5"),
+        ("pulse 12", "pulse 120"), ("BP 12080", "BP 120/80"),
+        ("BP 120 80", "BP 120/80"), ("value 90", "value >90"),
+        ("value >90", "value >=90"), ("value 5", "value +5"),
+        ("5", "- 5"), ("90", ">= 90"),
+        ("no bleeding", "no external bleeding"), ("no bleeding", "bleeding not assessed"),
+        ("patient is awake", "patient isn't awake"), ("...", "anything"),
+    ])
+    def test_matching_does_not_erase_meaningful_tokens(self, quote, source):
+        with pytest.raises(case_extraction.UnverifiedSourceQuote):
+            case_extraction.verified_quote(quote, source)
+
 
 class TestExtractionRuns:
+    def test_a_later_misquote_preserves_previously_extracted_information(self, monkeypatch):
+        def invalid(info):
+            result = answer(findings=[(0, "Pale", "present")])(info)
+            result["findings"][0]["quote"] = "No external bleeding"
+            return result
+        use_extractor(monkeypatch, answer(chief=[(0, "Breathing trouble")]), invalid)
+        case = start_case()
+        original = findings(case["id"])["chief_complaint"]
+        add_note(case["id"], "Patient is pale.")
+        after = findings(case["id"])
+        assert after["status"] == "failed" and after["can_retry"]
+        assert after["chief_complaint"] == original
+        assert after["findings"] == []
+
+    def test_unverified_quote_fails_visibly_without_storing_partial_facts(self, monkeypatch):
+        def invalid(info):
+            output = answer(chief=[(0, "Breathing trouble")])(info)
+            output["findings"] = [{"text": "Bleeding", "status": "absent", "item": "case-opened",
+                                   "quote": "No bleeding"}]
+            return output
+        use_extractor(monkeypatch, invalid, answer(chief=[(0, "Breathing trouble")]))
+        case = start_case()
+        result = findings(case["id"])
+        assert result["status"] == "failed" and result["can_retry"]
+        assert "source quote" in result["error"]
+        assert result["chief_complaint"] is None and result["findings"] == []
+        assert client.post(f"/api/cases/{case['id']}/findings/retry", headers=auth(DOCTOR)).status_code == 202
+        assert findings(case["id"])["status"] == "completed"
+
     def test_each_run_reads_only_new_information_with_earlier_text_as_context(self, monkeypatch):
         calls = use_extractor(
             monkeypatch,
