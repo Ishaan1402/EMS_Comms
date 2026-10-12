@@ -512,7 +512,9 @@ class Replay:
             attempts = self.call("GET", f"/api/cases/{case_id}/assessments", doctor)  # newest first
             final = next((a for a in attempts if a["status"] != "processing"), None)
             record = {"config_id": config_id, "case_id": source_case_id, "repeat_id": 1, "retry_count": None}
-            if final is None or final["based_on_version"] < case["info_version"]:
+            if final is None or final["based_on_version"] < case["info_version"] \
+                    or final["baseline_version"] != case["baseline_version"] \
+                    or final["input_eta_at"] != case["eta_at"]:
                 record["status"] = "error"  # the final information was never assessed
             elif final["status"] in ("completed", "needs_review"):
                 category = final["preparation_category"]
@@ -537,6 +539,7 @@ class Replay:
                 "assessment_id": final and final["id"],
                 "based_on_version": final and final["based_on_version"],
                 "baseline_version": final and final["baseline_version"],
+                "input_eta_at": final and final["input_eta_at"],
                 # The extraction step's output (KAN-8), for reviewing alongside the assessment.
                 "extracted": [{**{key: fact.get(key) for key in ("type", "text", "status", "name", "value", "unit",
                                                                    "qualifier")},

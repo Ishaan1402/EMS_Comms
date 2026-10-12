@@ -142,6 +142,9 @@ class TestTables:
         assert case["ARRIVED_DT"] is not None and case["CLOSED_DT"] >= case["ARRIVED_DT"]
         assessments = rows_of("ASSESSMENTS", story["id"])
         assert assessments and assessments[-1]["INPUT_TOKENS"] == 1000 and assessments[-1]["COST_USD"] is not None
+        snapshots = query("SELECT input_eta_at FROM risk_assessments WHERE case_id = ? ORDER BY id", (story["id"],))
+        assert [a["INPUT_ETA_AT"] for a in assessments] == [r["input_eta_at"] or "" for r in snapshots]
+        assert all(a["INPUT_ETA_DT"] is not None for a in assessments if a["INPUT_ETA_AT"])
         vitals = rows_of("VITALS", story["id"])
         typed = {(v["NAME"], v["VALUE"], v["UNIT"]) for v in vitals if v["SOURCE"] == "typed vitals"}
         assert typed == {("spo2", 89.0, "%"), ("hr", 126.0, "bpm")}

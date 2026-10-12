@@ -150,7 +150,8 @@ TABLES = {
         ("OUTPUT_TOKENS", "num", "Output tokens"),
         ("LATENCY_MS", "num", "Model latency (ms)"),
         ("COST_USD", "num", "Estimated cost (USD, list price)"),
-    ] + _time_columns("STARTED", "Started") + _time_columns("COMPLETED", "Completed"),
+    ] + _time_columns("STARTED", "Started") + _time_columns("COMPLETED", "Completed")
+        + _time_columns("INPUT_ETA", "Expected arrival used by the assessment"),
     "QUEUE": [("QUEUE_EVENT_ID", "num", "Queue change ID")] + CASE_KEYS + [
         ("REVISION", "num", "Queue revision (per hospital)"),
         ("CHANGE", "char", "entered / moved / left"),
@@ -310,7 +311,7 @@ def _build_tables() -> dict:
         "OUTPUT_TOKENS": row["output_tokens"],
         "LATENCY_MS": row["latency_ms"],
         "COST_USD": row["cost_usd"],
-    }, started=row["started_at"], completed=row["completed_at"])
+    }, started=row["started_at"], completed=row["completed_at"], input_eta=row["input_eta_at"] or None)
         for row in query("SELECT * FROM risk_assessments ORDER BY id") if row["case_id"] in keys]
 
     # Typed vitals and vitals extracted from the reports (case_extraction.py), in time order.
