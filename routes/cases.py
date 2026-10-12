@@ -488,11 +488,14 @@ async def hospital_queue(current_user: dict = Depends(require_role(["doctor"])))
         CASE_SELECT + " WHERE c.destination_hospital_id = ? AND c.status = 'active' AND c.arrived_at IS NULL",
         (hospital_id,),
     ) if hospital_id is not None else []
+    as_of = utc_now_iso()  # before reading, so a later snapshot always carries a later as_of
     ordered = case_queue.order(describe_cases(rows), datetime.now(timezone.utc))
     changes = case_extraction.vital_changes([case["id"] for case in ordered])
     for case in ordered:
         case["vital_changes"] = changes[case["id"]]
     return {
+        # Responses can arrive out of order; screens keep the snapshot with the latest as_of.
+        "as_of": as_of,
         "rule_version": case_queue.QUEUE_RULE_VERSION,
         "rule": case_queue.QUEUE_RULE,
         "counts": case_queue.counts(ordered),
