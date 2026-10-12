@@ -1,8 +1,8 @@
 """AI assessment of EMS cases, on the evaluation contract (evals/contracts.py).
 
-The model gets the same system prompt (evals/prompts/awareness_v2.txt) and the same input
-fields as the evaluation harness, and must answer with the same five fields, so what the
-evaluation measures is what the app runs:
+The model gets a versioned system prompt (evals/prompts/awareness_v3.txt) and the same input
+and output fields as the evaluation harness. Compare runs using the recorded prompt version;
+v3 retains v2's clinical wording and clarifies which ETA input is current. Output fields:
     summary, meaningful_change, change_explanation, missing_information, preparation_category
 
 "Earlier" information is what the hospital had acknowledged before this assessment, so
@@ -30,7 +30,7 @@ import openai
 from database import get_db, query, run, utc_now_iso
 from routes import recordings
 
-PROMPT_VERSION = "awareness_v2"
+PROMPT_VERSION = "awareness_v3"
 PROMPT = (Path(__file__).parent / "evals" / "prompts" / f"{PROMPT_VERSION}.txt").read_text(encoding="utf-8")
 
 # The evaluation contract, kept identical to evals/contracts.py (test_case_model checks this).
@@ -74,7 +74,7 @@ TRANSCRIPTION_WAIT_SECONDS = 60
 TRANSCRIPTION_POLL_SECONDS = 0.25
 
 ASSESSMENT_COLUMNS = (
-    "id, case_id, based_on_version, baseline_version, status, preparation_category, meaningful_change, "
+    "id, case_id, based_on_version, baseline_version, input_eta_at, status, preparation_category, meaningful_change, "
     "summary, change_explanation, missing_information, review_reason, error, scorer_version, "
     "input_tokens, output_tokens, latency_ms, cost_usd, started_at, completed_at, updated_at"
 )
@@ -215,6 +215,7 @@ def read_inputs(case_id: int) -> Optional[dict]:
         "case_id": case_id,
         "version": version,
         "baseline_version": baseline,
+        "eta_at": case["eta_at"],
         "has_information": bool(items),
         "input": {
             "case_id": label,
@@ -404,18 +405,19 @@ class AssessmentRunner(CaseRunner):
             return
         latest = latest_attempt(case_id)
         # An attempt covers the case if it read this information against the same acknowledged
-        # baseline; an acknowledgment of an intermediate version changes the baseline.
+        # baseline and expected arrival. ETA refreshes do not change the clinical/ack version.
         if latest and latest["based_on_version"] >= inputs["version"] \
-                and latest["baseline_version"] == inputs["baseline_version"]:
+                and latest["baseline_version"] == inputs["baseline_version"] \
+                and latest["input_eta_at"] == inputs["eta_at"]:
             if not (force and latest["status"] == "failed"):
                 return
 
         now = utc_now_iso()
         assessment_id = run(
             """INSERT INTO risk_assessments
-                   (case_id, based_on_version, baseline_version, status, scorer_version, started_at, updated_at)
-               VALUES (?, ?, ?, 'processing', ?, ?, ?)""",
-            (case_id, inputs["version"], inputs["baseline_version"], scorer_version(), now, now),
+                   (case_id, based_on_version, baseline_version, input_eta_at, status, scorer_version, started_at, updated_at)
+               VALUES (?, ?, ?, ?, 'processing', ?, ?, ?)""",
+            (case_id, inputs["version"], inputs["baseline_version"], inputs["eta_at"], scorer_version(), now, now),
         )["id"]
         self.on_change(case_id)
 
@@ -473,9 +475,13 @@ def unassessed_open_cases() -> list:
     """
     rows = query(
         """SELECT c.id FROM cases c
-           WHERE c.status = 'active' AND c.info_version > COALESCE(
-               (SELECT MAX(a.based_on_version) FROM risk_assessments a
-                WHERE a.case_id = c.id AND a.status IN ('completed', 'needs_review')), 0)
+           WHERE c.status = 'active' AND NOT EXISTS (
+               SELECT 1 FROM risk_assessments a
+               WHERE a.case_id = c.id AND a.status IN ('completed', 'needs_review')
+                 AND a.based_on_version = c.info_version AND a.input_eta_at IS c.eta_at
+                 AND a.baseline_version IS (
+                     SELECT MAX(ack.info_version) FROM case_acknowledgments ack
+                     WHERE ack.case_id = c.id AND ack.info_version < c.info_version))
            ORDER BY c.id"""
     )
     return [row["id"] for row in rows]

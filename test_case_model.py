@@ -193,7 +193,7 @@ class TestUpdatesAndHistory:
         assert updates[0]["body"] == "Patient on home oxygen"
         assert updates[1]["author_role"] == "emt"
 
-    def test_eta_change_is_logged_without_new_patient_version(self, monkeypatch):
+    def test_eta_change_refreshes_assessment_without_new_patient_version(self, monkeypatch):
         calls = use_scorer(monkeypatch, SCORED)
         case = start_case()
         calls.clear()
@@ -202,7 +202,33 @@ class TestUpdatesAndHistory:
         after = get_case(case["id"])
         assert after["info_version"] == 1
         assert after["eta_at"] == response.json()["eta_at"] < case["eta_at"]
-        assert calls == []
+        assert len(calls) == 1
+        assert calls[0]["input"]["eta_minutes"] == 3
+        assert after["current_assessment"]["input_eta_at"] == after["eta_at"]
+        assert after["assessment_is_outdated"] is False
+
+    def test_eta_refresh_preserves_acknowledgment_and_survives_failure(self, monkeypatch):
+        use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        ack = client.post(f"/api/cases/{case['id']}/acknowledge", headers=auth(DOCTOR)).json()["acknowledgment"]
+        use_scorer(monkeypatch, RuntimeError("provider unavailable"))
+        add_update(case["id"], kind="eta", eta_minutes=3, client_id="eta-refresh")
+        after = get_case(case["id"])
+        assert after["info_version"] == 1 and after["acknowledgment"] == ack
+        assert after["latest_update_acknowledged"] is True
+        assert after["assessment_is_outdated"] is True
+        assert after["processing"]["assessment"]["status"] == "failed"
+        assert after["processing"]["needs_review"] is True
+        assert case["id"] in case_assessment.unassessed_open_cases()
+
+        calls = use_scorer(monkeypatch, SCORED)
+        client.post(f"/api/cases/{case['id']}/assessments/retry", headers=auth(DOCTOR))
+        assert len(calls) == 1 and calls[0]["input"]["eta_minutes"] == 3
+        assert get_case(case["id"])["assessment_is_outdated"] is False
+        assert case["id"] not in case_assessment.unassessed_open_cases()
+        # A retried HTTP update must not bill a second refresh.
+        add_update(case["id"], kind="eta", eta_minutes=3, client_id="eta-refresh")
+        assert len(calls) == 1
 
     def test_update_validation(self):
         case = start_case()
@@ -284,7 +310,7 @@ class TestAssessments:
         assert assessment["meaningful_change"] == "No earlier report"
         assert assessment["summary"] == "Adult short of breath, SpO2 falling."
         assert assessment["based_on_version"] == 1 and assessment["baseline_version"] is None
-        assert assessment["scorer_version"] == f"{recordings.SCORING_MODEL}/awareness_v2"
+        assert assessment["scorer_version"] == f"{recordings.SCORING_MODEL}/awareness_v3"
         assert (assessment["input_tokens"], assessment["output_tokens"], assessment["latency_ms"]) == (1200, 300, 1500)
         assert assessment["cost_usd"] == pytest.approx((1200 * 0.10 + 300 * 0.50) / 1_000_000)
         assert after["processing"]["status"] == "completed"
@@ -477,11 +503,46 @@ class TestModelInput:
 
     def test_prompt_is_the_evaluation_prompt(self):
         assert case_assessment.PROMPT.startswith("You organize fictional EMS reports")
-        assert case_assessment.PROMPT_VERSION == "awareness_v2"
+        assert case_assessment.PROMPT_VERSION == "awareness_v3"
+        assert "use that value for the handoff's ETA" in case_assessment.PROMPT
 
 
 class TestAuditFixes:
     """Findings from the PR #5 review."""
+
+    def test_eta_change_during_an_assessment_queues_the_current_arrival(self, monkeypatch):
+        use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        eta_a, eta_b = "2030-01-01T10:00:00.000Z", "2030-01-01T10:05:00.000Z"
+        run("UPDATE cases SET eta_at = ? WHERE id = ?", (eta_a, case["id"]))
+        calls, states = [], []
+
+        async def scenario():
+            started, release = asyncio.Event(), asyncio.Event()
+
+            async def delayed_score(inputs):
+                calls.append(inputs)
+                if len(calls) == 1:
+                    started.set()
+                    await release.wait()
+                return SCORED, USAGE
+
+            monkeypatch.setattr(case_assessment, "score", delayed_score)
+            runner = case_assessment.AssessmentRunner()
+            runner.on_change = lambda case_id: states.append(cases.get_case(case_id))
+            first = asyncio.create_task(runner.request(case["id"]))
+            await asyncio.wait_for(started.wait(), 2)
+            run("UPDATE cases SET eta_at = ? WHERE id = ?", (eta_b, case["id"]))
+            await runner.request(case["id"])
+            release.set()
+            await asyncio.wait_for(first, 2)
+
+        asyncio.run(scenario())
+        assert [c["eta_at"] for c in calls] == [eta_a, eta_b]
+        assert any(s["current_assessment"]["input_eta_at"] == eta_a and s["assessment_is_outdated"] for s in states)
+        final = get_case(case["id"])
+        assert final["current_assessment"]["input_eta_at"] == eta_b
+        assert final["assessment_is_outdated"] is False and final["info_version"] == 1
 
     def test_speech_keeps_its_spoken_order_when_transcription_finishes_out_of_order(self, monkeypatch):
         calls = use_scorer(monkeypatch, SCORED)
@@ -932,6 +993,32 @@ class TestLegacyRecordingScores:
 
 
 class TestMigration:
+    def test_legacy_eta_snapshot_is_distinct_from_no_eta_after_two_migrations(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(database, "DB_PATH", tmp_path / "pre-freshness.db")
+        init_database()
+        insert_sample_data()
+        use_scorer(monkeypatch, SCORED)
+        original = start_case(eta_minutes=None)
+        assert get_case(original["id"])["current_assessment"]["input_eta_at"] is None
+        # Simulate the immediately preceding schema, including populated assessment/hospital rows.
+        with database.get_db() as conn:
+            conn.execute("ALTER TABLE risk_assessments DROP COLUMN input_eta_at")
+            for column in ("arrival_highlight_minutes", "settings_version", "settings_updated_at"):
+                conn.execute(f"ALTER TABLE hospitals DROP COLUMN {column}")
+        init_database()
+        init_database()
+        migrated = get_case(original["id"])
+        assert migrated["current_assessment"]["input_eta_at"] == ""
+        assert migrated["assessment_is_outdated"] is True
+        assert original["id"] in case_assessment.unassessed_open_cases()
+        asyncio.run(case_assessment.runner.request(original["id"]))
+        refreshed = get_case(original["id"])
+        assert refreshed["current_assessment"]["input_eta_at"] is None
+        assert not refreshed["assessment_is_outdated"]
+        assert original["id"] not in case_assessment.unassessed_open_cases()
+        assert query("SELECT arrival_highlight_minutes, settings_version FROM hospitals WHERE code = 'GEN'")[0] == {
+            "arrival_highlight_minutes": 5, "settings_version": 1}
+
     def test_database_from_before_cases_model_is_upgraded(self, tmp_path):
         old_db = tmp_path / "old.db"
         conn = sqlite3.connect(old_db)

@@ -349,7 +349,7 @@ class TestPilotScenario:
         assert predictions["kind"] == "model_predictions" and predictions["dataset_version"] == "pilot_v1"
         [config] = predictions["configs"]
         assert config["config_id"] == f"app-replay-{run.run_id}" and config["repeats"] == 1
-        assert config["prompt_version"] == "awareness_v2" and config["input_contract_version"] == "app_replay_typed"
+        assert config["prompt_version"] == "awareness_v3" and config["input_contract_version"] == "app_replay_typed"
         records = {r["case_id"]: r for r in predictions["records"]}
         assert set(records) == {"SYN001", "SYN002", "SYN004", "SYN007"}
         assert all(r["status"] == "ok" and set(r["output"]) == set(case_assessment.OUTPUT_FIELDS)

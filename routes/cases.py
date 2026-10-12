@@ -159,9 +159,10 @@ def processing_summary(case: dict, latest: Optional[dict]) -> dict:
 
     # Information no attempt has covered yet, or an acknowledgment that changed what the latest
     # attempt compared against, is waiting to be assessed.
-    if latest is None or (latest["status"] != "processing" and (
+    if latest is None or (latest["status"] not in ("processing", "failed") and (
             latest["based_on_version"] < case["info_version"]
-            or latest["baseline_version"] != case["baseline_version"])):
+            or latest["baseline_version"] != case["baseline_version"]
+            or latest["input_eta_at"] != case["eta_at"])):
         assessment = "pending"
     else:
         assessment = latest["status"]
@@ -254,7 +255,10 @@ def describe_cases(rows: list) -> list:
         case["current_assessment"] = assessment
         # None until an assessment says otherwise; "Cannot assess" when it couldn't decide.
         case["preparation_category"] = assessment["preparation_category"] if assessment else None
-        case["assessment_is_outdated"] = bool(assessment) and assessment["based_on_version"] < case["info_version"]
+        case["assessment_is_outdated"] = bool(assessment) and (
+            assessment["based_on_version"] < case["info_version"]
+            or assessment["baseline_version"] != case["baseline_version"]
+            or assessment["input_eta_at"] != case["eta_at"])
         case["processing"] = processing_summary(case, latest.get(case["id"]))
         described.append(case)
     return described
@@ -688,7 +692,7 @@ async def add_update(
 
         now = utc_now_iso()
         if kind == "eta":
-            # Logistics, not patient information: no new version, no re-assessment.
+            # Logistics refreshes the handoff, but does not invent new clinical information or acknowledgment.
             version = current["info_version"]
             conn.execute("UPDATE cases SET eta_at = ?, updated_at = ? WHERE id = ?", (eta_at, now, case["id"]))
         else:
@@ -713,6 +717,8 @@ async def add_update(
     publish_case("case.updated", get_case(case["id"]), "eta_changed" if kind == "eta" else "update_added")
     if kind != "eta":
         request_processing(background_tasks, case["id"])
+    else:
+        background_tasks.add_task(case_assessment.runner.request, case["id"])
     return update
 
 

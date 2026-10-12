@@ -267,6 +267,7 @@ def init_database():
       completed_at TEXT,
       updated_at TEXT NOT NULL,
       baseline_version INTEGER,
+      input_eta_at TEXT DEFAULT '',
       preparation_category TEXT,
       meaningful_change TEXT,
       change_explanation TEXT,
@@ -480,6 +481,8 @@ ADDED_COLUMNS = {
     ],
     "risk_assessments": [
         ("baseline_version", "INTEGER"),
+        # Empty means an older attempt did not record its ETA input; NULL means ETA was absent.
+        ("input_eta_at", "TEXT DEFAULT ''"),
         ("preparation_category", "TEXT"),
         ("meaningful_change", "TEXT"),
         ("change_explanation", "TEXT"),
