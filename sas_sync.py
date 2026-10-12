@@ -191,13 +191,12 @@ def build_tables() -> dict:
 
 
 def _build_tables() -> dict:
-    from case_assessment import VITAL_SIGNS
     from routes.cases import CASE_SELECT, describe_cases
 
     hospitals = {row["id"]: row["code"] for row in query("SELECT id, code FROM hospitals")}
     cases = describe_cases(query(CASE_SELECT + " ORDER BY c.id"))
+    # CASE_KEYS per case; every table exports only rows of these cases.
     keys = {}
-    started = {}
     for case in cases:
         keys[case["id"]] = {
             "CASE_ID": case["id"],
@@ -205,19 +204,28 @@ def _build_tables() -> dict:
             "SOURCE_RUN_ID": case["source_run_id"],
             "HOSPITAL_CODE": hospitals.get(case["destination_hospital_id"]),
         }
-        started[case["id"]] = sas_datetime(case["started_at"])
+    # Read once: queue changes are both EVENTS rows and the QUEUE table.
+    queue_events = query("SELECT * FROM queue_events ORDER BY id")
+    return {"CASES": _cases_table(keys, cases), "EVENTS": _events_table(keys, cases, queue_events),
+            "ASSESSMENTS": _assessments_table(keys), "QUEUE": _queue_table(keys, queue_events),
+            "VITALS": _vitals_table(keys)}
 
-    def with_times(row: dict, **times) -> dict:
-        for name, iso in times.items():
-            row[f"{name.upper()}_AT"] = iso
-            row[f"{name.upper()}_DT"] = sas_datetime(iso)
-        return row
 
+def _with_times(row: dict, **times) -> dict:
+    """Adds each timestamp to the row twice: NAME_AT (ISO text) and NAME_DT (SAS datetime)."""
+    for name, iso in times.items():
+        row[f"{name.upper()}_AT"] = iso
+        row[f"{name.upper()}_DT"] = sas_datetime(iso)
+    return row
+
+
+def _cases_table(keys: dict, cases: list) -> list:
+    """One row per case, its current state."""
     case_rows = []
     for case in cases:
         assessment = case["current_assessment"] or {}
         ack = case["acknowledgment"]
-        case_rows.append(with_times({
+        case_rows.append(_with_times({
             **keys[case["id"]],
             "EMS_UNIT": case["ems_unit"],
             "STATUS": case["status"],
@@ -233,7 +241,14 @@ def _build_tables() -> dict:
             "SEGMENT_COUNT": case["segment_count"],
             "FAILED_SEGMENT_COUNT": case["failed_segment_count"],
         }, started=case["started_at"], eta=case["eta_at"], arrived=case["arrived_at"], closed=case["closed_at"]))
+    return case_rows
 
+
+def _events_table(keys: dict, cases: list, queue_events: list) -> list:
+    """One row per thing that happened to a case, in time order."""
+    started = {}
+    for case in cases:
+        started[case["id"]] = sas_datetime(case["started_at"])
     events = []
 
     def event(event_id, case_id, event_type, occurred_at, info_version=None, actor_role=None, detail=None, value=None):
@@ -241,7 +256,7 @@ def _build_tables() -> dict:
             return
         occurred = sas_datetime(occurred_at)
         start = started.get(case_id)
-        events.append(with_times({
+        events.append(_with_times({
             "EVENT_ID": event_id,
             **keys[case_id],
             "EVENT_TYPE": event_type,
@@ -285,8 +300,7 @@ def _build_tables() -> dict:
     for row in query("SELECT id, case_id, sender_role, created_at FROM messages WHERE case_id IS NOT NULL"):
         event(f"message:{row['id']}", row["case_id"], "message_sent", row["created_at"], actor_role=row["sender_role"])
     # Queue position changes (queue_history.py); DETAIL is the cause, VALUE the new position.
-    queue_rows = query("SELECT * FROM queue_events ORDER BY id")
-    for row in queue_rows:
+    for row in queue_events:
         event(f"queue:{row['id']}", row["case_id"], f"queue_{row['change']}", row["created_at"],
               row["info_version"], detail=row["cause"], value=row["to_position"])
     for row in query("""SELECT r.id, r.case_id, r.to_version, r.status, r.error, r.latency_ms, r.completed_at,
@@ -295,8 +309,12 @@ def _build_tables() -> dict:
         event(f"extraction:{row['id']}", row["case_id"], f"extraction_{row['status']}", row["completed_at"],
               row["to_version"], detail=row["error"] or f"{row['facts']} facts", value=row["latency_ms"])
     events.sort(key=lambda e: (e["OCCURRED_DT"] if e["OCCURRED_DT"] is not None else 0, e["EVENT_ID"]))
+    return events
 
-    assessment_rows = [with_times({
+
+def _assessments_table(keys: dict) -> list:
+    """Every AI assessment attempt, with tokens, latency and cost."""
+    return [_with_times({
         "ASSESSMENT_ID": row["id"],
         **keys[row["case_id"]],
         "BASED_ON_VERSION": row["based_on_version"],
@@ -314,8 +332,26 @@ def _build_tables() -> dict:
     }, started=row["started_at"], completed=row["completed_at"], input_eta=row["input_eta_at"] or None)
         for row in query("SELECT * FROM risk_assessments ORDER BY id") if row["case_id"] in keys]
 
-    # Typed vitals and vitals extracted from the reports (case_extraction.py), in time order.
-    # The extracted ones carry their source but not the spoken words or qualifier (no free text).
+
+def _queue_table(keys: dict, queue_events: list) -> list:
+    """Every change to a hospital's queue order."""
+    return [_with_times({
+        "QUEUE_EVENT_ID": row["id"], **keys[row["case_id"]],
+        "REVISION": row["revision"], "CHANGE": row["change"],
+        "FROM_POSITION": row["from_position"], "TO_POSITION": row["to_position"],
+        "CAUSE": row["cause"], "CAUSE_CASE_ID": row["cause_case_id"], "INFO_VERSION": row["info_version"],
+        "PREPARATION_CATEGORY": row["preparation_category"], "NEEDS_ATTENTION": row["needs_attention"],
+        "RULE_VERSION": row["rule_version"],
+    }, occurred=row["created_at"]) for row in queue_events if row["case_id"] in keys]
+
+
+def _vitals_table(keys: dict) -> list:
+    """
+    Typed vitals and vitals extracted from the reports (case_extraction.py), in time order.
+    The extracted ones carry their source but not the spoken words or qualifier (no free text).
+    """
+    from case_assessment import VITAL_SIGNS
+
     readings = [(row["measured_at"], row["case_id"], row["name"], row["value"],
                  {"READING_ID": row["id"], "SOURCE": "typed vitals", "UPDATE_ID": row["update_id"]})
                 for row in query("SELECT id, case_id, update_id, name, value, measured_at FROM vital_readings")]
@@ -330,22 +366,11 @@ def _build_tables() -> dict:
         if case_id not in keys:
             continue
         label, unit, _, _ = VITAL_SIGNS.get(name, (name, "", 0, 0))
-        vital_rows.append(with_times({
+        vital_rows.append(_with_times({
             "READING_ID": None, **keys[case_id], "UPDATE_ID": None, "SEGMENT_ID": None, "FINDING_ID": None, **ids,
             "NAME": name, "LABEL": label, "UNIT": unit, "VALUE": value,
         }, measured=measured_at))
-
-    queue_table = [with_times({
-        "QUEUE_EVENT_ID": row["id"], **keys[row["case_id"]],
-        "REVISION": row["revision"], "CHANGE": row["change"],
-        "FROM_POSITION": row["from_position"], "TO_POSITION": row["to_position"],
-        "CAUSE": row["cause"], "CAUSE_CASE_ID": row["cause_case_id"], "INFO_VERSION": row["info_version"],
-        "PREPARATION_CATEGORY": row["preparation_category"], "NEEDS_ATTENTION": row["needs_attention"],
-        "RULE_VERSION": row["rule_version"],
-    }, occurred=row["created_at"]) for row in queue_rows if row["case_id"] in keys]
-
-    return {"CASES": case_rows, "EVENTS": events, "ASSESSMENTS": assessment_rows, "QUEUE": queue_table,
-            "VITALS": vital_rows}
+    return vital_rows
 
 
 def table_vars(name: str) -> list:
