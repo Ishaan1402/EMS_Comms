@@ -2,12 +2,9 @@
 
 An AI-powered emergency triage system that enables EMTs to record patient conversations, automatically classify risk levels, prioritize cases by urgency, and instantly notify doctors for faster emergency response.
 
-## 🐍 Python/FastAPI Backend Available
+## 🐍 Python/FastAPI Backend
 
-This repository includes a **Python/FastAPI backend** as an alternative to the Node/Express backend. It serves the same API to the React client.
-
-- **Node/Express** (original): `npm start` or `node server.js`
-- **Python/FastAPI**: `python3 main.py` or `./start-python.sh`
+The backend is Python/FastAPI: `python3 main.py` or `./start-python.sh`. It began as a port of a Node/Express backend, which has since been removed; `test_parity.py` still checks the API contract the port kept.
 
 ### Running the Python backend
 
@@ -78,8 +75,6 @@ EMTs can start a **live case** from the EMT dashboard. The browser records the c
 | `POST /api/cases/:id/segments/:segmentId/retry` | EMT | Re-run a failed transcription |
 | `GET /api/cases/events` | EMT / Doctor | SSE stream: `ready`, `case.opened`, `case.updated`, `segment.created`, `segment.updated`, `update.created` |
 
-Live cases are implemented only in the Python backend.
-
 ### Cases: one per patient transport
 
 The case is the main object. One transport is one case, and everything about the patient belongs to it: transcript segments, typed updates, vital signs, AI assessments, messages and hospital acknowledgments. Nothing is overwritten, so history such as SpO2 96 → 91 → 86 is kept.
@@ -148,8 +143,6 @@ Each case has a message thread at `/api/cases/:id/messages`: the EMT who owns th
 - `POST /api/recordings/:id/messages` with `{ "body": "...", "client_id": "optional-uuid" }` sends a message. The case comes only from the URL. A retry with the same `client_id` returns the original message instead of a duplicate.
 - `GET /api/recordings/:id/messages/stream?after_id=N` is a server-sent event stream of new messages. It honours `Last-Event-ID` and needs the usual `Authorization` header.
 
-Messaging is implemented in the Python backend only.
-
 ---
 
 ## ✨ Features
@@ -185,7 +178,8 @@ Web Interface → File Upload → SQLite Database → Transcription → Medical 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 16+ 
+- Python 3 (packages in `requirements.txt`)
+- Node.js 16+ (for the React client)
 - OpenAI API key
 - Twilio account (for SMS)
 - SendGrid account (for email)
@@ -194,7 +188,7 @@ Web Interface → File Upload → SQLite Database → Transcription → Medical 
 ```bash
 git clone <repository-url>
 cd shealthcare
-npm install
+pip install -r requirements.txt
 cd client && npm install
 ```
 
@@ -207,7 +201,7 @@ cp env.example .env
 ### 3. Start Development
 ```bash
 # Terminal 1: Backend
-npm run dev
+python3 main.py
 
 # Terminal 2: Frontend
 cd client && npm start
@@ -217,7 +211,7 @@ cd client && npm start
 - **Frontend**: http://localhost:3000
 - **Backend**: http://localhost:5000
 - **Demo Accounts**: See login page for test credentials
-- **Database**: Automatically created as `shealthcare.db`
+- **Database**: Automatically created as `asclepius.db`
 
 ## 🔧 Configuration
 
@@ -288,17 +282,6 @@ SENDGRID_FROM_EMAIL=noreply@shealthcare.com
 
 ## 🚀 Deployment
 
-### Heroku
-```bash
-# Backend
-heroku create your-app-name
-git push heroku main
-
-# Frontend
-cd client
-npm run build
-```
-
 ### Docker
 ```bash
 docker-compose up -d
@@ -306,9 +289,8 @@ docker-compose up -d
 
 ### Local Development
 ```bash
-# Simple startup
-chmod +x start.sh
-./start.sh
+# Installs the Python packages, then starts the server (needs a .env file)
+./start-python.sh
 ```
 
 ## 📊 Performance
