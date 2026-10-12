@@ -13,6 +13,7 @@ import openai
 import case_assessment
 import case_extraction
 import case_queue
+import queue_history
 from case_assessment import ASSESSMENT_COLUMNS, VITAL_SIGNS
 from database import get_db, query, run, to_iso, utc_now_iso
 from middleware.auth import require_role, APIError
@@ -270,10 +271,10 @@ def touch_case(case_id: int) -> Optional[dict]:
     return get_case(case_id)
 
 
-def publish_case_changed(case_id: int) -> None:
+def publish_case_changed(case_id: int, cause: str = "assessment_updated") -> None:
     case = touch_case(case_id)
     if case:
-        publish_case("case.updated", case)
+        publish_case("case.updated", case, cause)
 
 
 case_assessment.runner.on_change = publish_case_changed
@@ -330,8 +331,33 @@ def get_segment_by_seq(case_id: int, seq: int) -> Optional[dict]:
     return rows[0] if rows else None
 
 
-def publish_case(event_type: str, case: dict) -> None:
+def publish_case(event_type: str, case: dict, cause: str) -> None:
+    """Push a changed case to its viewers and record any change to its hospital's queue order."""
     broker.publish(event_type, {"case": case}, owner_id=case["emt_id"], hospital_id=case["destination_hospital_id"])
+    record_queue(case["destination_hospital_id"], cause, case["id"])
+
+
+def hospital_queue_cases(hospital_id: Optional[int]) -> list:
+    """The hospital's inbound cases in queue order (case_queue.py)."""
+    if hospital_id is None:
+        return []
+    rows = query(
+        CASE_SELECT + " WHERE c.destination_hospital_id = ? AND c.status = 'active' AND c.arrived_at IS NULL",
+        (hospital_id,),
+    )
+    return case_queue.order(describe_cases(rows), datetime.now(timezone.utc))
+
+
+def record_queue(hospital_id: Optional[int], cause: str, cause_case_id: Optional[int]) -> None:
+    """After a committed change: store how the hospital's order moved, if it did (queue_history.py)."""
+    if hospital_id is not None:
+        queue_history.record(hospital_id, hospital_queue_cases(hospital_id), cause, cause_case_id)
+
+
+def record_all_queues(cause: str) -> None:
+    """At startup: recovery or a new queue rule can change an order without any case event."""
+    for row in query("SELECT id FROM hospitals"):
+        record_queue(row["id"], cause, None)
 
 
 def publish_segment(event_type: str, segment: dict, case: dict) -> None:
@@ -442,7 +468,7 @@ async def start_case(
         # idx_cases_one_active_per_emt: an EMT has at most one open case at a time.
         raise APIError(409, "You already have an active case")
     case = get_case(result["id"])
-    publish_case("case.opened", case)
+    publish_case("case.opened", case, "case_opened")
     request_processing(background_tasks, case["id"])
     return case
 
@@ -484,12 +510,8 @@ async def hospital_queue(current_user: dict = Depends(require_role(["doctor"])))
     case's position and the reasons for it. Arrived and closed cases are not in it.
     """
     hospital_id = user_hospital_id(current_user)
-    rows = query(
-        CASE_SELECT + " WHERE c.destination_hospital_id = ? AND c.status = 'active' AND c.arrived_at IS NULL",
-        (hospital_id,),
-    ) if hospital_id is not None else []
     as_of = utc_now_iso()  # before reading, so a later snapshot always carries a later as_of
-    ordered = case_queue.order(describe_cases(rows), datetime.now(timezone.utc))
+    ordered = hospital_queue_cases(hospital_id)
     changes = case_extraction.vital_changes([case["id"] for case in ordered])
     for case in ordered:
         case["vital_changes"] = changes[case["id"]]
@@ -501,6 +523,21 @@ async def hospital_queue(current_user: dict = Depends(require_role(["doctor"])))
         "counts": case_queue.counts(ordered),
         "cases": ordered,
     }
+
+
+@router.get("/queue/history")
+async def hospital_queue_history(after_revision: Optional[str] = None,
+                                 current_user: dict = Depends(require_role(["doctor"]))):
+    """
+    How the user's hospital's queue order changed, oldest first (queue_history.py): one row per
+    patient that entered, moved or left in each revision, with the cause. after_revision pages on.
+    """
+    try:
+        after = int(after_revision) if after_revision is not None else 0
+    except ValueError:
+        raise APIError(400, "after_revision must be a whole number")
+    hospital_id = user_hospital_id(current_user)
+    return queue_history.events(hospital_id, after) if hospital_id is not None else []
 
 
 @router.get("/{case_id}")
@@ -515,7 +552,7 @@ async def close_case(case_id: str, current_user: dict = Depends(require_role(["e
         now = utc_now_iso()
         run("UPDATE cases SET status = 'closed', closed_at = ?, updated_at = ? WHERE id = ?", (now, now, case["id"]))
         case = get_case(case["id"])
-        publish_case("case.updated", case)
+        publish_case("case.updated", case, "closed")
     return case
 
 
@@ -527,7 +564,7 @@ async def mark_arrived(case_id: str, current_user: dict = Depends(require_role([
         now = utc_now_iso()
         run("UPDATE cases SET arrived_at = ?, updated_at = ? WHERE id = ? AND arrived_at IS NULL", (now, now, case["id"]))
         case = get_case(case["id"])
-        publish_case("case.updated", case)
+        publish_case("case.updated", case, "arrived")
     return case
 
 
@@ -557,7 +594,7 @@ async def acknowledge_case(
         (case["id"], current_user["id"], version, utc_now_iso()),
     )
     case = touch_case(case["id"])
-    publish_case("case.updated", case)
+    publish_case("case.updated", case, "acknowledged")
     if version < case["info_version"]:
         # The AI compares newer information against this acknowledgment now; re-assess.
         background_tasks.add_task(case_assessment.runner.request, case["id"])
@@ -673,7 +710,7 @@ async def add_update(
     update = get_updates(case["id"], update_id)[0]
     broker.publish("update.created", {"case_id": case["id"], "update": update},
                    owner_id=case["emt_id"], hospital_id=case["destination_hospital_id"])
-    publish_case("case.updated", get_case(case["id"]))
+    publish_case("case.updated", get_case(case["id"]), "eta_changed" if kind == "eta" else "update_added")
     if kind != "eta":
         request_processing(background_tasks, case["id"])
     return update
@@ -871,7 +908,7 @@ async def upload_segment(
     run("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case["id"]))
     segment = get_segment(result["id"])
     publish_segment("segment.created", segment, case)
-    publish_case("case.updated", get_case(case["id"]))
+    publish_case("case.updated", get_case(case["id"]), "clip_received")
     background_tasks.add_task(transcribe_segment, segment["id"])
     return segment
 
@@ -900,7 +937,7 @@ async def retry_segment(
     segment = get_segment(segment["id"])
     publish_segment("segment.updated", segment, case)
     # The case's failed/pending counts changed.
-    publish_case_changed(case["id"])
+    publish_case_changed(case["id"], "transcription_retried")
     background_tasks.add_task(transcribe_segment, segment["id"])
     return segment
 
@@ -927,7 +964,7 @@ async def dismiss_segment(case_id: str, segment_id: str, current_user: dict = De
 
     segment = get_segment(segment["id"])
     publish_segment("segment.updated", segment, case)
-    publish_case_changed(case["id"])
+    publish_case_changed(case["id"], "failure_handled")
     return segment
 
 
@@ -1022,7 +1059,7 @@ async def transcribe_segment(segment_id: int):
         else:
             conn.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, segment["case_id"]))
     publish_segment("segment.updated", get_segment(segment_id), segment)
-    publish_case("case.updated", get_case(segment["case_id"]))
+    publish_case("case.updated", get_case(segment["case_id"]), "transcript_added" if text else "transcription_failed")
     if text:
         await asyncio.gather(case_assessment.runner.request(segment["case_id"]),
                              case_extraction.runner.request(segment["case_id"]))

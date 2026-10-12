@@ -425,6 +425,12 @@ class Replay:
     def summary(self) -> list:
         return [self.call("GET", f"/api/cases/{case_id}", self.scenario["doctor"]) for case_id in self.cases.values()]
 
+    def queue_changes(self) -> list:
+        """How this run's patients moved in the hospital queue, as the server recorded it (KAN-29)."""
+        ours = set(self.cases.values())
+        return [row for row in self.call("GET", "/api/cases/queue/history", self.scenario["doctor"])
+                if row["case_id"] in ours]
+
     def queue_order(self) -> dict:
         """The doctor's hospital queue as the server orders it (case_queue.py)."""
         return self.call("GET", "/api/cases/queue", self.scenario["doctor"])
@@ -603,6 +609,24 @@ def print_speed(speed: dict) -> None:
                                 f"{value['median_s']} s / {value['max_s']} s (n={value['n']})"))
 
 
+def print_queue_changes(rows: list, cases: dict) -> None:
+    """
+    Each patient's path through the queue: position after each change and what caused it, naming
+    the other patient when someone else's change moved this one ("transcription_failed: SYN008").
+    """
+    print(f"\nQueue changes ({len({row['revision'] for row in rows})} revisions, recorded on the server):")
+    names = {case_id: source for source, case_id in cases.items()}
+    paths = {}
+    for row in rows:
+        step = f"#{row['to_position']}" if row["to_position"] else "left"
+        cause = row["cause"]
+        if row["cause_case_id"] not in (None, row["case_id"]):
+            cause += f": {names.get(row['cause_case_id'], row['cause_case_id'])}"
+        paths.setdefault(row["source_case_id"] or row["case_id"], []).append(f"{step} ({cause})")
+    for patient, steps in paths.items():
+        print(f"  {patient}: " + " -> ".join(steps))
+
+
 def print_queue(queue: dict) -> None:
     print(f"\nHospital queue ({queue['rule_version']}): {queue['rule']}")
     for case in queue["cases"]:
@@ -626,15 +650,16 @@ def main():
         try:
             replay.run()
             replay.wait_until_settled()
-            usage, speed = replay.model_usage(), replay.speed()
+            usage, speed, queue_changes = replay.model_usage(), replay.speed(), replay.queue_changes()
             DEFAULT_RUNS_DIR.mkdir(exist_ok=True)
             manifest_path = DEFAULT_RUNS_DIR / f"{replay.run_id}.json"
-            manifest_path.write_text(json.dumps({**replay.manifest(), "model_usage": usage, "speed": speed},
-                                                indent=2) + "\n")
+            manifest_path.write_text(json.dumps({**replay.manifest(), "model_usage": usage, "speed": speed,
+                                                 "queue_changes": queue_changes}, indent=2) + "\n")
             predictions_path = DEFAULT_RUNS_DIR / f"{replay.run_id}-predictions.json"
             predictions_path.write_text(json.dumps(replay.predictions(), indent=2) + "\n")
             print_summary(replay.summary(), usage)
             print_speed(speed)
+            print_queue_changes(queue_changes, replay.cases)
             print_queue(replay.queue_order())
             print(f"\nRun {replay.run_id} saved to {manifest_path}")
             print(f"Predictions for the evaluation harness: {predictions_path}")

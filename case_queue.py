@@ -9,17 +9,22 @@ DRAFT rule until the clinician agrees to it (QUEUE_RULE_VERSION):
    then Can wait, then Routine. Unknown sits above Can wait because unknown is not low risk.
    A "Cannot assess" the hospital has acknowledged stays here, with the unknowns: the clinician
    has looked, so it no longer outranks a known Prepare now (draft-2).
-3. Sooner ETA first; a case without an ETA after those with one.
+3. Earlier expected arrival (eta_at) first; a case without an ETA after those with one.
 4. Earlier case first, so the order is stable.
+
+The order depends only on stored case state, never on the clock: ETAs are compared as arrival
+times, so two patients whose ETAs have both passed keep their order (draft-3; draft-2 compared
+minutes left, which stop at zero). It can therefore only change when something is committed,
+which is when queue_history.py records it.
 
 Cases that have arrived or are closed leave the queue; their history stays.
 """
 from datetime import datetime
 from typing import Optional
 
-QUEUE_RULE_VERSION = "draft-2"
+QUEUE_RULE_VERSION = "draft-3"
 QUEUE_RULE = ("Draft rule: unacknowledged information or a processing failure first, then Prepare now, "
-              "not yet known (including acknowledged Cannot assess), Can wait, Routine, then sooner ETA.")
+              "not yet known (including acknowledged Cannot assess), Can wait, Routine, then earlier expected arrival.")
 
 CATEGORY_RANK = {"Prepare now": 0, None: 1, "Cannot assess": 1, "Can wait": 2, "Routine": 3}
 
@@ -59,12 +64,11 @@ def order(cases: list, now) -> list:
     queued = [case for case in cases if in_queue(case)]
 
     def key(case):
-        eta = minutes_until(case["eta_at"], now)
         return (
             0 if needs_attention(case) else 1,
             CATEGORY_RANK.get(case["preparation_category"], 1),
-            eta is None,
-            eta if eta is not None else 0,
+            case["eta_at"] is None,
+            case["eta_at"] or "",  # fixed-width UTC timestamps compare in time order
             case["started_at"],
             case["id"],
         )

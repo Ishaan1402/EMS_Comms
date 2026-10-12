@@ -8,10 +8,11 @@ os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
 from main import app
 import case_assessment
+import case_queue
 import database
 from database import init_database, insert_sample_data, query, run
 from middleware.auth import create_access_token
-from routes import recordings
+from routes import cases, recordings
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -35,6 +36,8 @@ def fresh(monkeypatch):
     monkeypatch.setattr(recordings, "openai_client", None)
     monkeypatch.setattr(case_assessment, "SETTLE_SECONDS", 0)
     run("UPDATE cases SET status = 'closed' WHERE status = 'active'")
+    run("DELETE FROM queue_events")
+    run("DELETE FROM queue_state")
 
 
 def auth(username):
@@ -86,7 +89,7 @@ def test_order_follows_the_draft_rule(monkeypatch):
     assert [c["id"] for c in body["cases"]] == [now, wait, routine]
     assert [c["queue_position"] for c in body["cases"]] == [1, 2, 3]
     assert body["cases"][0]["queue_reasons"] == ["Prepare now", "ETA 30 min"]
-    assert body["rule_version"] == "draft-2"
+    assert body["rule_version"] == "draft-3"
 
 
 def test_unacknowledged_information_comes_before_category(monkeypatch):
@@ -207,3 +210,94 @@ def test_queue_snapshots_are_ordered_by_as_of(monkeypatch):
     open_case("emt.wilson", "x patient", eta=10)
     first, second = queue(), queue()
     assert first["as_of"] < second["as_of"]  # screens keep the later snapshot whatever order they arrive in
+
+
+def history(username=DOCTOR, **params):
+    response = client.get("/api/cases/queue/history", params=params, headers=auth(username))
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def moves(rows):
+    return [(row["case_id"], row["change"], row["from_position"], row["to_position"], row["cause"], row["cause_case_id"])
+            for row in rows]
+
+
+def test_each_queue_change_is_recorded_once_with_its_cause(monkeypatch):
+    score_as(monkeypatch, {"first": "Can wait", "second": "Can wait"})
+    first = open_case("emt.wilson", "first patient", eta=5)
+    second = open_case("emt.garcia", "second patient", eta=20)
+    acknowledge(first)
+    acknowledge(second)
+    # Each step of the draft rule, with whose change caused it:
+    assert moves(history()) == [
+        (first, "entered", None, 1, "case_opened", first),
+        # Unassessed ("not yet known") ranks above the first patient's Can wait.
+        (second, "entered", None, 1, "case_opened", second),
+        (first, "moved", 1, 2, "case_opened", second),
+        # Assessed Can wait too: sooner arrival first.
+        (first, "moved", 2, 1, "assessment_updated", second),
+        (second, "moved", 1, 2, "assessment_updated", second),
+        # Acknowledged information drops below unacknowledged information...
+        (second, "moved", 2, 1, "acknowledged", first),
+        (first, "moved", 1, 2, "acknowledged", first),
+        # ...until both are acknowledged.
+        (first, "moved", 2, 1, "acknowledged", second),
+        (second, "moved", 1, 2, "acknowledged", second),
+    ]
+    seen = history()[-1]["revision"]
+
+    # New information on the second patient puts it first; the first patient moves because of it.
+    client.post(f"/api/cases/{second}/updates", json={"kind": "note", "body": "second patient worse"},
+                headers=auth("emt.garcia"))
+    changed = history(after_revision=seen)
+    assert moves(changed) == [(second, "moved", 2, 1, "update_added", second),
+                              (first, "moved", 1, 2, "update_added", second)]
+    assert {row["rule_version"] for row in changed} == {"draft-3"}
+    assert changed[0]["needs_attention"] == 1 and changed[1]["needs_attention"] == 0
+
+    # Reading the queue or its history never records anything.
+    total = len(history())
+    queue()
+    history()
+    assert len(history()) == total
+
+    # Leaving the queue is recorded too; the history stays.
+    client.post(f"/api/cases/{first}/arrive", headers=auth(DOCTOR))
+    assert moves(history()[total:]) == [(first, "left", 2, None, "arrived", first)]
+
+
+def test_another_hospitals_queue_history_is_not_visible(monkeypatch):
+    score_as(monkeypatch, {"x": "Can wait"})
+    open_case("emt.lee", "x patient", eta=5, code="NORTH")
+    assert history() == []
+    assert len(history(OTHER_DOCTOR)) == 1
+    assert client.get("/api/cases/queue/history", headers=auth("emt.lee")).status_code == 403
+    assert client.get("/api/cases/queue/history?after_revision=x", headers=auth(DOCTOR)).status_code == 400
+
+
+def test_startup_records_an_order_changed_without_a_case_event(monkeypatch):
+    score_as(monkeypatch, {"x": "Can wait"})
+    first = open_case("emt.wilson", "x patient", eta=5)
+    second = open_case("emt.garcia", "x patient", eta=20)
+    acknowledge(first)
+    acknowledge(second)
+    before = len(history())
+    run("UPDATE cases SET eta_at = '2000-01-01T00:00:00.000Z' WHERE id = ?", (second,))  # e.g. a migration
+    cases.record_all_queues("server_started")
+    cases.record_all_queues("server_started")  # nothing new the second time
+    assert moves(history()[before:]) == [(second, "moved", 2, 1, "server_started", None),
+                                         (first, "moved", 1, 2, "server_started", None)]
+
+
+def test_the_order_does_not_change_just_because_time_passes():
+    from datetime import datetime, timezone
+    def inbound(case_id, eta_at):
+        return {"id": case_id, "status": "active", "arrived_at": None, "eta_at": eta_at,
+                "started_at": f"2026-10-11T18:00:0{case_id}.000Z", "preparation_category": "Can wait",
+                "latest_update_acknowledged": True, "processing": {"needs_review": False, "reasons": []}}
+    # Both ETAs pass between the two looks; the one due first stays first.
+    cases_ = [inbound(1, "2026-10-11T18:05:00.000Z"), inbound(2, "2026-10-11T18:03:00.000Z")]
+    early = [c["id"] for c in case_queue.order([dict(c) for c in cases_], datetime(2026, 10, 11, 18, 0, tzinfo=timezone.utc))]
+    late = [c["id"] for c in case_queue.order([dict(c) for c in cases_], datetime(2026, 10, 11, 19, 0, tzinfo=timezone.utc))]
+    assert early == late == [2, 1]

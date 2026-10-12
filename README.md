@@ -110,6 +110,12 @@ The case is the main object. One transport is one case, and everything about the
     - Changes are pushed as `findings.updated` events.
   - **The assessment still reads the reports themselves.** That is the contract the evaluation measures; feeding it extracted facts would need its own evaluation first.
   - **Model:** `OPENAI_EXTRACTION_MODEL`, defaulting to the scoring model.
+- **Hospital queue** (`case_queue.py`, rule draft-3, not yet clinician-approved):
+  - `GET /api/cases/queue` orders each hospital's inbound cases on the server, with the reasons.
+  - **The order depends only on stored state, never the clock.** So it changes only when something is committed.
+  - **Every change is recorded** (`queue_history.py`, KAN-29) as a revision. Each revision lists who entered, moved or left, the cause, and whose case caused it.
+  - **Reading the queue never records anything.**
+  - `GET /api/cases/queue/history` returns the history, and the SAS export has it as `ASC_QUEUE`.
 - **Messages**: each case has its own thread at `/api/cases/:id/messages` (same API as below).
 
 Existing databases are migrated on startup: new columns are added, and `messages` is rebuilt so a message can belong to a case or a recording.
@@ -123,6 +129,7 @@ Existing databases are migrated on startup: new columns are added, and `messages
 | `ASC_CASES` | case, current state (transport status, AI processing, category, acknowledgment) |
 | `ASC_EVENTS` | thing that happened: case started/arrived/closed, update, segment uploaded/transcribed/failed/dismissed, assessment, patient information extraction, acknowledgment, message |
 | `ASC_ASSESSMENTS` | AI assessment attempt, with tokens, latency and cost |
+| `ASC_QUEUE` | change to a hospital's queue order: a patient entering, moving or leaving, with positions before/after, the cause (e.g. `update_added`, `acknowledged`) and whose case caused it |
 | `ASC_VITALS` | vital sign reading, typed or extracted from a report (`SOURCE`: typed vitals / radio / typed note / case opened) |
 
 Rows carry `CASE_ID`, `SOURCE_CASE_ID` and `SOURCE_RUN_ID`, so they join with the evaluation datasets. Each timestamp comes as `*_AT` (ISO UTC text) and `*_DT` (SAS datetime). No free text leaves the app: transcripts, notes, messages and AI summaries stay in SQLite.

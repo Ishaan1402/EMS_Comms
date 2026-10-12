@@ -70,6 +70,8 @@ async def lifespan(app: FastAPI):
     case_extraction.fail_interrupted_extractions()
     for case_id in case_extraction.unextracted_open_cases():
         case_extraction.runner.start(case_id, force=True)
+    # Recovery or a new queue rule can change an order without a case event.
+    cases.record_all_queues("server_started")
     if os.getenv("SEED_DEMO_USERS", "").lower() in ("1", "true", "yes"):
         insert_sample_data()
     # Off unless SAS_SYNC_ENABLED is set; failures stay inside the sync and never reach requests.

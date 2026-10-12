@@ -150,6 +150,14 @@ class TestTables:
         assert extracted["FINDING_ID"] is not None and extracted["READING_ID"] is None
         assert [v["MEASURED_DT"] for v in vitals] == sorted(v["MEASURED_DT"] for v in vitals)
 
+    def test_queue_changes_are_exported_with_their_cause(self, story):
+        [entered, *rest] = rows_of("QUEUE", story["id"])
+        assert (entered["CHANGE"], entered["TO_POSITION"], entered["CAUSE"]) == ("entered", 1, "case_opened")
+        assert rest[-1]["CHANGE"] == "left" and rest[-1]["CAUSE"] == "arrived"
+        assert all(r["RULE_VERSION"] and r["OCCURRED_DT"] is not None for r in [entered, *rest])
+        timeline = [e for e in rows_of("EVENTS", story["id"]) if e["EVENT_TYPE"].startswith("queue_")]
+        assert [e["EVENT_TYPE"] for e in timeline][0] == "queue_entered" and timeline[-1]["DETAIL"] == "arrived"
+
     def test_no_free_text_leaves_the_app(self, story):
         exported = b"".join(sas_sync.to_csv(name, rows) for name, rows in sas_sync.build_tables().items())
         for private in (b"lives alone", b"on room air", b"Bay 2 is ready"):
@@ -318,7 +326,7 @@ class TestSync:
             finally:
                 await syncer.stop()
         first, second, third, status = run_async(go())
-        assert set(first) == {"CASES", "EVENTS", "ASSESSMENTS", "VITALS"}
+        assert set(first) == {"CASES", "EVENTS", "ASSESSMENTS", "QUEUE", "VITALS"}
         assert second == [] and third == ["CASES"]
         assert status["last_error"] is None and status["tables"]["ASC_CASES"]["rows"] >= 1
         assert "client_secret" not in json.dumps(status) and "s3cret" not in json.dumps(status)
@@ -386,7 +394,7 @@ class TestCsvAndLoader:
     def test_csv_command_writes_tables_and_schema(self, story, tmp_path):
         assert sas_sync.main(["sas_sync", "csv", str(tmp_path)]) == 0
         schema = json.loads((tmp_path / "schema.json").read_text())
-        assert set(schema["tables"]) == {"ASC_CASES", "ASC_EVENTS", "ASC_ASSESSMENTS", "ASC_VITALS"}
+        assert set(schema["tables"]) == {"ASC_CASES", "ASC_EVENTS", "ASC_ASSESSMENTS", "ASC_QUEUE", "ASC_VITALS"}
         for table, spec in schema["tables"].items():
             name = table[len("ASC_"):]
             header = (tmp_path / f"{table}.csv").read_text().splitlines()[0].split(",")
@@ -411,7 +419,7 @@ class TestCsvAndLoader:
         conn = SimpleNamespace(table=Table(), upload_file=lambda path, **params: calls.append(("upload", params)))
         load_csvs.load_tables(conn, str(tmp_path))
         actions = [name for name, _ in calls]
-        assert actions == ["upload", "alterTable", "dropTable", "promote", "save"] * 3
+        assert actions == ["upload", "alterTable", "dropTable", "promote", "save"] * 4  # every table but the empty one
         upload = calls[0][1]
         assert upload["casout"] == {"name": "ASC_CASES_STAGE", "caslib": "Public", "replace": True}
         assert upload["importoptions"]["vars"] == sas_sync.table_vars("CASES")
