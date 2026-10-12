@@ -57,6 +57,7 @@ export default function useCaseEvents(onEvent, enabled = true) {
           cache: 'no-store',
           signal: controller.signal,
         });
+        if (cancelled) { controller.abort(); return; }
         if (AUTH_FAILURES.includes(response.status)) {
           // Retrying with the same token can't succeed; the user has to log in again.
           setStatus('unauthorized');
@@ -70,6 +71,7 @@ export default function useCaseEvents(onEvent, enabled = true) {
         resetStaleTimer();
         for (;;) {
           const { value, done } = await reader.read();
+          if (cancelled) return;
           if (done) break;
           resetStaleTimer();
           buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
@@ -78,6 +80,12 @@ export default function useCaseEvents(onEvent, enabled = true) {
             const parsed = parseFrame(buffer.slice(0, boundary));
             buffer = buffer.slice(boundary + 2);
             if (!parsed) continue;
+            if (parsed.event === 'auth.expired') {
+              clearTimeout(staleTimer);
+              setStatus('unauthorized');
+              controller.abort();
+              return;
+            }
             if (parsed.event === 'ready') {
               failures = 0;
               setStatus('live');

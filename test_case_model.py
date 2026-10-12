@@ -1056,6 +1056,71 @@ class TestMigration:
             database.DB_PATH = previous
 
 
+class TestCaseAccessMatrix:
+    @pytest.mark.parametrize("identity", ["anonymous", "other_emt", "other_hospital", "unassigned", "wrong_role"])
+    def test_reads_and_mutations_do_not_cross_case_access_boundaries(self, monkeypatch, identity):
+        use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        path = f"/api/cases/{case['id']}"
+        north = hospital_id("NORTH")
+        headers = {}
+        role = None
+        if identity != "anonymous":
+            username = OTHER_EMT if identity == "other_emt" else OTHER_DOCTOR
+            user = query("SELECT id, username, role FROM users WHERE username = ?", (username,))[0]
+            if identity == "wrong_role":
+                user["role"] = "observer"
+            if identity == "unassigned":
+                run("UPDATE users SET hospital_id = NULL WHERE id = ?", (user["id"],))
+            headers = {"Authorization": f"Bearer {create_access_token(user)}"}
+            role = user["role"]
+        expected_read = 401 if identity == "anonymous" else 403 if identity == "wrong_role" else 404
+        tables = ("case_updates", "vital_readings", "risk_assessments", "case_findings", "extraction_runs",
+                  "case_acknowledgments", "messages", "transcript_segments", "queue_events")
+        # These are test-db rows only; any denied write must leave all case history intact.
+        def snapshot():
+            return {table: query(f"SELECT * FROM {table} WHERE case_id = ?", (case["id"],)) for table in tables}
+        try:
+            before, raw_case = snapshot(), query("SELECT * FROM cases WHERE id = ?", (case["id"],))
+            for suffix in ("", "/segments", "/updates", "/vitals", "/assessments", "/findings", "/extractions", "/messages"):
+                denied = client.get(path + suffix, headers=headers)
+                # Messages share the legacy router: unsupported roles reach its case-visibility
+                # check and get 404, while the other routes reject the role with 403 first.
+                expected = 404 if identity == "wrong_role" and suffix == "/messages" else expected_read
+                assert denied.status_code == expected, (identity, suffix, denied.text)
+                assert set(denied.json()) == {"error"}
+            for suffix, body, roles in (
+                ("/close", {}, ["emt"]), ("/arrive", {}, ["emt", "doctor"]),
+                ("/acknowledge", {"info_version": 1}, ["doctor"]),
+                ("/updates", {"kind": "note", "body": "should not be stored"}, ["emt"]),
+                ("/messages", {"body": "should not be stored"}, ["emt", "doctor"]),
+                ("/assessments/retry", {}, ["emt", "doctor"]),
+                ("/findings/retry", {}, ["emt", "doctor"]),
+                ("/segments/999/retry", {}, ["emt"]),
+                ("/segments/999/dismiss", {}, ["emt", "doctor"]),
+            ):
+                expected = 401 if identity == "anonymous" else 403 if role not in roles else 404
+                if identity == "wrong_role" and suffix == "/messages":
+                    expected = 404
+                denied = client.post(path + suffix, json=body, headers=headers)
+                assert denied.status_code == expected, (identity, suffix, denied.text)
+            denied = client.post(path + "/segments", headers=headers, data={"seq": "0", "client_id": "denied"},
+                                 files={"audio": ("clip.webm", b"synthetic", "audio/webm")})
+            assert denied.status_code == (401 if identity == "anonymous" else 403 if role != "emt" else 404)
+            assert snapshot() == before
+            assert query("SELECT * FROM cases WHERE id = ?", (case["id"],)) == raw_case
+        finally:
+            if identity == "unassigned":
+                run("UPDATE users SET hospital_id = ? WHERE id = ?", (north, user["id"]))
+
+    def test_owning_crew_and_receiving_hospital_can_read_the_case(self, monkeypatch):
+        use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        for username in (EMT, DOCTOR):
+            for suffix in ("", "/segments", "/updates", "/vitals", "/assessments", "/findings", "/extractions", "/messages"):
+                assert client.get(f"/api/cases/{case['id']}{suffix}", headers=auth(username)).status_code == 200
+
+
 class TestDatabasePath:
     def test_a_separate_database_can_be_named(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ASCLEPIUS_DB_PATH", str(tmp_path / "demo.db"))
