@@ -182,7 +182,10 @@ def init_database():
     CREATE TABLE IF NOT EXISTS hospitals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       code TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL
+      name TEXT NOT NULL,
+      arrival_highlight_minutes INTEGER NOT NULL DEFAULT 5,
+      settings_version INTEGER NOT NULL DEFAULT 1,
+      settings_updated_at TEXT
     );
 
     -- EMS cases: one per patient transport. Transcript segments, typed updates, vitals,
@@ -446,6 +449,11 @@ DEMO_HOSPITALS = [
 # Columns added to tables after they first shipped; ALTER TABLE adds them to older databases.
 ADDED_COLUMNS = {
     "users": [("hospital_id", "INTEGER REFERENCES hospitals (id)")],
+    "hospitals": [
+        ("arrival_highlight_minutes", "INTEGER NOT NULL DEFAULT 5"),
+        ("settings_version", "INTEGER NOT NULL DEFAULT 1"),
+        ("settings_updated_at", "TEXT"),
+    ],
     "cases": [
         ("destination_hospital_id", "INTEGER REFERENCES hospitals (id)"),
         ("ems_unit", "TEXT"),

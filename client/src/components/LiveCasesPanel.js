@@ -9,6 +9,7 @@ import useCaseFindings from '../hooks/useCaseFindings';
 import LiveTranscript from './LiveTranscript';
 import CaseOverview, { CategoryBadge, OperationalBadge, ProcessingBadge } from './CaseOverview';
 import CaseChat from './CaseChat';
+import HospitalWorkflowSettings, { ArrivalHighlight } from './HospitalWorkflowSettings';
 
 // An open case with no new audio for this long is shown as idle instead of LIVE.
 const IDLE_AFTER_MS = 2 * 60 * 1000;
@@ -77,7 +78,7 @@ const CaseStatusBadge = ({ liveCase, serverNow }) => {
   return <span className="px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full animate-pulse">LIVE</span>;
 };
 
-const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move }) => (
+const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, arrivalMinutes }) => (
   <li>
     <button
       onClick={() => onSelect(c.id)}
@@ -101,6 +102,7 @@ const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move
       </div>
       <div className="flex flex-wrap gap-1 mb-1">
         <CategoryBadge liveCase={c} />
+        <ArrivalHighlight liveCase={c} serverNow={serverNow} minutes={arrivalMinutes} />
         {c.status === 'active' && <OperationalBadge status={c.operational_status} />}
         {c.processing?.needs_review && <ProcessingBadge processing={c.processing} />}
       </div>
@@ -139,6 +141,14 @@ const LiveCasesPanel = () => {
   const { apply: applyFindings, reload: reloadFindings } = extracted;
   // The hospital whose inbound cases this user sees; null if the account has none.
   const [hospital, setHospital] = useState(undefined);
+  const applyHospital = useCallback((next) => setHospital((current) => {
+    if (current && next && current.id === next.id && current.settings_version > next.settings_version) return current;
+    return next;
+  }), []);
+  const fetchHospital = useCallback(() => {
+    axios.get('/api/hospitals/mine').then((response) => applyHospital(response.data))
+      .catch(() => toast.error('Could not load hospital settings'));
+  }, [applyHospital]);
   // Order, counts and reasons come from the server (GET /api/cases/queue); this view never re-sorts.
   const [queue, setQueue] = useState({ cases: [], counts: null, rule: '' });
   const queueTimer = useRef(null);
@@ -181,10 +191,8 @@ const LiveCasesPanel = () => {
   useEffect(() => () => clearTimeout(queueTimer.current), []);
 
   useEffect(() => {
-    axios.get('/api/hospitals/mine')
-      .then((response) => setHospital(response.data))
-      .catch((error) => console.error('Error loading hospital:', error));
-  }, []);
+    fetchHospital();
+  }, [fetchHospital]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 15000);
@@ -227,6 +235,7 @@ const LiveCasesPanel = () => {
   const handleEvent = useCallback((type, data) => {
     if (type === 'ready') {
       setClockOffsetMs(Date.parse(data.server_time) - Date.now());
+      fetchHospital();
       fetchCases();
       fetchQueue();
       if (selectedRef.current) {
@@ -234,6 +243,8 @@ const LiveCasesPanel = () => {
         reloadUpdates();
         reloadFindings();
       }
+    } else if (type === 'hospital.updated') {
+      applyHospital(data.hospital);
     } else if (type === 'update.created') {
       addCaseUpdate(data.update);
     } else if (type === 'findings.updated') {
@@ -254,7 +265,7 @@ const LiveCasesPanel = () => {
       }
     }
   }, [fetchCases, fetchQueue, refreshQueueSoon, fetchSegments, addCaseUpdate, reloadUpdates, applyFindings,
-    reloadFindings]);
+    reloadFindings, fetchHospital, applyHospital]);
 
   const connection = useCaseEvents(handleEvent);
   const byId = useMemo(() => new Map(cases.map((c) => [c.id, c])), [cases]);
@@ -304,6 +315,8 @@ const LiveCasesPanel = () => {
         <ConnectionBadge status={connection} />
       </div>
 
+      {hospital?.settings_version && <HospitalWorkflowSettings hospital={hospital} onChange={applyHospital} />}
+
       {queue.counts && (
         <div className="px-6 py-3 border-b border-gray-200 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
           <span><span className="font-bold text-gray-900">{queue.counts.inbound}</span> inbound</span>
@@ -325,7 +338,8 @@ const LiveCasesPanel = () => {
           <ul className="lg:col-span-2 border-r border-gray-200 max-h-[48rem] overflow-y-auto">
             {queued.map((c) => (
               <CaseListItem key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
-                            unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]} />
+                            unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
+                            arrivalMinutes={hospital?.arrival_highlight_minutes} />
             ))}
             {others.length > 0 && (
               <li className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-100">
