@@ -29,7 +29,7 @@ const inbound = (id, unit) => ({
   processing: { status: 'completed', needs_review: false, reasons: [] },
 });
 const queue = (second, units) => ({
-  as_of: at(second), rule_version: 'draft-2', rule: 'r', counts: { inbound: 2, needs_review: 0, unacknowledged: 0, prepare_now: 0 },
+  as_of: at(second), rule_version: 'draft-3', rule: 'r', counts: { inbound: 2, needs_review: 0, unacknowledged: 0, prepare_now: 0 },
   cases: units.map(([id, unit], index) => ({ ...inbound(id, unit), queue_position: index + 1, queue_reasons: ['Can wait'], vital_changes: [] })),
 });
 
