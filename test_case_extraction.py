@@ -14,7 +14,8 @@ import case_extraction
 import database
 from database import init_database, insert_sample_data, query, run
 from middleware.auth import create_access_token
-from routes import cases, recordings
+import openai_config
+from routes import cases
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -38,7 +39,7 @@ def temp_database(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch):
-    monkeypatch.setattr(recordings, "openai_client", None)
+    monkeypatch.setattr(openai_config, "openai_client", None)
     monkeypatch.setattr(case_assessment, "SETTLE_SECONDS", 0)
 
     async def fake_score(inputs):

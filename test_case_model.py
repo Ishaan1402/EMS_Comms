@@ -16,6 +16,8 @@ import case_assessment
 import database
 from database import init_database, insert_sample_data, query, run
 from middleware.auth import create_access_token
+import openai_config
+import thread_pools
 from routes import cases, recordings
 
 client = TestClient(app, raise_server_exceptions=False)
@@ -38,7 +40,7 @@ def temp_database(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch, tmp_path):
-    monkeypatch.setattr(recordings, "openai_client", None)
+    monkeypatch.setattr(openai_config, "openai_client", None)
     monkeypatch.setattr(cases, "SEGMENT_DIR", tmp_path / "segments")
     monkeypatch.setattr(cases, "RETRY_DELAY_SECONDS", 0)
     monkeypatch.setattr(case_assessment, "SETTLE_SECONDS", 0)
@@ -310,7 +312,7 @@ class TestAssessments:
         assert assessment["meaningful_change"] == "No earlier report"
         assert assessment["summary"] == "Adult short of breath, SpO2 falling."
         assert assessment["based_on_version"] == 1 and assessment["baseline_version"] is None
-        assert assessment["scorer_version"] == f"{recordings.SCORING_MODEL}/awareness_v3"
+        assert assessment["scorer_version"] == f"{openai_config.SCORING_MODEL}/awareness_v3"
         assert (assessment["input_tokens"], assessment["output_tokens"], assessment["latency_ms"]) == (1200, 300, 1500)
         assert assessment["cost_usd"] == pytest.approx((1200 * 0.10 + 300 * 0.50) / 1_000_000)
         assert after["processing"]["status"] == "completed"
@@ -658,9 +660,9 @@ class TestAuditFixes:
             audio.unlink()
 
     def test_scoring_calls_finish_before_they_are_given_up_on(self):
-        attempts = recordings.OPENAI_MAX_RETRIES + 1
-        assert attempts * recordings.SCORING_REQUEST_TIMEOUT_SECONDS < case_assessment.SCORING_TIMEOUT_SECONDS
-        assert case_assessment.assessment_executor is not recordings.slow_executor
+        attempts = openai_config.OPENAI_MAX_RETRIES + 1
+        assert attempts * openai_config.SCORING_REQUEST_TIMEOUT_SECONDS < case_assessment.SCORING_TIMEOUT_SECONDS
+        assert case_assessment.assessment_executor is not thread_pools.slow_executor
 
     def test_server_timestamps_never_repeat(self):
         stamps = [database.utc_now_iso() for _ in range(2000)]
@@ -692,7 +694,7 @@ class TestScorerRequest:
             return SimpleNamespace(
                 choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(SCORED), refusal=None))],
                 usage=SimpleNamespace(prompt_tokens=900, completion_tokens=120))
-        monkeypatch.setattr(recordings, "openai_client",
+        monkeypatch.setattr(openai_config, "openai_client",
                             SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
         inputs = {"input": {"case_id": "case-1", "current_transcript": "x"}}
         result, usage = asyncio.run(case_assessment.score(inputs))
@@ -702,14 +704,14 @@ class TestScorerRequest:
         assert json.loads(sent["messages"][1]["content"]) == inputs["input"]
         schema = sent["response_format"]["json_schema"]
         assert schema["strict"] is True and schema["schema"] == case_assessment.OUTPUT_SCHEMA
-        assert sent["timeout"] == recordings.SCORING_REQUEST_TIMEOUT_SECONDS
+        assert sent["timeout"] == openai_config.SCORING_REQUEST_TIMEOUT_SECONDS
 
     def test_refusal_fails_the_assessment(self, monkeypatch):
         def create(**kwargs):
             return SimpleNamespace(
                 choices=[SimpleNamespace(message=SimpleNamespace(content=None, refusal="no"))],
                 usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1))
-        monkeypatch.setattr(recordings, "openai_client",
+        monkeypatch.setattr(openai_config, "openai_client",
                             SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
         after = get_case(start_case()["id"])
         assert after["processing"]["reasons"] == ["Assessment failed: the AI declined to assess this case"]
@@ -834,20 +836,20 @@ class TestScoringRequest:
         def create(**kwargs):
             sent.update(kwargs)
             return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"risk_score": 3}'))])
-        monkeypatch.setattr(recordings, "openai_client",
+        monkeypatch.setattr(openai_config, "openai_client",
                             SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
         return sent
 
     def test_request_has_a_timeout_and_reasoning_effort(self, monkeypatch):
         sent = self.capture(monkeypatch)
         asyncio.run(recordings.analyze_with_llm("transcript", "info"))
-        assert sent["model"] == recordings.SCORING_MODEL
-        assert sent["timeout"] == recordings.SCORING_REQUEST_TIMEOUT_SECONDS
+        assert sent["model"] == openai_config.SCORING_MODEL
+        assert sent["timeout"] == openai_config.SCORING_REQUEST_TIMEOUT_SECONDS
         assert sent["extra_body"]["reasoning_effort"] == "none"
 
     def test_blank_reasoning_effort_is_not_sent(self, monkeypatch):
         sent = self.capture(monkeypatch)
-        monkeypatch.setattr(recordings, "SCORING_REASONING_EFFORT", "")
+        monkeypatch.setattr(openai_config, "SCORING_REASONING_EFFORT", "")
         asyncio.run(recordings.analyze_with_llm("transcript", "info"))
         assert "reasoning_effort" not in sent["extra_body"]
 
@@ -1134,5 +1136,5 @@ class TestBuildInfo:
         assert client.get("/api/version").status_code == 401
         info = client.get("/api/version", headers=auth(DOCTOR)).json()
         assert info["scorer_version"] == case_assessment.scorer_version()
-        assert info["queue_rule_version"] and info["transcription_model"] == recordings.TRANSCRIPTION_MODEL
+        assert info["queue_rule_version"] and info["transcription_model"] == openai_config.TRANSCRIPTION_MODEL
         assert {"git_sha", "git_dirty", "client_build_sha256", "extractor_version", "server_started_at"} <= set(info)

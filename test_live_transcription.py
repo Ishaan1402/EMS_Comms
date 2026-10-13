@@ -19,7 +19,8 @@ from database import init_database, insert_sample_data, query
 from middleware.auth import create_access_token
 from realtime import EventBroker
 import case_assessment
-from routes import cases, recordings
+import openai_config
+from routes import cases
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -36,7 +37,7 @@ def temp_database(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch, tmp_path):
-    monkeypatch.setattr(recordings, "openai_client", None)
+    monkeypatch.setattr(openai_config, "openai_client", None)
     monkeypatch.setattr(cases, "SEGMENT_DIR", tmp_path / "segments")
     monkeypatch.setattr(cases, "RETRY_DELAY_SECONDS", 0)
     monkeypatch.setattr(case_assessment, "SETTLE_SECONDS", 0)

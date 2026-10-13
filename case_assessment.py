@@ -28,7 +28,7 @@ from typing import Callable, Optional
 import openai
 
 from database import get_db, query, run, utc_now_iso
-from routes import recordings
+import openai_config
 
 PROMPT_VERSION = "awareness_v3"
 PROMPT = (Path(__file__).parent / "evals" / "prompts" / f"{PROMPT_VERSION}.txt").read_text(encoding="utf-8")
@@ -59,7 +59,7 @@ UNREADABLE_ERROR = "the AI's answer didn't follow the expected format"
 # here gets no cost estimate rather than a wrong one.
 PRICES_PER_MILLION = {"gpt-6-luna": (0.10, 0.50)}
 
-# Longer than the request timeout times its attempts (recordings.SCORING_REQUEST_TIMEOUT_SECONDS,
+# Longer than the request timeout times its attempts (openai_config.SCORING_REQUEST_TIMEOUT_SECONDS,
 # OPENAI_MAX_RETRIES), so the worker thread is free again by the time a call is given up on.
 SCORING_TIMEOUT_SECONDS = 90
 # Own pool, so assessments never queue behind the older recording flow's calls.
@@ -82,7 +82,7 @@ ASSESSMENT_COLUMNS = (
 
 def scorer_version() -> str:
     """Model and prompt that produced an assessment, stored with it."""
-    return f"{recordings.SCORING_MODEL}/{PROMPT_VERSION}"
+    return f"{openai_config.SCORING_MODEL}/{PROMPT_VERSION}"
 
 
 # Vital signs an EMT can enter: name -> (label, unit, min, max).
@@ -234,22 +234,22 @@ async def score(inputs: dict):
     Call the model with the evaluation prompt and schema. Returns (parsed output or None if
     unreadable, usage). Raises on any failure; never fills in defaults.
     """
-    client = recordings.openai_client
+    client = openai_config.openai_client
     if not client:
         raise ScoringUnavailable()
     started = time.monotonic()
     response = await asyncio.get_running_loop().run_in_executor(
         assessment_executor,
         lambda: client.chat.completions.create(
-            model=recordings.SCORING_MODEL,
+            model=openai_config.SCORING_MODEL,
             messages=[
                 {"role": "system", "content": PROMPT},
                 {"role": "user", "content": json.dumps(inputs["input"], ensure_ascii=False)},
             ],
             response_format={"type": "json_schema",
                              "json_schema": {"name": "ems_output", "strict": True, "schema": OUTPUT_SCHEMA}},
-            extra_body=recordings.scoring_extra_body(),
-            timeout=recordings.SCORING_REQUEST_TIMEOUT_SECONDS,
+            extra_body=openai_config.scoring_extra_body(),
+            timeout=openai_config.SCORING_REQUEST_TIMEOUT_SECONDS,
         ),
     )
     usage = {
@@ -441,7 +441,7 @@ class AssessmentRunner(CaseRunner):
             (fields["status"], fields.get("preparation_category"), fields.get("meaningful_change"),
              fields.get("summary"), fields.get("change_explanation"), fields.get("missing_information"),
              fields.get("review_reason"), error, usage.get("input_tokens"), usage.get("output_tokens"),
-             usage.get("latency_ms"), estimate_cost(recordings.SCORING_MODEL, usage), now, now, assessment_id),
+             usage.get("latency_ms"), estimate_cost(openai_config.SCORING_MODEL, usage), now, now, assessment_id),
         )
         self.on_change(case_id)
 

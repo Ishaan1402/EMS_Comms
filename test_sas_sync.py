@@ -21,7 +21,8 @@ import database
 import sas_sync
 from database import init_database, insert_sample_data, query, run
 from middleware.auth import create_access_token
-from routes import cases, recordings
+import openai_config
+from routes import cases
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -63,7 +64,7 @@ def fakes(temp_database, tmp_path_factory):
                 "treatments": []}, {"input_tokens": 300, "output_tokens": 80, "latency_ms": 700}
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(recordings, "openai_client", None)
+        patch.setattr(openai_config, "openai_client", None)
         patch.setattr(cases, "SEGMENT_DIR", tmp_path_factory.mktemp("segments"))
         patch.setattr(cases, "RETRY_DELAY_SECONDS", 0)
         patch.setattr(case_assessment, "SETTLE_SECONDS", 0)

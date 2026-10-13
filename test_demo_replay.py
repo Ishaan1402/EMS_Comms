@@ -19,7 +19,8 @@ import case_extraction
 import database
 from database import init_database, insert_sample_data, query
 from demo import pilot_scenario, replay
-from routes import cases, recordings
+import openai_config
+from routes import cases
 
 SCENARIO_PATH = Path(replay.DEFAULT_SCENARIO)
 PILOT_CASES = Path(__file__).parent / "docs" / "clinician-annotation" / "pilot_cases.json"
@@ -97,7 +98,7 @@ def audio_dir(tmp_path, scenario):
 
 @pytest.fixture(autouse=True)
 def fakes(monkeypatch, tmp_path):
-    monkeypatch.setattr(recordings, "openai_client", None)
+    monkeypatch.setattr(openai_config, "openai_client", None)
     monkeypatch.setattr(cases, "SEGMENT_DIR", tmp_path / "segments")
     monkeypatch.setattr(cases, "transcribe_segment_sync", fake_whisper)
     monkeypatch.setattr(case_assessment, "score", fake_scorer)
