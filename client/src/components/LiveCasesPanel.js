@@ -10,6 +10,7 @@ import LiveTranscript from './LiveTranscript';
 import CaseOverview, { CategoryBadge, OperationalBadge, ProcessingBadge, ReportingBadge } from './CaseOverview';
 import CaseChat from './CaseChat';
 import HospitalWorkflowSettings, { ArrivalHighlight } from './HospitalWorkflowSettings';
+import { CrewAlertBadges, CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
 
 // An open case with no new audio for this long is shown as idle instead of LIVE.
 const IDLE_AFTER_MS = 2 * 60 * 1000;
@@ -100,6 +101,7 @@ const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move
           <CaseStatusBadge liveCase={c} serverNow={serverNow} />
         </div>
       </div>
+      <CrewAlertBadges liveCase={c} serverNow={serverNow} />
       <div className="flex flex-wrap gap-1 mb-1">
         <CategoryBadge liveCase={c} />
         <ReportingBadge liveCase={c} />
@@ -313,7 +315,10 @@ const LiveCasesPanel = () => {
             Inbound Cases{hospital ? ` — ${hospital.name}` : ''}
           </h2>
         </div>
-        <ConnectionBadge status={connection} />
+        <div className="flex items-center gap-4">
+          <CrewAlertSound cases={cases} />
+          <ConnectionBadge status={connection} />
+        </div>
       </div>
 
       {hospital?.settings_version && <HospitalWorkflowSettings hospital={hospital} onChange={applyHospital} />}
@@ -386,6 +391,8 @@ const LiveCasesPanel = () => {
                     )}
                   </div>
                 )}
+                <CrewAlertPanel liveCase={selected} serverNow={serverNow}
+                                onChanged={(c) => { setCases((list) => upsertNewer(list, c)); refreshQueueSoon(); }} />
                 <div className="mb-6">
                   <CaseOverview
                     liveCase={selected}

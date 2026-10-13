@@ -20,6 +20,7 @@ from routes import auth, messages, cases, sas
 from database import init_database, insert_sample_data, utc_now_iso
 import case_assessment
 import case_extraction
+from routes import alerts
 import case_queue
 import openai_config
 import sas_sync
@@ -160,6 +161,7 @@ app.include_router(cases.hospitals_router, prefix="/api/hospitals", tags=["hospi
 async def version(current_user: dict = Depends(require_role(["emt", "doctor"]))):
     """The running build (build_info), so a demo or evaluation run can record exactly what it ran against."""
     return BUILD_INFO or build_info()
+app.include_router(alerts.router, prefix="/api/cases", tags=["alerts"])
 app.include_router(sas.router, prefix="/api/sas", tags=["sas"])
 
 # Serve React app in production

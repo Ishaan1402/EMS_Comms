@@ -419,6 +419,36 @@ def init_database():
       FOREIGN KEY (segment_id) REFERENCES transcript_segments (id)
     );
 
+    -- Crew alerts (case_alerts.py): the crew's declared stroke, STEMI, trauma or sepsis alert and its
+    -- key time (last known well, symptom onset, time of injury; NULL when not stated). Append-only:
+    -- a call, a corrected key time and a cancellation are each a row. Never part of the AI's input.
+    CREATE TABLE IF NOT EXISTS case_alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      alert TEXT NOT NULL CHECK (alert IN ('stroke', 'stemi', 'trauma', 'sepsis')),
+      action TEXT NOT NULL CHECK (action IN ('called', 'cancelled')),
+      key_time TEXT,
+      author_id INTEGER NOT NULL,
+      client_id TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (case_id) REFERENCES cases (id),
+      FOREIGN KEY (author_id) REFERENCES users (id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_case_alerts_case ON case_alerts(case_id, id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_case_alerts_client_id ON case_alerts(case_id, client_id) WHERE client_id IS NOT NULL;
+
+    -- A hospital user acknowledging a case's crew alerts up to one change (case_alerts.id).
+    CREATE TABLE IF NOT EXISTS case_alert_acknowledgments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      through_alert_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      acknowledged_at TEXT NOT NULL,
+      FOREIGN KEY (case_id) REFERENCES cases (id),
+      FOREIGN KEY (through_alert_id) REFERENCES case_alerts (id),
+      FOREIGN KEY (user_id) REFERENCES users (id)
+    );
+
     """ + MESSAGES_TABLE.format(name="messages") + """;
 
     -- Create indexes for better performance
