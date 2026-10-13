@@ -984,6 +984,13 @@ class TestMigration:
         assert query("SELECT arrival_highlight_minutes, settings_version FROM hospitals WHERE code = 'GEN'")[0] == {
             "arrival_highlight_minutes": 5, "settings_version": 1}
 
+    def test_new_databases_have_no_tables_for_the_removed_recording_flow(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(database, "DB_PATH", tmp_path / "fresh.db")
+        init_database()
+        tables = {row["name"] for row in query("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        assert not tables & {"recordings", "notifications"}
+        assert {"cases", "messages", "case_reports", "case_alerts"} <= tables
+
     def test_database_from_before_cases_model_is_upgraded(self, tmp_path):
         old_db = tmp_path / "old.db"
         conn = sqlite3.connect(old_db)
