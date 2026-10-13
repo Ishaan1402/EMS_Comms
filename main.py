@@ -21,6 +21,7 @@ import case_assessment
 import case_extraction
 import case_queue
 import sas_sync
+from routes import fhir
 
 
 def build_info() -> dict:
@@ -171,6 +172,7 @@ async def version(current_user: dict = Depends(require_role(["emt", "doctor"])))
     """The running build (build_info), so a demo or evaluation run can record exactly what it ran against."""
     return BUILD_INFO or build_info()
 app.include_router(sas.router, prefix="/api/sas", tags=["sas"])
+app.include_router(fhir.router, prefix="/api/cases", tags=["fhir"])
 
 # Serve React app in production
 if os.getenv("NODE_ENV") == "production":
