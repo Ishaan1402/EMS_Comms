@@ -17,11 +17,13 @@ Every timestamp comes twice: *_AT is ISO-8601 UTC text, and *_DT is the same mom
 datetime (seconds since 1960-01-01, UTC) formatted DATETIME, so Visual Analytics can chart it.
 
 Configuration (.env): SAS_VIYA_URL, SAS_CLIENT_ID, SAS_CLIENT_SECRET (an OAuth client with the
-client_credentials grant), SAS_SYNC_ENABLED=1 to run in the server, and optionally
+client_credentials grant), or instead SAS_ACCESS_TOKEN (a token the SAS admins issued for that
+client), SAS_SYNC_ENABLED=1 to run in the server, and optionally
 SAS_CAS_SERVER (cas-shared-default), SAS_CASLIB (Public), SAS_TABLE_PREFIX (ASC_),
 SAS_SYNC_INTERVAL_SECONDS (10), SAS_SAVE_TABLES (1: also save to disk so tables survive a CAS restart).
 
-    python -m sas_sync check     # sign in and read the CAS server and caslibs; writes nothing
+    python -m sas_sync check     # sign in, read the CAS server and caslibs, open and close a
+                                 # CAS session and run one read-only action; writes no tables
     python -m sas_sync push      # push every table now
     python -m sas_sync csv DIR   # write the tables as CSV files + schema.json; load them as
                                  # yourself with sas/load_csvs.py (no app credentials needed)
@@ -61,6 +63,8 @@ class Settings:
     interval: float = 10.0
     enabled: bool = False
     save_tables: bool = True
+    # Issued by the SAS admins (Oct 2026, valid for the hackathon); used as is instead of signing in.
+    access_token: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -76,11 +80,12 @@ class Settings:
             interval=float(os.getenv("SAS_SYNC_INTERVAL_SECONDS", "10")),
             enabled=flag("SAS_SYNC_ENABLED", "0"),
             save_tables=flag("SAS_SAVE_TABLES", "1"),
+            access_token=os.getenv("SAS_ACCESS_TOKEN", "").strip(),
         )
 
     @property
     def configured(self) -> bool:
-        return bool(self.url and self.client_id and self.client_secret)
+        return bool(self.url and (self.access_token or (self.client_id and self.client_secret)))
 
 
 # --- Tables -------------------------------------------------------------------------------
@@ -398,6 +403,8 @@ class CasClient:
         await self._http.aclose()
 
     async def _headers(self) -> dict:
+        if self.settings.access_token:
+            return {"Authorization": f"Bearer {self.settings.access_token}", "Accept": "application/json"}
         if not self._token or time.monotonic() > self._token_expires:
             response = await self._http.post(
                 f"{self.settings.url}/SASLogon/oauth/token",
@@ -586,7 +593,7 @@ class SasSync:
             self._task = asyncio.get_running_loop().create_task(self.run_forever())
             print(f"🔄 SAS sync on: every {self.settings.interval:g}s to {self.settings.caslib} on {self.settings.url}")
         elif self.settings.enabled:
-            print("⚠️  SAS_SYNC_ENABLED is set but SAS_VIYA_URL / SAS_CLIENT_ID / SAS_CLIENT_SECRET are missing")
+            print("⚠️  SAS_SYNC_ENABLED is set but SAS_VIYA_URL and the client ID/secret (or SAS_ACCESS_TOKEN) are missing")
 
     async def stop(self) -> None:
         if self._task:
@@ -630,6 +637,20 @@ async def check(settings: Settings) -> list:
         names = [item["name"] for item in caslibs.get("items", [])]
         found = settings.caslib in names
         lines.append(f"caslib {settings.caslib}: {'found' if found else 'NOT FOUND'} (visible: {', '.join(names)})")
+        # Where this client has been refused (HTTP 403): opening a session, then any action in it.
+        # serverStatus only reads; nothing here creates or changes a table.
+        try:
+            session = await client.open_session()
+        except SasError as error:
+            lines.append(f"CAS session: {error}")
+            return lines
+        for step, call in (("CAS action", client.action(session, "builtins.serverStatus", {})),
+                           ("CAS session close", client.close_session(session))):
+            try:
+                await call
+                lines.append(f"{step}: ok")
+            except SasError as error:
+                lines.append(f"{step}: {error}")
         return lines
     finally:
         await client.close()
@@ -652,7 +673,7 @@ def main(argv: list) -> int:
         print(__doc__)
         return 2
     if not settings.configured:
-        print("Set SAS_VIYA_URL, SAS_CLIENT_ID and SAS_CLIENT_SECRET in .env")
+        print("Set SAS_VIYA_URL and SAS_CLIENT_ID + SAS_CLIENT_SECRET (or SAS_ACCESS_TOKEN) in .env")
         return 1
     try:
         if command == "check":
