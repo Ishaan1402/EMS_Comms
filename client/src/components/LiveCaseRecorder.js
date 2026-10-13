@@ -11,6 +11,7 @@ import useCaseFindings from '../hooks/useCaseFindings';
 import LiveTranscript from './LiveTranscript';
 import CaseOverview from './CaseOverview';
 import CaseUpdateForm from './CaseUpdateForm';
+import CrewAlerts from './CrewAlerts';
 import CaseChat from './CaseChat';
 
 const SEGMENT_MS = 8000;
@@ -407,6 +408,7 @@ const LiveCaseRecorder = () => {
           )}
         </div>
       )}
+      {isOpen && <CrewAlerts liveCase={activeCase} />}
 
       {activeCase && (
         <div className="mt-4 space-y-4">

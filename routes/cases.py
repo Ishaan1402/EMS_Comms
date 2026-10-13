@@ -11,6 +11,7 @@ import math
 import time
 import uuid
 import openai
+import case_alerts
 import case_assessment
 import case_extraction
 import case_queue
@@ -262,6 +263,10 @@ def describe_cases(rows: list) -> list:
             or assessment["input_eta_at"] != case["eta_at"])
         case["processing"] = processing_summary(case, latest.get(case["id"]))
         described.append(case)
+    # The crew's declared alerts (case_alerts.py), with whether the hospital has acknowledged them.
+    crew_alerts = case_alerts.summaries(ids)
+    for case in described:
+        case["crew_alerts"] = crew_alerts[case["id"]]
     return described
 
 

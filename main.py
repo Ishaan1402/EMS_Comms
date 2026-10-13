@@ -16,6 +16,7 @@ load_dotenv()
 
 from middleware.auth import APIError, require_role
 from routes import auth, recordings, doctors, notifications, messages, cases, sas
+from routes import alerts
 from database import init_database, insert_sample_data, utc_now_iso
 import case_assessment
 import case_extraction
@@ -164,6 +165,7 @@ app.include_router(notifications.router, prefix="/api/notifications", tags=["not
 app.include_router(cases.router, prefix="/api/cases", tags=["cases"])
 app.include_router(messages.case_router, prefix="/api/cases", tags=["messages"])
 app.include_router(cases.hospitals_router, prefix="/api/hospitals", tags=["hospitals"])
+app.include_router(alerts.router, prefix="/api/cases", tags=["alerts"])
 
 
 @app.get("/api/version")
