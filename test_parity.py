@@ -13,7 +13,6 @@ from main import app
 import database
 from database import query, run, get_db, init_database, insert_sample_data
 import openai_config
-from routes import recordings, notifications
 
 REAL_DB_PATH = Path(database.__file__).parent / "asclepius.db"
 
@@ -34,27 +33,11 @@ def temp_database(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def no_external_services(monkeypatch, tmp_path):
-    """Run with no OpenAI/Twilio/SendGrid clients and write uploads to a temp dir."""
+    """Run with no OpenAI client, and keep any clip audio in a temp dir."""
+    from routes import cases
     monkeypatch.setattr(openai_config, "openai_client", None)
-    monkeypatch.setattr(notifications, "twilio_client", None)
-    monkeypatch.setattr(notifications, "sendgrid_client", None)
-    monkeypatch.setattr(recordings, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(cases, "SEGMENT_DIR", tmp_path / "segments")
 
-
-def create_recording(emt_username="emt.wilson"):
-    emt_id = query('SELECT id FROM users WHERE username = ?', (emt_username,))[0]["id"]
-    return run(
-        'INSERT INTO recordings (emt_id, patient_info, audio_file_path) VALUES (?, ?, ?)',
-        (emt_id, "Test patient", "uploads/fake.wav")
-    )["id"]
-
-
-def get_recording_row(recording_id):
-    return query('SELECT * FROM recordings WHERE id = ?', (recording_id,))[0]
-
-
-def count_notifications(recording_id):
-    return query('SELECT COUNT(*) AS n FROM notifications WHERE recording_id = ?', (recording_id,))[0]["n"]
 
 # Test data
 TEST_EMT = {
@@ -190,63 +173,24 @@ class TestRoleBasedAccess:
         })
         self.doctor_token = doctor_response.json()["token"]
     
-    def test_emt_cannot_access_doctor_notifications(self):
-        """GET /api/doctors/notifications - EMT should get 403."""
+    def test_emt_cannot_access_the_hospital_queue(self):
+        """GET /api/cases/queue - EMT should get 403."""
         response = client.get(
-            "/api/doctors/notifications",
+            "/api/cases/queue",
             headers={"Authorization": f"Bearer {self.emt_token}"}
         )
         assert response.status_code == 403
         data = response.json()
         assert data["error"] == "Access denied. Insufficient permissions."
     
-    def test_doctor_can_access_notifications(self):
-        """GET /api/doctors/notifications - Doctor should succeed."""
+    def test_doctor_can_access_the_hospital_queue(self):
+        """GET /api/cases/queue - Doctor should succeed."""
         response = client.get(
-            "/api/doctors/notifications",
+            "/api/cases/queue",
             headers={"Authorization": f"Bearer {self.doctor_token}"}
         )
         assert response.status_code == 200
-        assert isinstance(response.json(), list)
-
-
-class TestDoctorsEndpoints:
-    """Test doctors endpoints."""
-    
-    def test_get_available_doctors_no_auth(self):
-        """GET /api/doctors/available - Public endpoint, no auth required."""
-        response = client.get("/api/doctors/available")
-        assert response.status_code == 200
-        doctors = response.json()
-        assert isinstance(doctors, list)
-        # Should have dr.smith and dr.jones
-        assert len(doctors) >= 2
-        # Check structure
-        if len(doctors) > 0:
-            doctor = doctors[0]
-            assert "id" in doctor
-            assert "first_name" in doctor
-            assert "last_name" in doctor
-            assert "specialty" in doctor
-            assert "phone" in doctor
-            assert "email" in doctor
-    
-    def test_notifications_sorting(self):
-        """GET /api/doctors/notifications - Test sorting options."""
-        doctor_response = client.post("/api/auth/login", json={
-            "username": "dr.smith",
-            "password": "password123"
-        })
-        token = doctor_response.json()["token"]
-        
-        # Test different sort options
-        for sort_by in ["newest", "oldest", "priority"]:
-            response = client.get(
-                f"/api/doctors/notifications?sortBy={sort_by}",
-                headers={"Authorization": f"Bearer {token}"}
-            )
-            assert response.status_code == 200
-            assert isinstance(response.json(), list)
+        assert isinstance(response.json()["cases"], list)
 
 
 class TestDataIntegrity:
@@ -271,29 +215,19 @@ class TestDataIntegrity:
         assert profile["is_available"] in [0, 1]
         assert not isinstance(profile["is_available"], bool)
     
-    def test_risk_score_range(self):
-        """Verify risk_score is 0-10, not 0-100."""
-        recording_id = create_recording()
-        for ok in (0, 10):
-            run('UPDATE recordings SET risk_score = ? WHERE id = ?', (ok, recording_id))
-        for bad in (-1, 11, 85):
-            with pytest.raises(sqlite3.IntegrityError):
-                run('UPDATE recordings SET risk_score = ? WHERE id = ?', (bad, recording_id))
-        assert get_recording_row(recording_id)["risk_score"] == 10
-    
-    def test_priority_level_range(self):
-        """Verify priority_level is 1-5."""
-        recording_id = create_recording()
-        for ok in (1, 5):
-            run('UPDATE recordings SET priority_level = ? WHERE id = ?', (ok, recording_id))
-        for bad in (0, 6):
-            with pytest.raises(sqlite3.IntegrityError):
-                run('UPDATE recordings SET priority_level = ? WHERE id = ?', (bad, recording_id))
-        assert get_recording_row(recording_id)["priority_level"] == 5
-
-
 class TestErrorMessages:
     """Test exact error messages."""
+
+    def test_removed_old_routes_are_gone(self):
+        """The old record-and-upload, doctor and notification routes no longer exist."""
+        token = client.post("/api/auth/login", json={"username": "emt.wilson", "password": "password123"}).json()["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        for method, path in [("GET", "/api/recordings/my-recordings"), ("POST", "/api/recordings/upload"),
+                             ("GET", "/api/recordings/1"), ("GET", "/api/recordings/1/messages"),
+                             ("GET", "/api/doctors/available"), ("GET", "/api/doctors/notifications"),
+                             ("PATCH", "/api/doctors/availability"), ("POST", "/api/notifications/send"),
+                             ("POST", "/api/notifications/test"), ("GET", "/api/notifications/status/1")]:
+            assert client.request(method, path, headers=headers).status_code == 404, (method, path)
     
     def test_missing_token_message(self):
         """Verify exact error message for missing token."""
@@ -321,7 +255,7 @@ class TestErrorMessages:
         token = emt_response.json()["token"]
         
         response = client.get(
-            "/api/doctors/notifications",
+            "/api/cases/queue",
             headers={"Authorization": f"Bearer {token}"}
         )
         assert response.status_code == 403
@@ -419,217 +353,14 @@ class TestExpressContractParity:
         assert response.status_code == 500
         assert response.json() == {"error": "Something went wrong!"}
     
-    # Recordings tests
-
-    def _upload(self, content_type, content=b"RIFF fake wav", data=None):
-        return client.post(
-            "/api/recordings/upload",
-            headers={"Authorization": f"Bearer {self.emt_token}"},
-            files={"audio": ("clip.wav", content, content_type)},
-            data=data or {}
-        )
-    
-    def test_missing_patient_info_allows_null(self, tmp_path):
-        """Missing patient_info should result in 201 with NULL."""
-        response = self._upload("audio/wav")
-        assert response.status_code == 201
-        recording = response.json()["recording"]
-        assert list(recording.keys()) == ["id", "emt_id", "audio_file_path"]
-        assert Path(recording["audio_file_path"]).read_bytes() == b"RIFF fake wav"
-        assert Path(recording["audio_file_path"]).parent == tmp_path
-        row = get_recording_row(recording["id"])
-        assert row["patient_info"] is None
-        # Background processing ran with no OpenAI key: an outage is an error, not a review.
-        assert row["status"] == "error"
-        assert count_notifications(recording["id"]) == 0
-    
-    def test_audio_mpeg_rejected(self):
-        """MIME audio/mpeg should be rejected."""
-        response = self._upload("audio/mpeg")
-        assert response.status_code == 500
-        assert response.json() == {"error": "Something went wrong!"}
-    
-    def test_bad_mime_returns_500(self):
-        """Bad MIME type should return 500 not 400."""
-        response = self._upload("text/plain")
-        assert response.status_code == 500
-        assert response.json() == {"error": "Something went wrong!"}
-    
-    def test_file_too_large_returns_500(self):
-        """File >50MB should return 500 not 400."""
-        response = self._upload("audio/wav", content=b"\0" * (50 * 1024 * 1024 + 1))
-        assert response.status_code == 500
-        assert response.json() == {"error": "Something went wrong!"}
-    
-    def test_missing_audio_file_returns_500(self):
-        """Missing audio file should return 500 not 422."""
-        # FastAPI will catch missing required File(...) and our global handler maps to 500
-        response = client.post(
-            "/api/recordings/upload",
-            headers={"Authorization": f"Bearer {self.emt_token}"},
-            data={"patient_info": "Test"}  # Missing audio file
-        )
-        # With our RequestValidationError handler, this should be 500
-        assert response.status_code == 500
-        data = response.json()
-        assert "error" in data
-    
-    # Doctors tests
-    
-    def test_patch_availability_empty_body_defaults_falsy(self):
-        """PATCH /availability with empty body should set is_available=0."""
-        response = client.patch(
-            "/api/doctors/availability",
-            headers={"Authorization": f"Bearer {self.doctor_token}"},
-            json={}
-        )
-        assert response.status_code == 200
-        # Verify is_available was set to 0
-        profile = client.get(
-            "/api/auth/profile",
-            headers={"Authorization": f"Bearer {self.doctor_token}"}
-        ).json()
-        assert profile["is_available"] == 0
-    
-    def test_string_false_is_truthy(self):
-        """is_available:'false' string should be truthy -> 1."""
-        response = client.patch(
-            "/api/doctors/availability",
-            headers={"Authorization": f"Bearer {self.doctor_token}"},
-            json={"is_available": "false"}
-        )
-        assert response.status_code == 200
-        # Verify is_available was set to 1 (string "false" is truthy)
-        profile = client.get(
-            "/api/auth/profile",
-            headers={"Authorization": f"Bearer {self.doctor_token}"}
-        ).json()
-        assert profile["is_available"] == 1
-    
-    def test_non_numeric_id_doesnt_422(self):
-        """Non-numeric :id should not return 422."""
-        response = client.get(
-            "/api/doctors/recording/abc",
-            headers={"Authorization": f"Bearer {self.doctor_token}"}
-        )
-        # Should return 404 or 200, not 422
-        assert response.status_code in [200, 404]
-    
-    def test_missing_response_field_allowed(self):
-        """POST respond missing response field should be allowed."""
-        response = client.post(
-            "/api/doctors/recordings/999/respond",
-            headers={"Authorization": f"Bearer {self.doctor_token}"},
-            json={}  # Missing response field
-        )
-        # Should return 200, not 422
-        assert response.status_code == 200
-    
-    # Notifications tests
-    
-    def test_missing_send_body_not_422(self):
-        """Missing notification send body should not return 422."""
-        response = client.post(
-            "/api/notifications/send",
-            headers={"Authorization": f"Bearer {self.emt_token}"},
-            json={}
-        )
-        # Should return 404 or 500, not 422
-        assert response.status_code in [404, 500]
-    
     def test_validation_error_returns_500(self):
         """RequestValidationError should return 500 not 422."""
-        response = client.post(
-            "/api/notifications/test",
-            headers={"Authorization": f"Bearer {self.emt_token}"},
-            json=["not", "an", "object"]
+        response = client.get(
+            "/api/sas/status?check=maybe",
+            headers={"Authorization": f"Bearer {self.doctor_token}"},
         )
         assert response.status_code == 500
         assert response.json() == {"error": "Something went wrong!"}
-
-
-class TestRecordingProcessing:
-    """Background processing: happy path, model failure, and atomic doctor fan-out."""
-
-    def _set_doctors_available(self):
-        run("UPDATE users SET is_available = 1 WHERE role = 'doctor'")
-        return [row["id"] for row in query("SELECT id FROM users WHERE role = 'doctor' ORDER BY id")]
-
-    def _process(self, monkeypatch, analysis=None):
-        monkeypatch.setattr(recordings, "transcribe_audio_sync", lambda path: "patient fell, broken arm")
-        if analysis is not None:
-            async def fake_analyze(transcription, patient_info=""):
-                return analysis
-            monkeypatch.setattr(recordings, "analyze_with_llm", fake_analyze)
-        recording_id = create_recording()
-        asyncio.run(recordings.process_recording(recording_id, "uploads/fake.wav"))
-        return recording_id
-
-    def test_successful_analysis_completes_and_notifies(self, monkeypatch):
-        doctor_ids = self._set_doctors_available()
-        recording_id = self._process(monkeypatch, analysis={
-            "chief_complaint": "Broken arm",
-            "risk_score": 6,
-            "priority_level": 3,
-            "urgency_level": "urgent",
-            "medical_summary": "Stable patient with a closed arm fracture",
-        })
-        row = get_recording_row(recording_id)
-        assert row["status"] == "notified"
-        assert row["transcription"] == "patient fell, broken arm"
-        assert row["llm_summary"] == "Stable patient with a closed arm fracture"
-        assert row["risk_score"] == 6
-        assert row["chief_complaint"] == "Broken arm"
-        # "urgent" is not an allowed urgency_level, so the default stays.
-        assert row["urgency_level"] == "medium"
-        assert count_notifications(recording_id) == len(doctor_ids)
-
-    def test_llm_exception_marks_error_and_does_not_notify(self, monkeypatch):
-        self._set_doctors_available()
-
-        def outage(**kwargs):
-            raise RuntimeError("model outage")
-        monkeypatch.setattr(openai_config, "openai_client", SimpleNamespace(
-            chat=SimpleNamespace(completions=SimpleNamespace(create=outage))
-        ))
-        recording_id = self._process(monkeypatch)
-        row = get_recording_row(recording_id)
-        assert row["status"] == "error"
-        assert row["llm_summary"] is None
-        assert row["chief_complaint"] is None
-        assert count_notifications(recording_id) == 0
-
-    def test_missing_openai_key_marks_error_and_does_not_notify(self, monkeypatch):
-        self._set_doctors_available()
-        recording_id = self._process(monkeypatch)
-        row = get_recording_row(recording_id)
-        assert row["status"] == "error"
-        assert row["llm_summary"] is None
-        assert count_notifications(recording_id) == 0
-
-    def test_notify_doctors_is_all_or_nothing(self):
-        doctor_ids = self._set_doctors_available()
-        assert len(doctor_ids) >= 2
-        recording_id = create_recording()
-        run("UPDATE recordings SET status = 'completed' WHERE id = ?", (recording_id,))
-        with get_db() as conn:
-            conn.execute(
-                f"""CREATE TRIGGER fail_last_fanout BEFORE INSERT ON notifications
-                    WHEN NEW.doctor_id = {doctor_ids[-1]}
-                    BEGIN SELECT RAISE(ABORT, 'fan-out failed'); END"""
-            )
-        try:
-            with pytest.raises(sqlite3.IntegrityError):
-                asyncio.run(recordings.notify_doctors(recording_id, "summary"))
-        finally:
-            with get_db() as conn:
-                conn.execute("DROP TRIGGER fail_last_fanout")
-        assert count_notifications(recording_id) == 0
-        assert get_recording_row(recording_id)["status"] == "completed"
-
-        asyncio.run(recordings.notify_doctors(recording_id, "summary"))
-        assert count_notifications(recording_id) == len(doctor_ids)
-        assert get_recording_row(recording_id)["status"] == "notified"
 
 
 class TestSecurityFixes:
@@ -699,6 +430,10 @@ class TestSecurityFixes:
             assert response.status_code == 200
             assert response.text == "public asset"
             
+            # An unknown API path is a 404, not index.html (e.g. the removed old routes)
+            for path in ("/api/recordings/my-recordings", "/api/doctors/available", "/api/notifications/status/1"):
+                assert test_client.get(path).status_code == 404, path
+
             # Test 2: Parent traversal blocked
             response = test_client.get("/../build-backup/secret.txt")
             assert response.status_code == 200  # Returns index.html, not secret
@@ -737,84 +472,19 @@ class TestSecurityFixes:
             importlib.reload(main)
     
     def test_mime_with_codec_parameter(self):
-        """Issue 2: Accept MIME types with parameters like audio/webm;codecs=opus."""
+        """Issue 2: Accept MIME types with parameters like audio/webm;codecs=opus (live clip upload)."""
         import io
-        
-        # Create a simple audio file
-        file_content = b"fake webm audio content"
-        files = {'audio': ('test.webm', io.BytesIO(file_content), 'audio/webm;codecs=opus')}
-        data = {'patient_info': 'test'}
-        
+        hospital = query("SELECT id FROM hospitals WHERE code = 'GEN'")[0]["id"]
+        run("UPDATE cases SET status = 'closed' WHERE emt_id = (SELECT id FROM users WHERE username = 'emt.wilson')")
+        headers = {"Authorization": f"Bearer {self.emt_token}"}
+        case = client.post("/api/cases", headers=headers, json={"destination_hospital_id": hospital}).json()
         response = client.post(
-            "/api/recordings/upload",
-            headers={"Authorization": f"Bearer {self.emt_token}"},
-            files=files,
-            data=data
+            f"/api/cases/{case['id']}/segments",
+            headers=headers,
+            files={"audio": ("test.webm", io.BytesIO(b"fake webm audio content"), "audio/webm;codecs=opus")},
+            data={"seq": "0", "client_id": "codec-test"},
         )
-        
-        # Should accept parameterized MIME type
-        assert response.status_code == 201
-        assert response.json()["message"] == "Recording uploaded successfully"
-    
-    def test_malformed_json_availability_rejected(self):
-        """Issue 3: Malformed nonempty JSON on availability update must be rejected."""
-        response = client.request(
-            "PATCH",
-            "/api/doctors/availability",
-            headers={
-                "Authorization": f"Bearer {self.doctor_token}",
-                "Content-Type": "application/json"
-            },
-            content="{bad json}"
-        )
-        
-        # Should reject malformed JSON with 400
-        assert response.status_code == 400
-        assert response.json()["error"] == "Invalid JSON"
-    
-    def test_malformed_json_respond_rejected(self):
-        """Issue 3: Malformed nonempty JSON on respond route must be rejected."""
-        response = client.request(
-            "POST",
-            "/api/doctors/recordings/1/respond",
-            headers={
-                "Authorization": f"Bearer {self.doctor_token}",
-                "Content-Type": "application/json"
-            },
-            content="{invalid: json}"
-        )
-        
-        # Should reject malformed JSON with 400
-        assert response.status_code == 400
-        assert response.json()["error"] == "Invalid JSON"
-    
-    def test_empty_body_availability_still_works(self):
-        """Issue 3: Empty body on availability should still work (set to 0)."""
-        response = client.patch(
-            "/api/doctors/availability",
-            headers={"Authorization": f"Bearer {self.doctor_token}"},
-            content=b""  # Empty body
-        )
-        
-        # Should succeed with empty body
-        assert response.status_code == 200
-        assert "is_available" not in response.json()  # Omitted when not in request
-    
-    def test_thread_pool_separation(self):
-        """Issue 4: Fast operations (auth, upload) use separate pool from slow OpenAI calls."""
-        # This tests that login doesn't block on slow processing
-        # We can't easily test the actual thread pool behavior in unit tests,
-        # but we can verify the code structure is correct
-        from thread_pools import fast_executor, slow_executor
-        
-        # Verify separate executors exist
-        assert fast_executor is not None
-        assert slow_executor is not None
-        assert fast_executor != slow_executor
-        
-        # Verify they have different name prefixes
-        assert "fast" in fast_executor._thread_name_prefix
-        assert "slow" in slow_executor._thread_name_prefix
+        assert response.status_code == 201, response.text
 
 
 if __name__ == "__main__":

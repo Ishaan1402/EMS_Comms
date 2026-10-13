@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from dotenv import load_dotenv
 import pathlib
 import json
@@ -15,7 +16,7 @@ import json
 load_dotenv()
 
 from middleware.auth import APIError, require_role
-from routes import auth, recordings, doctors, notifications, messages, cases, sas
+from routes import auth, messages, cases, sas
 from database import init_database, insert_sample_data, utc_now_iso
 import case_assessment
 import case_extraction
@@ -57,7 +58,7 @@ BUILD_INFO = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Missing keys only fail the routes that need them; warn instead of exiting.
-    expected_env_vars = ["JWT_SECRET", "OPENAI_API_KEY", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]
+    expected_env_vars = ["JWT_SECRET", "OPENAI_API_KEY"]
     missing_vars = [var for var in expected_env_vars if not os.getenv(var)]
     if missing_vars:
         print(f"⚠️  Missing environment variables: {', '.join(missing_vars)}. Routes that need them will fail.")
@@ -92,13 +93,6 @@ async def api_error_handler(request: Request, exc: APIError):
 # Validation errors are reported as 500s, never 422.
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    # A missing audio file on upload gets the upload route's own error message.
-    if request.url.path == "/api/recordings/upload":
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Server error during upload"}
-        )
-    
     print(f"Validation error: {exc.errors()}")
     return JSONResponse(
         status_code=500,
@@ -155,13 +149,7 @@ async def add_security_headers(request, call_next):
     
     return response
 
-# Recording audio in uploads/ is patient data and is not served over HTTP (no screen uses it).
-
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(recordings.router, prefix="/api/recordings", tags=["recordings"])
-app.include_router(messages.router, prefix="/api/recordings", tags=["messages"])
-app.include_router(doctors.router, prefix="/api/doctors", tags=["doctors"])
-app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(cases.router, prefix="/api/cases", tags=["cases"])
 app.include_router(messages.case_router, prefix="/api/cases", tags=["messages"])
 app.include_router(cases.hospitals_router, prefix="/api/hospitals", tags=["hospitals"])
@@ -181,6 +169,9 @@ if os.getenv("NODE_ENV") == "production":
         
         @app.get("/{full_path:path}")
         async def serve_react_app(full_path: str):
+            # An unknown API path is a 404, not the React app (e.g. the removed /api/recordings routes).
+            if full_path == "api" or full_path.startswith("api/"):
+                raise StarletteHTTPException(status_code=404)
             # Resolve the path and ensure it stays within client_build
             file_path = client_build / full_path
             try:

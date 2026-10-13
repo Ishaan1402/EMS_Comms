@@ -18,7 +18,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
 from main import app
 import database
-from database import query, run, init_database, insert_sample_data
+from database import query, run, init_database, insert_sample_data, utc_now_iso
 
 REAL_DB_PATH = Path(database.__file__).parent / "asclepius.db"
 
@@ -47,26 +47,26 @@ def auth(username):
     return {"Authorization": f"Bearer {response.json()['token']}"}
 
 
-def create_case(emt_username="emt.wilson", notify=("dr.smith",)):
-    """A recording (the case) plus notifications for the doctors receiving it."""
-    recording_id = run(
-        'INSERT INTO recordings (emt_id, patient_info, audio_file_path) VALUES (?, ?, ?)',
-        (user_id(emt_username), "Inbound patient", "uploads/fake.wav")
+def hospital_id(code="GEN"):
+    return query("SELECT id FROM hospitals WHERE code = ?", (code,))[0]["id"]
+
+
+def create_case(emt_username="emt.wilson", hospital="GEN"):
+    """A case routed to `hospital`. Closed, so one crew can have many; its thread still works."""
+    now = utc_now_iso()
+    return run(
+        """INSERT INTO cases (emt_id, patient_info, status, started_at, updated_at, destination_hospital_id, info_version)
+           VALUES (?, ?, 'closed', ?, ?, ?, 1)""",
+        (user_id(emt_username), "Inbound patient", now, now, hospital_id(hospital))
     )["id"]
-    for doctor in notify:
-        run(
-            'INSERT INTO notifications (recording_id, doctor_id, notification_type) VALUES (?, ?, ?)',
-            (recording_id, user_id(doctor), 'both')
-        )
-    return recording_id
 
 
-def send(recording_id, headers, body, **extra):
-    return client.post(f"/api/recordings/{recording_id}/messages", headers=headers, json={"body": body, **extra})
+def send(case_id, headers, body, **extra):
+    return client.post(f"/api/cases/{case_id}/messages", headers=headers, json={"body": body, **extra})
 
 
-def history(recording_id, headers, **params):
-    return client.get(f"/api/recordings/{recording_id}/messages", headers=headers, params=params)
+def history(case_id, headers, **params):
+    return client.get(f"/api/cases/{case_id}/messages", headers=headers, params=params)
 
 
 @pytest.fixture(scope="module")
@@ -95,7 +95,7 @@ class TestConversation:
 
         empty = history(case, emt)
         assert empty.status_code == 200
-        assert empty.json() == {"recording_id": case, "messages": []}
+        assert empty.json() == {"case_id": case, "messages": []}
 
         sent = [
             (emt, "ETA 8 minutes, 58M chest pain, STEMI on 12-lead"),
@@ -107,7 +107,7 @@ class TestConversation:
             response = send(case, headers, body)
             assert response.status_code == 201, response.text
             message = response.json()
-            assert message["recording_id"] == case
+            assert message["case_id"] == case
             assert message["body"] == body
 
         # "Refresh" on both sides: a fresh read returns the full conversation, oldest first.
@@ -131,7 +131,7 @@ class TestConversation:
 
         conn = sqlite3.connect(str(database.DB_PATH))
         rows = conn.execute(
-            'SELECT body FROM messages WHERE recording_id = ? ORDER BY id', (case,)
+            'SELECT body FROM messages WHERE case_id = ? ORDER BY id', (case,)
         ).fetchall()
         conn.close()
         assert [r[0] for r in rows] == ["first", "second"]
@@ -149,10 +149,13 @@ class TestConversation:
         case = create_case()
         assert send(case, emt, "  BP 90/60  ").json()["body"] == "BP 90/60"
 
-    def test_all_notified_doctors_share_the_conversation(self, emt):
-        case = create_case(notify=("dr.smith", "dr.jones"))
-        send(case, auth("dr.jones"), "Trauma bay ready")
-        send(case, auth("dr.smith"), "I'll take the airway")
+    def test_everyone_at_the_receiving_hospital_shares_the_conversation(self, emt, doctor):
+        colleague = {"username": "dr.gen.colleague", "email": "colleague@gen.test", "password": "password123",
+                     "role": "doctor", "first_name": "Ana", "last_name": "Ruiz", "hospital_id": hospital_id("GEN")}
+        assert client.post("/api/auth/register", json=colleague).status_code in (201, 400)
+        case = create_case()
+        send(case, auth("dr.gen.colleague"), "Trauma bay ready")
+        send(case, doctor, "I'll take the airway")
         bodies = [m["body"] for m in history(case, emt).json()["messages"]]
         assert bodies == ["Trauma bay ready", "I'll take the airway"]
 
@@ -170,20 +173,20 @@ class TestCaseIsolation:
         b = history(case_b, doctor).json()["messages"]
         assert [m["body"] for m in a] == ["A: patient is diabetic", "A: check glucose"]
         assert [m["body"] for m in b] == ["B: patient on warfarin"]
-        assert {m["recording_id"] for m in a} == {case_a}
-        assert {m["recording_id"] for m in b} == {case_b}
+        assert {m["case_id"] for m in a} == {case_a}
+        assert {m["case_id"] for m in b} == {case_b}
 
-    def test_recording_id_in_body_is_ignored(self, emt):
+    def test_case_id_in_body_is_ignored(self, emt):
         case_a = create_case()
         case_b = create_case()
 
         response = client.post(
-            f"/api/recordings/{case_a}/messages",
+            f"/api/cases/{case_a}/messages",
             headers=emt,
-            json={"body": "goes to A", "recording_id": case_b},
+            json={"body": "goes to A", "case_id": case_b},
         )
         assert response.status_code == 201
-        assert response.json()["recording_id"] == case_a
+        assert response.json()["case_id"] == case_a
         assert history(case_b, emt).json()["messages"] == []
 
     def test_after_id_from_another_case_does_not_leak(self, emt):
@@ -222,7 +225,7 @@ class TestCaseIsolation:
         for case in cases:
             messages = history(case, doctor).json()["messages"]
             assert len(messages) == 10
-            assert all(m["recording_id"] == case for m in messages)
+            assert all(m["case_id"] == case for m in messages)
             assert all(m["body"].startswith(f"case-{case}-") for m in messages)
 
 
@@ -233,31 +236,31 @@ class TestAccessControl:
 
         assert history(case, other_emt).status_code == 404
         assert send(case, other_emt, "intrusion").status_code == 404
-        assert client.get(f"/api/recordings/{case}/messages/stream", headers=other_emt).status_code == 404
+        assert client.get(f"/api/cases/{case}/messages/stream", headers=other_emt).status_code == 404
         assert [m["body"] for m in history(case, emt).json()["messages"]] == ["private"]
 
-    def test_doctor_not_notified_about_case_is_denied(self, other_doctor):
-        case = create_case(notify=("dr.smith",))
+    def test_doctor_at_another_hospital_is_denied(self, other_doctor):
+        case = create_case(hospital="GEN")
         assert history(case, other_doctor).status_code == 404
         assert send(case, other_doctor, "hi").status_code == 404
 
     def test_requires_authentication(self):
         case = create_case()
-        response = client.get(f"/api/recordings/{case}/messages")
+        response = client.get(f"/api/cases/{case}/messages")
         assert response.status_code == 401
         assert response.json() == {"error": "Access denied. No token provided."}
-        assert client.post(f"/api/recordings/{case}/messages", json={"body": "x"}).status_code == 401
+        assert client.post(f"/api/cases/{case}/messages", json={"body": "x"}).status_code == 401
 
     def test_missing_or_non_numeric_case_is_404(self, emt):
         assert history(999999, emt).status_code == 404
-        assert history("abc", emt).json() == {"error": "Recording not found"}
+        assert history("abc", emt).json() == {"error": "Case not found"}
 
 
 class TestValidation:
     @pytest.mark.parametrize("payload", [{}, {"body": ""}, {"body": "   "}, {"body": 42}, {"body": None}])
     def test_empty_or_non_string_body_rejected(self, emt, payload):
         case = create_case()
-        response = client.post(f"/api/recordings/{case}/messages", headers=emt, json=payload)
+        response = client.post(f"/api/cases/{case}/messages", headers=emt, json=payload)
         assert response.status_code == 400
         assert history(case, emt).json()["messages"] == []
 
@@ -269,7 +272,7 @@ class TestValidation:
     def test_malformed_json_rejected(self, emt):
         case = create_case()
         response = client.post(
-            f"/api/recordings/{case}/messages",
+            f"/api/cases/{case}/messages",
             headers={**emt, "Content-Type": "application/json"},
             content=b"{not json",
         )
@@ -309,7 +312,7 @@ class TestDatabase:
     def test_message_requires_existing_case(self):
         with pytest.raises(sqlite3.IntegrityError):
             run(
-                'INSERT INTO messages (recording_id, sender_id, sender_role, body) VALUES (?, ?, ?, ?)',
+                'INSERT INTO messages (case_id, sender_id, sender_role, body) VALUES (?, ?, ?, ?)',
                 (987654, user_id("emt.wilson"), "emt", "orphan")
             )
 
@@ -355,15 +358,15 @@ class TestLiveStream:
         send(case_a, emt, "A history")
 
         with httpx.Client(base_url=live_server, timeout=10) as http:
-            with http.stream("GET", f"/api/recordings/{case_a}/messages/stream", headers=doctor) as response:
+            with http.stream("GET", f"/api/cases/{case_a}/messages/stream", headers=doctor) as response:
                 assert response.status_code == 200
                 assert response.headers["content-type"].startswith("text/event-stream")
 
                 def post_later():
                     time.sleep(0.3)
-                    http.post(f"/api/recordings/{case_b}/messages", headers=emt, json={"body": "B live"})
-                    http.post(f"/api/recordings/{case_a}/messages", headers=emt, json={"body": "A live 1"})
-                    http.post(f"/api/recordings/{case_a}/messages", headers=doctor, json={"body": "A live 2"})
+                    http.post(f"/api/cases/{case_b}/messages", headers=emt, json={"body": "B live"})
+                    http.post(f"/api/cases/{case_a}/messages", headers=emt, json={"body": "A live 1"})
+                    http.post(f"/api/cases/{case_a}/messages", headers=doctor, json={"body": "A live 2"})
 
                 poster = threading.Thread(target=post_later)
                 poster.start()
@@ -371,7 +374,7 @@ class TestLiveStream:
                 poster.join()
 
         assert [e["body"] for e in events] == ["A history", "A live 1", "A live 2"]
-        assert {e["recording_id"] for e in events} == {case_a}
+        assert {e["case_id"] for e in events} == {case_a}
 
     def test_stream_resumes_after_last_event_id(self, live_server, emt):
         case = create_case()
@@ -380,7 +383,7 @@ class TestLiveStream:
 
         with httpx.Client(base_url=live_server, timeout=10) as http:
             headers = {**emt, "Last-Event-ID": str(first["id"])}
-            with http.stream("GET", f"/api/recordings/{case}/messages/stream", headers=headers) as response:
+            with http.stream("GET", f"/api/cases/{case}/messages/stream", headers=headers) as response:
                 events = read_events(response, 1)
 
         assert [e["body"] for e in events] == ["missed while offline"]
@@ -389,12 +392,12 @@ class TestLiveStream:
         """A write that bypasses the API (no in-process wake-up) still arrives via polling."""
         case = create_case()
         with httpx.Client(base_url=live_server, timeout=10) as http:
-            with http.stream("GET", f"/api/recordings/{case}/messages/stream", headers=emt) as response:
+            with http.stream("GET", f"/api/cases/{case}/messages/stream", headers=emt) as response:
                 def write_directly():
                     time.sleep(0.3)
                     conn = sqlite3.connect(str(database.DB_PATH))
                     conn.execute(
-                        'INSERT INTO messages (recording_id, sender_id, sender_role, body) VALUES (?, ?, ?, ?)',
+                        'INSERT INTO messages (case_id, sender_id, sender_role, body) VALUES (?, ?, ?, ?)',
                         (case, user_id("dr.smith"), "doctor", "from elsewhere")
                     )
                     conn.commit()
@@ -413,7 +416,7 @@ class TestLiveStream:
         with httpx.Client(base_url=live_server, timeout=10) as http:
             # "²" passes str.isdigit() but is not a valid id.
             headers = {**emt, "Last-Event-ID": "²".encode("latin-1")}
-            with http.stream("GET", f"/api/recordings/{case}/messages/stream", headers=headers) as response:
+            with http.stream("GET", f"/api/cases/{case}/messages/stream", headers=headers) as response:
                 assert response.status_code == 200
                 events = read_events(response, 1)
         assert [e["body"] for e in events] == ["still delivered"]

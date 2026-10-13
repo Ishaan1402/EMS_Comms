@@ -1,4 +1,4 @@
-"""The OpenAI client and model settings used by transcription, assessment, extraction and the older recording flow.
+"""The OpenAI client and model settings used by transcription, assessment and extraction.
 
 Read once at import, after main.py has loaded .env. Callers read openai_client from this module when
 they make a call, so tests can replace it with a fake or None.

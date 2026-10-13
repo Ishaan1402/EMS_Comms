@@ -31,7 +31,7 @@ MAX_SEGMENT_BYTES = 10 * 1024 * 1024
 MAX_SEQ = 1_000_000
 MAX_DURATION_MS = 10 * 60 * 1000
 ALLOWED_SEGMENT_EXTENSIONS = {".webm", ".ogg", ".mp4", ".m4a", ".wav", ".mp3", ".aac"}
-# Also checked by the older recording upload (routes/recordings.py). audio/mpeg is deliberately not accepted.
+# audio/mpeg is deliberately not accepted.
 ALLOWED_AUDIO_TYPES = [
     "audio/mp3", "audio/wav", "audio/m4a", "audio/x-m4a",
     "audio/aac", "audio/x-aac", "audio/ogg", "audio/webm", "audio/mp4"
