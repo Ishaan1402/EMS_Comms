@@ -92,10 +92,11 @@ def build(case: dict) -> dict:
     encounter_url = bundle.add(encounter)
     context = {"subject": _ref(patient), "encounter": _ref(encounter_url)}
 
-    # Every report, as the crew gave it.
-    sources = {}
+    # Every report, as the crew gave it, with the information version it became (None: not sent yet).
+    sources, versions = {}, {}
 
-    def report(key, title, text, at):
+    def report(key, title, text, at, version):
+        versions[key] = version
         sources[key] = bundle.add({
             "resourceType": "DocumentReference", "status": "current", "docStatus": "preliminary",
             "type": {"text": title}, "subject": _ref(patient), "date": at, "author": [_ref(crew, crew_name)],
@@ -104,16 +105,16 @@ def build(case: dict) -> dict:
         })
 
     if case["patient_info"]:
-        report(("opened", None), "EMS summary typed when the case was opened", case["patient_info"], case["started_at"])
-    for update in query("""SELECT id, kind, body, created_at FROM case_updates
+        report(("opened", None), "EMS summary typed when the case was opened", case["patient_info"], case["started_at"], 1)
+    for update in query("""SELECT id, kind, body, created_at, info_version FROM case_updates
                            WHERE case_id = ? AND kind IN ('note', 'correction') AND body IS NOT NULL ORDER BY id""",
                         (case_id,)):
         title = "EMS correction typed by the crew" if update["kind"] == "correction" else "EMS note typed by the crew"
-        report(("update", update["id"]), title, update["body"], update["created_at"])
-    for segment in query("""SELECT id, seq, text, recorded_at FROM transcript_segments
+        report(("update", update["id"]), title, update["body"], update["created_at"], update["info_version"])
+    for segment in query("""SELECT id, seq, text, recorded_at, info_version FROM transcript_segments
                             WHERE case_id = ? AND status = 'completed' AND text != '' ORDER BY seq""", (case_id,)):
         report(("segment", segment["id"]), f"EMS radio report transcript, clip {segment['seq'] + 1}",
-               segment["text"], segment["recorded_at"])
+               segment["text"], segment["recorded_at"], segment["info_version"])
 
     devices = {}
 
@@ -198,11 +199,17 @@ def build(case: dict) -> dict:
             lines.append(f"Change since the hospital's last acknowledgment ({assessment['meaningful_change']}): "
                          f"{assessment['change_explanation']}")
         lines.append(f"Missing: {assessment['missing_information']}")
+        # The app's freshness warning travels with the summary: newer information or an ETA change since.
+        outdated = case["assessment_is_outdated"]
+        if outdated:
+            lines.append("Outdated: written before the latest information or ETA change; "
+                         "a newer AI summary is pending or failed. Check the crew's reports.")
         title = "AI-drafted EMS handoff summary (not clinician-reviewed)"
         summary = bundle.add({
             "resourceType": "DocumentReference", "status": "current", "docStatus": "preliminary",
             "type": {"text": title}, "subject": _ref(patient), "date": assessment["completed_at"],
-            "description": f"{title}, based on information version {assessment['based_on_version']}",
+            "description": f"{'Outdated: ' if outdated else ''}{title}, based on information version "
+                           f"{assessment['based_on_version']} and the ETA known then ({assessment['input_eta_at'] or 'none'})",
             "content": [{"attachment": {**_text("\n".join(lines)), "title": title}}],
             "context": {"encounter": [_ref(encounter_url)]},
         })
@@ -211,7 +218,9 @@ def build(case: dict) -> dict:
             "activity": {"text": "Written by AI from the crew's reports"},
             "agent": [{"type": {"coding": [{"system": PARTICIPANT_TYPE, "code": "author"}]},
                        "who": _ref(device(assessment["scorer_version"]))}],
-            "entity": [{"role": "source", "what": _ref(url)} for url in sources.values()] or None,
+            # Only what the model read: reports that were information by the version it was based on.
+            "entity": [{"role": "source", "what": _ref(url)} for key, url in sources.items()
+                       if versions[key] is not None and versions[key] <= assessment["based_on_version"]] or None,
         })
         if bundle.entries[-1]["resource"]["entity"] is None:
             del bundle.entries[-1]["resource"]["entity"]
