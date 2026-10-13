@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import os
 import socket
@@ -468,6 +469,59 @@ class TestReports:
         end_report(case["id"], "r1", 2)
         assert case_assessment.read_inputs(case["id"])["input"]["current_transcript"] == "BP 92 over 58"
         assert [i["text"] for i in case_extraction.read_new_information(case["id"])["new"]] == ["BP 92 over", "58"]
+
+
+class TestReportCompletionReachesScreens:
+    """Screens only take clip rows from segment events, so a finished report must publish all its clips.
+    From Astra's Oct 13 audit (R4): the transcript stayed "reporting..." until a reload."""
+
+    @staticmethod
+    def capture(monkeypatch):
+        events = []
+        original = cases.broker.publish
+
+        def publish(kind, data, **kwargs):
+            events.append((kind, copy.deepcopy(data)))
+            return original(kind, data, **kwargs)
+        monkeypatch.setattr(cases.broker, "publish", publish)
+        return events
+
+    @staticmethod
+    def completed_rows(events):
+        return {data["segment"]["id"] for kind, data in events
+                if kind == "segment.updated" and data["segment"]["report_complete"] == 1}
+
+    def test_sending_a_transcribed_report_publishes_every_clip(self, monkeypatch):
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "BP 100 over", 1: "64."}))
+        case = start_case()
+        upload(case["id"], 0, report_id="sent-last")
+        upload(case["id"], 1, report_id="sent-last")
+        events = self.capture(monkeypatch)
+        assert end_report(case["id"], "sent-last", 2).status_code == 200
+        after = get_segments(case["id"])
+        assert all(s["report_complete"] == 1 and s["info_version"] == 2 for s in after)
+        assert self.completed_rows(events) == {s["id"] for s in after}
+
+    def test_the_last_transcription_publishes_every_clip_of_its_report(self, monkeypatch):
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "BP 100 over", 1: "64."}))
+        case = start_case()
+        upload(case["id"], 0, report_id="clip-last")
+        assert end_report(case["id"], "clip-last", 2).status_code == 200
+        events = self.capture(monkeypatch)
+        upload(case["id"], 1, report_id="clip-last")
+        after = get_segments(case["id"])
+        assert all(s["report_complete"] == 1 and s["info_version"] == 2 for s in after)
+        assert self.completed_rows(events) == {s["id"] for s in after}
+
+    def test_closing_mid_report_publishes_its_clips(self, monkeypatch):
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "Patient stable"}))
+        case = start_case()
+        upload(case["id"], 0, report_id="unsent")
+        events = self.capture(monkeypatch)
+        client.post(f"/api/cases/{case['id']}/close", headers=auth_headers(EMT))
+        [clip] = get_segments(case["id"])
+        assert clip["report_complete"] == 1
+        assert self.completed_rows(events) == {clip["id"]}
 
 
 class TestBroker:

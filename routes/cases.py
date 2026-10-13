@@ -403,6 +403,18 @@ def publish_segment(event_type: str, segment: dict, case: dict) -> None:
                    owner_id=case["emt_id"], hospital_id=case["destination_hospital_id"])
 
 
+def publish_report_clips(case: dict, report_client_ids: Optional[list] = None) -> None:
+    """
+    A report finishing changes all of its clips (report_complete, info_version), not just the one that
+    completed it, and screens only take rows from segment events. None means every report in the case.
+    """
+    rows = query(f"SELECT {SEGMENT_COLUMNS} FROM transcript_segments WHERE case_id = ? AND report_id IS NOT NULL "
+                 "ORDER BY seq", (case["id"],))
+    for row in rows:
+        if report_client_ids is None or row["report_id"] in report_client_ids:
+            publish_segment("segment.updated", row, case)
+
+
 def event_filter(user: dict):
     """accepts(owner_id, hospital_id) for the live stream: the same visibility as can_see_case."""
     if user["role"] == "doctor":
@@ -616,6 +628,7 @@ async def close_case(case_id: str, background_tasks: BackgroundTasks,
                          (now, now, case["id"]))
             end_reports(conn, case["id"], now, background_tasks)
         case = get_case(case["id"])
+        publish_report_clips(case)
         publish_case("case.updated", case, "closed")
     return case
 
@@ -633,6 +646,7 @@ async def mark_arrived(case_id: str, background_tasks: BackgroundTasks,
                          (now, now, case["id"]))
             end_reports(conn, case["id"], now, background_tasks)
         case = get_case(case["id"])
+        publish_report_clips(case)
         publish_case("case.updated", case, "arrived")
     return case
 
@@ -674,7 +688,9 @@ async def end_report(
     if changed:
         request_processing(background_tasks, case["id"])
     if existing is None or existing["clip_count"] is None:
-        publish_case("case.updated", get_case(case["id"]), "report_completed" if changed else "report_sent")
+        updated = get_case(case["id"])
+        publish_report_clips(updated, [report_id])
+        publish_case("case.updated", updated, "report_completed" if changed else "report_sent")
     return {"id": report["client_id"], "clips": report["clip_count"], "started_at": report["started_at"],
             "ended_at": report["ended_at"], "completed_at": report["completed_at"],
             "info_version": report["info_version"]}
@@ -1232,12 +1248,18 @@ async def transcribe_segment(segment_id: int):
             whole_report = not case_reports.is_single_clip(conn, segment["report_id"])
         if not changed:
             conn.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, segment["case_id"]))
-    publish_segment("segment.updated", get_segment(segment_id), segment)
+    updated = get_segment(segment_id)
+    case = get_case(segment["case_id"])
+    if whole_report and updated["report_complete"]:
+        # This clip may have completed its report, which changes the report's other clips too.
+        publish_report_clips(case, [updated["report_id"]])
+    else:
+        publish_segment("segment.updated", updated, case)
     if changed and whole_report:
         cause = "report_completed"
     else:
         cause = "transcript_added" if text else "transcription_failed"
-    publish_case("case.updated", get_case(segment["case_id"]), cause)
+    publish_case("case.updated", case, cause)
     if changed:
         await asyncio.gather(case_assessment.runner.request(segment["case_id"]),
                              case_extraction.runner.request(segment["case_id"]))

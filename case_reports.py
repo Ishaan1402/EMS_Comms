@@ -106,6 +106,8 @@ def settle(conn, report_id: Optional[int], now: str) -> bool:
         if arrived < report["clip_count"] or pending:
             return False
         conn.execute("UPDATE case_reports SET completed_at = ? WHERE id = ?", (now, report_id))
+        # Every clip of the report changes (report_complete), so screens must take each row again.
+        conn.execute("UPDATE transcript_segments SET updated_at = ? WHERE report_id = ?", (now, report_id))
     new_text = conn.execute(
         """SELECT id FROM transcript_segments
            WHERE report_id = ? AND status = 'completed' AND text != '' AND info_version IS NULL""",
