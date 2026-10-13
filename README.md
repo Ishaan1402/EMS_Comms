@@ -209,7 +209,7 @@ EMTs act on their own cases; hospital users act on cases routed to their hospita
 | `GET /api/cases/:id/segments` | EMT / hospital user | Transcript, ordered by `seq` |
 | `POST /api/cases/:id/segments/:segmentId/retry` | EMT | Re-run a failed transcription |
 | `POST /api/cases/:id/segments/:segmentId/dismiss` | EMT / hospital user | Mark a failed clip as handled |
-| `GET /api/cases/:id/assessments`, `POST /api/cases/:id/assessments/retry` | EMT / hospital user | Every AI handoff attempt; retry a failed one |
+| `GET /api/cases/:id/assessments`, `POST /api/cases/:id/assessments/retry` | EMT / hospital user | Every AI handoff attempt, each marked `is_current`; retry a failed one |
 | `GET /api/cases/:id/findings`, `GET /api/cases/:id/extractions`, `POST /api/cases/:id/findings/retry` | EMT / hospital user | Extracted patient information and every attempt; retry a failed one |
 | `GET /api/cases/:id/messages`, `POST /api/cases/:id/messages`, `GET /api/cases/:id/messages/stream` | EMT / hospital user | Case messages |
 | `POST /api/cases/:id/reports/:reportId/end` | EMT | Close a report (`{"clips": N}`) |

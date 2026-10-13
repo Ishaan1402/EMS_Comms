@@ -1101,3 +1101,24 @@ class TestBuildInfo:
         assert info["scorer_version"] == case_assessment.scorer_version()
         assert info["queue_rule_version"] and info["transcription_model"] == openai_config.TRANSCRIPTION_MODEL
         assert {"git_sha", "git_dirty", "client_build_sha256", "extractor_version", "server_started_at"} <= set(info)
+
+
+class TestOneDefinitionOfCurrent:
+    """case_assessment.covers is the only definition of "this AI handoff is current"."""
+
+    def test_new_information_another_baseline_or_another_eta_make_an_attempt_outdated(self):
+        attempt = {"based_on_version": 3, "baseline_version": 2, "input_eta_at": "2030-01-01T10:00:00.000Z"}
+        assert case_assessment.covers(attempt, 3, 2, "2030-01-01T10:00:00.000Z")
+        assert not case_assessment.covers(attempt, 4, 2, "2030-01-01T10:00:00.000Z")
+        assert not case_assessment.covers(attempt, 3, None, "2030-01-01T10:00:00.000Z")
+        assert not case_assessment.covers(attempt, 3, 2, "2030-01-01T10:05:00.000Z")
+        assert not case_assessment.covers({**attempt, "input_eta_at": ""}, 3, 2, None)  # ETA never recorded
+
+    def test_the_attempts_api_says_which_attempt_is_current(self, monkeypatch):
+        use_scorer(monkeypatch, SCORED)
+        case = start_case()
+        [first] = client.get(f"/api/cases/{case['id']}/assessments", headers=auth(DOCTOR)).json()
+        assert first["is_current"] is True
+        add_update(case["id"], kind="eta", eta_minutes=3, client_id="eta-current")
+        newest, older = client.get(f"/api/cases/{case['id']}/assessments", headers=auth(DOCTOR)).json()
+        assert (newest["is_current"], older["is_current"]) == (True, False)

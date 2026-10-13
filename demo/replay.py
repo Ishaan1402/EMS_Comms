@@ -519,9 +519,7 @@ class Replay:
             attempts = self.call("GET", f"/api/cases/{case_id}/assessments", doctor)  # newest first
             final = next((a for a in attempts if a["status"] != "processing"), None)
             record = {"config_id": config_id, "case_id": source_case_id, "repeat_id": 1, "retry_count": None}
-            if final is None or final["based_on_version"] < case["info_version"] \
-                    or final["baseline_version"] != case["baseline_version"] \
-                    or final["input_eta_at"] != case["eta_at"]:
+            if final is None or not final["is_current"]:  # the server's definition (case_assessment.covers)
                 record["status"] = "error"  # the final information was never assessed
             elif final["status"] in ("completed", "needs_review"):
                 category = final["preparation_category"]

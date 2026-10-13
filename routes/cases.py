@@ -176,10 +176,8 @@ def processing_summary(case: dict, latest: Optional[dict]) -> dict:
 
     # Information no attempt has covered yet, or an acknowledgment that changed what the latest
     # attempt compared against, is waiting to be assessed.
-    if latest is None or (latest["status"] not in ("processing", "failed") and (
-            latest["based_on_version"] < case["info_version"]
-            or latest["baseline_version"] != case["baseline_version"]
-            or latest["input_eta_at"] != case["eta_at"])):
+    if latest is None or (latest["status"] not in ("processing", "failed") and not case_assessment.covers(
+            latest, case["info_version"], case["baseline_version"], case["eta_at"])):
         assessment = "pending"
     else:
         assessment = latest["status"]
@@ -285,10 +283,8 @@ def describe_cases(rows: list) -> list:
         case["current_assessment"] = assessment
         # None until an assessment says otherwise; "Cannot assess" when it couldn't decide.
         case["preparation_category"] = assessment["preparation_category"] if assessment else None
-        case["assessment_is_outdated"] = bool(assessment) and (
-            assessment["based_on_version"] < case["info_version"]
-            or assessment["baseline_version"] != case["baseline_version"]
-            or assessment["input_eta_at"] != case["eta_at"])
+        case["assessment_is_outdated"] = bool(assessment) and not case_assessment.covers(
+            assessment, case["info_version"], case["baseline_version"], case["eta_at"])
         case["processing"] = processing_summary(case, latest.get(case["id"]))
         described.append(case)
     # The crew's declared alerts (case_alerts.py), with whether the hospital has acknowledged them.
@@ -865,12 +861,17 @@ async def list_vitals(case_id: str, current_user: dict = Depends(require_role(["
 
 @router.get("/{case_id}/assessments")
 async def list_assessments(case_id: str, current_user: dict = Depends(require_role(["emt", "doctor"]))):
-    """Every assessment attempt, newest first, including failed ones."""
+    """Every assessment attempt, newest first, including failed ones. `is_current`: whether the attempt
+    read the case's current information, baseline and ETA (case_assessment.covers)."""
     case = get_case_for_user(case_id, current_user)
-    return query(
+    attempts = query(
         f"SELECT {ASSESSMENT_COLUMNS} FROM risk_assessments WHERE case_id = ? ORDER BY id DESC",
         (case["id"],),
     )
+    for attempt in attempts:
+        attempt["is_current"] = case_assessment.covers(attempt, case["info_version"], case["baseline_version"],
+                                                       case["eta_at"])
+    return attempts
 
 
 @router.post("/{case_id}/assessments/retry", status_code=202)

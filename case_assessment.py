@@ -333,6 +333,16 @@ def transcription_in_flight(case_id: int) -> bool:
                       (case_id,)))
 
 
+def covers(attempt: dict, info_version: int, baseline_version: Optional[int], eta_at: Optional[str]) -> bool:
+    """
+    Whether an attempt is current: it read this information, compared against this acknowledged
+    baseline, with this expected arrival. The one definition used by the runner, startup recovery,
+    the case API and the replay (via the API). An older attempt with no recorded ETA ('') is never current.
+    """
+    return (attempt["based_on_version"] >= info_version and attempt["baseline_version"] == baseline_version
+            and attempt["input_eta_at"] == eta_at)
+
+
 def latest_attempt(case_id: int) -> Optional[dict]:
     rows = query(
         f"SELECT {ASSESSMENT_COLUMNS} FROM risk_assessments WHERE case_id = ? ORDER BY id DESC LIMIT 1",
@@ -406,11 +416,8 @@ class AssessmentRunner(CaseRunner):
         if inputs is None or not inputs["has_information"]:
             return
         latest = latest_attempt(case_id)
-        # An attempt covers the case if it read this information against the same acknowledged
-        # baseline and expected arrival. ETA refreshes do not change the clinical/ack version.
-        if latest and latest["based_on_version"] >= inputs["version"] \
-                and latest["baseline_version"] == inputs["baseline_version"] \
-                and latest["input_eta_at"] == inputs["eta_at"]:
+        # ETA refreshes do not change the clinical/ack version, but they do make an attempt outdated.
+        if latest and covers(latest, inputs["version"], inputs["baseline_version"], inputs["eta_at"]):
             if not (force and latest["status"] == "failed"):
                 return
 
@@ -475,15 +482,17 @@ def unassessed_open_cases() -> list:
     Open cases whose current information has no usable assessment: never assessed, queued when
     the server stopped, interrupted, or failed. Nothing else would re-trigger them after a restart.
     """
-    rows = query(
-        """SELECT c.id FROM cases c
-           WHERE c.status = 'active' AND NOT EXISTS (
-               SELECT 1 FROM risk_assessments a
-               WHERE a.case_id = c.id AND a.status IN ('completed', 'needs_review')
-                 AND a.based_on_version = c.info_version AND a.input_eta_at IS c.eta_at
-                 AND a.baseline_version IS (
-                     SELECT MAX(ack.info_version) FROM case_acknowledgments ack
-                     WHERE ack.case_id = c.id AND ack.info_version < c.info_version))
-           ORDER BY c.id"""
+    open_cases = query(
+        """SELECT c.id, c.info_version, c.eta_at,
+                  (SELECT MAX(ack.info_version) FROM case_acknowledgments ack
+                   WHERE ack.case_id = c.id AND ack.info_version < c.info_version) AS baseline_version
+           FROM cases c WHERE c.status = 'active' ORDER BY c.id"""
     )
-    return [row["id"] for row in rows]
+    usable = {}
+    for attempt in query(f"""SELECT {ASSESSMENT_COLUMNS} FROM risk_assessments
+                             WHERE status IN ('completed', 'needs_review')
+                               AND case_id IN (SELECT id FROM cases WHERE status = 'active')"""):
+        usable.setdefault(attempt["case_id"], []).append(attempt)
+    return [case["id"] for case in open_cases
+            if not any(covers(a, case["info_version"], case["baseline_version"], case["eta_at"])
+                       for a in usable.get(case["id"], []))]
