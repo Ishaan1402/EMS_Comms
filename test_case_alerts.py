@@ -151,13 +151,26 @@ def test_acknowledging_what_was_on_screen_leaves_a_later_change_unacknowledged()
 
 def test_retries_and_repeated_calls_are_stored_once():
     case_id = open_case()
-    first = call(case_id, alert="stroke", key_time=ago(10), client_id="tap-1")
-    retry = call(case_id, alert="stroke", key_time=ago(10), client_id="tap-1")
+    key_time = ago(10)  # a retry resends the identical body
+    first = call(case_id, alert="stroke", key_time=key_time, client_id="tap-1")
+    retry = call(case_id, alert="stroke", key_time=key_time, client_id="tap-1")
     assert (first.status_code, retry.status_code) == (201, 200)
     assert retry.json()["id"] == first.json()["id"]
     same = call(case_id, alert="stroke", key_time=first.json()["key_time"])
     assert same.status_code == 200 and same.json()["id"] == first.json()["id"]
     assert len(client.get(f"/api/cases/{case_id}/alerts", headers=auth(EMT)).json()) == 1
+
+
+def test_a_used_client_id_cannot_carry_a_different_change():
+    """Astra's Oct 13 audit (R3): a call commits, its reply is lost, and the crew cancels. Reusing the call's
+    client_id must not return the old call as if the cancellation had worked."""
+    case_id = open_case()
+    assert call(case_id, alert="stroke", client_id="lost-reply").status_code == 201
+    cancel = call(case_id, alert="stroke", action="cancelled", client_id="lost-reply")
+    assert cancel.status_code == 409, cancel.json()
+    assert call(case_id, alert="stroke", key_time=ago(5), client_id="lost-reply").status_code == 409
+    assert call(case_id, alert="stroke", client_id="lost-reply").status_code == 200  # the same change, retried
+    assert case_as(case_id)["crew_alerts"]["active"][0]["alert"] == "stroke"
 
 
 @pytest.mark.parametrize("body, status", [

@@ -24,7 +24,8 @@ async def change_alert(case_id: str, request: Request, current_user: dict = Depe
       {"alert": "stroke" | "stemi" | "trauma" | "sepsis", "action": "called" | "cancelled",
        "key_time": "2026-10-13T14:10:00Z" or null (not stated), "client_id": "..."}
     Calling an active alert again with a different key time corrects it; the same call again is a
-    no-op (200). A retry with the same client_id returns the stored change (200).
+    no-op (200). A retry with the same client_id returns the stored change (200); a different change
+    under a used client_id is a 409, so a lost reply can never turn a cancellation into the old call.
     """
     case = get_case_for_user(case_id, current_user)
     body = await read_json_body(request)
@@ -44,9 +45,13 @@ async def change_alert(case_id: str, request: Request, current_user: dict = Depe
     with get_db() as conn:
         conn.execute("BEGIN IMMEDIATE")  # so a retry can't race the original past the client_id check
         if client_id is not None:
-            existing = conn.execute("SELECT id FROM case_alerts WHERE case_id = ? AND client_id = ?",
-                                    (case["id"], client_id)).fetchone()
+            existing = conn.execute(
+                "SELECT id, alert, action, key_time FROM case_alerts WHERE case_id = ? AND client_id = ?",
+                (case["id"], client_id),
+            ).fetchone()
             if existing:
+                if (existing["alert"], existing["action"], existing["key_time"]) != (alert, action, key_time):
+                    raise APIError(409, "This client_id was already used for a different alert change")
                 return JSONResponse(status_code=200, content=_change(case["id"], existing["id"]))
         if conn.execute("SELECT status FROM cases WHERE id = ?", (case["id"],)).fetchone()["status"] != "active":
             raise APIError(409, "Case is closed")
