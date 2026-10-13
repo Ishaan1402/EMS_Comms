@@ -73,13 +73,23 @@ def acknowledge(case_id):
     client.post(f"/api/cases/{case_id}/acknowledge", headers=auth(DOCTOR))
 
 
+def call_alert(case_id, emt, alert):
+    response = client.post(f"/api/cases/{case_id}/alerts", json={"alert": alert, "action": "called"}, headers=auth(emt))
+    assert response.status_code == 201, response.text
+
+
+def acknowledge_alerts(case_id):
+    response = client.post(f"/api/cases/{case_id}/alerts/acknowledge", headers=auth(DOCTOR))
+    assert response.status_code == 200, response.text
+
+
 def queue(username=DOCTOR):
     response = client.get("/api/cases/queue", headers=auth(username))
     assert response.status_code == 200, response.text
     return response.json()
 
 
-def test_order_follows_the_draft_rule(monkeypatch):
+def test_the_ai_category_is_shown_but_does_not_set_the_order(monkeypatch):
     score_as(monkeypatch, {"routine": "Routine", "wait": "Can wait", "now": "Prepare now"})
     routine = open_case("emt.wilson", "routine patient", eta=5)
     wait = open_case("emt.garcia", "wait patient", eta=20)
@@ -87,13 +97,17 @@ def test_order_follows_the_draft_rule(monkeypatch):
     for case_id in (routine, wait, now):
         acknowledge(case_id)
     body = queue()
-    assert [c["id"] for c in body["cases"]] == [now, wait, routine]
+    # draft-3 put "now" first on the AI's Prepare now; draft-4 orders by arrival.
+    assert [c["id"] for c in body["cases"]] == [routine, wait, now]
     assert [c["queue_position"] for c in body["cases"]] == [1, 2, 3]
-    assert body["cases"][0]["queue_reasons"] == ["Prepare now", "ETA 30 min"]
-    assert body["rule_version"] == "draft-3"
+    assert [c["preparation_category"] for c in body["cases"]] == ["Routine", "Can wait", "Prepare now"]
+    # "Why here" names only what the rule used.
+    assert body["cases"][2]["queue_reasons"] == ["ETA 30 min"]
+    assert body["counts"]["prepare_now"] == 1 and body["counts"]["crew_alerts"] == 0
+    assert body["rule_version"] == "draft-4"
 
 
-def test_unacknowledged_information_comes_before_category(monkeypatch):
+def test_unacknowledged_information_comes_first(monkeypatch):
     score_as(monkeypatch, {"routine": "Routine", "now": "Prepare now"})
     now = open_case("emt.wilson", "now patient", eta=10)
     routine = open_case("emt.garcia", "routine patient", eta=10)
@@ -101,18 +115,72 @@ def test_unacknowledged_information_comes_before_category(monkeypatch):
     body = queue()
     assert [c["id"] for c in body["cases"]] == [routine, now]
     assert body["cases"][0]["queue_reasons"][0] == "New information not yet acknowledged"
-    assert body["counts"] == {"inbound": 2, "needs_review": 0, "unacknowledged": 1, "prepare_now": 1}
+    assert body["counts"] == {"inbound": 2, "needs_review": 0, "unacknowledged": 1, "crew_alerts": 0,
+                              "prepare_now": 1}
 
 
-def test_unknown_category_ranks_above_can_wait(monkeypatch):
-    score_as(monkeypatch, {"wait": "Can wait", "unsure": "Unsure"})
-    wait = open_case("emt.wilson", "wait patient", eta=5)
-    unsure = open_case("emt.garcia", "unsure patient", eta=5)
-    acknowledge(wait)
-    acknowledge(unsure)
+def test_a_new_ai_category_does_not_move_anyone(monkeypatch):
+    score_as(monkeypatch, {"first": "Routine", "second": "Routine"})
+    first = open_case("emt.wilson", "first patient", eta=5)
+    second = open_case("emt.garcia", "second patient", eta=20)
+    acknowledge(first)
+    acknowledge(second)
+    before = len(history())
+    # The AI re-assesses the later patient as Prepare now (an ETA refresh needs no acknowledgment).
+    score_as(monkeypatch, {"first": "Routine", "second": "Prepare now"})
+    client.post(f"/api/cases/{second}/updates", json={"kind": "eta", "eta_minutes": 19}, headers=auth("emt.garcia"))
     body = queue()
-    assert [c["id"] for c in body["cases"]] == [unsure, wait]
-    assert body["cases"][0]["queue_reasons"] == ["Cannot assess", "ETA 5 min"]
+    assert body["cases"][1]["id"] == second and body["cases"][1]["preparation_category"] == "Prepare now"
+    assert [c["id"] for c in body["cases"]] == [first, second]
+    assert history()[before:] == []
+
+
+def test_a_crew_alert_outranks_the_ai(monkeypatch):
+    score_as(monkeypatch, {"stroke": "Can wait", "breathing": "Prepare now"})
+    breathing = open_case("emt.wilson", "breathing patient", eta=5)
+    stroke = open_case("emt.garcia", "stroke patient", eta=25)
+    call_alert(stroke, "emt.garcia", "stroke")
+    for case_id in (breathing, stroke):
+        acknowledge(case_id)
+    # Unacknowledged, the alert puts the stroke patient in the top group.
+    body = queue()
+    assert [c["id"] for c in body["cases"]] == [stroke, breathing]
+    assert body["cases"][0]["queue_reasons"] == ["Crew alert not yet acknowledged", "Crew alert: Stroke", "ETA 25 min"]
+    assert body["counts"]["crew_alerts"] == 1
+
+    # Acknowledged, it still ranks above a patient the AI calls Prepare now who arrives sooner.
+    acknowledge_alerts(stroke)
+    body = queue()
+    assert [c["id"] for c in body["cases"]] == [stroke, breathing]
+    assert body["cases"][0]["queue_reasons"] == ["Crew alert: Stroke", "ETA 25 min"]
+
+    # New information on any patient still comes first, alert or not.
+    client.post(f"/api/cases/{breathing}/updates", json={"kind": "note", "body": "breathing worse"},
+                headers=auth("emt.wilson"))
+    assert [c["id"] for c in queue()["cases"]] == [breathing, stroke]
+    acknowledge(breathing)
+
+    # A cancelled alert: on top until acknowledged, then back to arrival order.
+    response = client.post(f"/api/cases/{stroke}/alerts", json={"alert": "stroke", "action": "cancelled"},
+                           headers=auth("emt.garcia"))
+    assert response.status_code == 201, response.text
+    assert [c["id"] for c in queue()["cases"]] == [stroke, breathing]
+    acknowledge_alerts(stroke)
+    assert [c["id"] for c in queue()["cases"]] == [breathing, stroke]
+
+
+def test_alert_changes_are_recorded_in_the_queue_history(monkeypatch):
+    score_as(monkeypatch, {"a": "Routine", "b": "Routine"})
+    early = open_case("emt.wilson", "a patient", eta=5)
+    late = open_case("emt.garcia", "b patient", eta=30)
+    acknowledge(early)
+    acknowledge(late)
+    before = len(history())
+    call_alert(late, "emt.garcia", "stemi")
+    acknowledge_alerts(late)
+    assert moves(history()[before:]) == [(late, "moved", 2, 1, "update_added", late),
+                                         (early, "moved", 1, 2, "update_added", late)]
+    assert history()[-1]["rule_version"] == "draft-4"
 
 
 def test_cannot_assess_needs_review_until_acknowledged(monkeypatch):
@@ -128,7 +196,9 @@ def test_cannot_assess_needs_review_until_acknowledged(monkeypatch):
     # The doctor has read it: an unknown no longer outranks a known Prepare now.
     acknowledge(unsure)
     body = queue()
-    assert [c["id"] for c in body["cases"]] == [now, unsure]
+    # It ranks by arrival like everyone else (draft-4 doesn't rank on the AI's category).
+    assert [c["id"] for c in body["cases"]] == [unsure, now]
+    assert body["cases"][0]["queue_reasons"] == ["ETA 5 min"]
     assert body["counts"]["needs_review"] == 0
     case = client.get(f"/api/cases/{unsure}", headers=auth(DOCTOR)).json()
     assert case["preparation_category"] == "Cannot assess"
@@ -233,12 +303,8 @@ def test_each_queue_change_is_recorded_once_with_its_cause(monkeypatch):
     # Each step of the draft rule, with whose change caused it:
     assert moves(history()) == [
         (first, "entered", None, 1, "case_opened", first),
-        # Unassessed ("not yet known") ranks above the first patient's Can wait.
-        (second, "entered", None, 1, "case_opened", second),
-        (first, "moved", 1, 2, "case_opened", second),
-        # Assessed Can wait too: sooner arrival first.
-        (first, "moved", 2, 1, "assessment_updated", second),
-        (second, "moved", 1, 2, "assessment_updated", second),
+        # Both new: sooner arrival first. The assessments that follow move nobody.
+        (second, "entered", None, 2, "case_opened", second),
         # Acknowledged information drops below unacknowledged information...
         (second, "moved", 2, 1, "acknowledged", first),
         (first, "moved", 1, 2, "acknowledged", first),
@@ -254,7 +320,7 @@ def test_each_queue_change_is_recorded_once_with_its_cause(monkeypatch):
     changed = history(after_revision=seen)
     assert moves(changed) == [(second, "moved", 2, 1, "update_added", second),
                               (first, "moved", 1, 2, "update_added", second)]
-    assert {row["rule_version"] for row in changed} == {"draft-3"}
+    assert {row["rule_version"] for row in changed} == {"draft-4"}
     assert changed[0]["needs_attention"] == 1 and changed[1]["needs_attention"] == 0
 
     # Reading the queue or its history never records anything.
