@@ -79,3 +79,17 @@ test('a delayed hospital fetch cannot undo a newer setting received by the strea
   });
   expect(container.textContent).toContain('Arrival highlight · 15 min');
 });
+
+test('queue rows label the AI category as a suggestion and the board states the order rule', async () => {
+  await act(async () => root.render(<LiveCasesPanel />));
+  await resolve(pendingFor('/api/hospitals/mine')[0], { id: 1, name: 'General' });
+  await resolve(pendingFor('/api/cases')[0], [inbound(1, 'Medic 1')]);
+  const body = queue(1, [[1, 'Medic 1']]);
+  await resolve(pendingFor('/api/cases/queue')[0], { ...body, rule_version: 'draft-4', rule: 'Arrival order rule.',
+    counts: { ...body.counts, crew_alerts: 0 } });
+  const row = container.querySelector('ul').textContent;
+  expect(row).toContain('AI suggests:Can wait');
+  expect(container.textContent).toContain('Order (draft-4): Arrival order rule.');
+  expect(container.textContent).toContain('not validated on real EMS audio');
+  expect(container.textContent).toContain('0 crew alerts');
+});

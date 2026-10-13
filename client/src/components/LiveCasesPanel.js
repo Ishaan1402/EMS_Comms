@@ -102,7 +102,8 @@ const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move
         </div>
       </div>
       <CrewAlertBadges liveCase={c} serverNow={serverNow} />
-      <div className="flex flex-wrap gap-1 mb-1">
+      <div className="flex flex-wrap items-center gap-1 mb-1">
+        {c.queue_position && <span className="text-xs text-gray-500">AI suggests:</span>}
         <CategoryBadge liveCase={c} />
         <ArrivalHighlight liveCase={c} serverNow={serverNow} minutes={arrivalMinutes} />
         {c.status === 'active' && <OperationalBadge status={c.operational_status} />}
@@ -327,8 +328,15 @@ const LiveCasesPanel = () => {
           <span><span className="font-bold text-gray-900">{queue.counts.inbound}</span> inbound</span>
           <span className="text-purple-700"><span className="font-bold">{queue.counts.needs_review}</span> need review</span>
           <span className="text-orange-700"><span className="font-bold">{queue.counts.unacknowledged}</span> not acknowledged</span>
-          <span className="text-red-700"><span className="font-bold">{queue.counts.prepare_now}</span> prepare now</span>
-          <span className="text-xs text-gray-500 ml-auto" title={queue.rule}>Order: draft rule</span>
+          {queue.counts.crew_alerts !== undefined && (
+            <span className="text-slate-900"><span className="font-bold">{queue.counts.crew_alerts}</span> crew alert{queue.counts.crew_alerts === 1 ? '' : 's'}</span>
+          )}
+          <span className="text-red-700"><span className="font-bold">{queue.counts.prepare_now}</span> AI suggests prepare now</span>
+          <p className="w-full text-xs text-gray-600">
+            Order ({queue.rule_version}): {queue.rule} AI suggestions come from a language model reading the
+            crew&apos;s reports; they are not validated on real EMS audio. Check each one against the quotes and
+            missing items in the handoff.
+          </p>
         </div>
       )}
 
