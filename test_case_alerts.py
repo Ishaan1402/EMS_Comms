@@ -206,3 +206,23 @@ def test_a_closed_case_takes_no_new_alerts():
     case_id = open_case()
     client.post(f"/api/cases/{case_id}/close", headers=auth(EMT))
     assert call(case_id, alert="trauma").status_code == 409
+
+
+def test_alerts_and_the_queue_moves_they_cause_are_in_the_sas_export():
+    """Astra's Oct 13 audit (R6): under draft-4 an alert reorders the queue, so the export must show the
+    alert, its key time and its acknowledgment, and record it as the cause of the move."""
+    import sas_sync
+    first = open_case()
+    case_id = open_case(emt="emt.lee")  # second in the queue until its crew calls an alert
+    key_time = ago(20)
+    assert call(case_id, "emt.lee", alert="stroke", key_time=key_time, client_id="sas-1").status_code == 201
+    assert client.post(f"/api/cases/{case_id}/alerts/acknowledge", headers=auth(DOCTOR)).status_code == 200
+    tables = sas_sync.build_tables()
+    events = [e for e in tables["EVENTS"] if e["CASE_ID"] == case_id and e["EVENT_TYPE"].startswith("alert_")]
+    assert [(e["EVENT_TYPE"], e["DETAIL"]) for e in sorted(events, key=lambda e: e["EVENT_ID"])] == [
+        ("alert_called", "stroke"), ("alert_key_time", "stroke"), ("alert_acknowledged", "stroke")]
+    [key_event] = [e for e in events if e["EVENT_TYPE"] == "alert_key_time"]
+    assert key_event["SECONDS_SINCE_START"] < 0  # last known well was before the case opened
+    moves = [row for row in tables["QUEUE"] if row["CAUSE"] == "alert_called"]
+    assert {row["CASE_ID"] for row in moves} == {case_id, first}  # the alert moved both patients
+    assert all(row["CAUSE_CASE_ID"] == case_id for row in moves)
