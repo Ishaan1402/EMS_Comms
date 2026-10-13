@@ -173,3 +173,37 @@ def test_validates_against_the_fhir_models_when_available():
     models = pytest.importorskip("fhir.resources.R4B.bundle")
     case_id, _ = handoff_case()
     models.Bundle.parse_obj(bundle_for(case_id))
+
+
+# From Astra's Oct 13 audit (R5): the summary may cite only what its assessment read, and an outdated
+# summary must say so (information version alone can't show an ETA-only change).
+def test_an_older_summary_does_not_cite_information_it_never_read(monkeypatch):
+    case_id, _ = handoff_case()
+
+    async def pending(_):
+        pass
+    monkeypatch.setattr(case_assessment.runner, "request", pending)
+    response = client.post(f"/api/cases/{case_id}/updates", headers=auth(EMT),
+                           json={"kind": "correction", "body": "Correction: oxygen saturation now 78 percent."})
+    assert response.status_code == 201
+    assert client.get(f"/api/cases/{case_id}", headers=auth(DOCTOR)).json()["assessment_is_outdated"] is True
+    bundle = bundle_for(case_id)
+    by_url = {entry["fullUrl"]: entry["resource"] for entry in bundle["entry"]}
+    [summary_source] = [p for p in resources(bundle, "Provenance")
+                        if p["agent"][0]["type"]["coding"][0]["code"] == "author"]
+    claimed = [decoded(by_url[e["what"]["reference"]]) for e in summary_source["entity"]]
+    assert claimed and "Correction: oxygen saturation now 78 percent." not in claimed
+
+
+def test_a_summary_outdated_by_an_eta_change_says_so(monkeypatch):
+    case_id, _ = handoff_case()
+
+    async def pending(_):
+        pass
+    monkeypatch.setattr(case_assessment.runner, "request", pending)
+    assert client.post(f"/api/cases/{case_id}/updates", headers=auth(EMT),
+                       json={"kind": "eta", "eta_minutes": 1}).status_code == 201
+    assert client.get(f"/api/cases/{case_id}", headers=auth(DOCTOR)).json()["assessment_is_outdated"] is True
+    [summary] = [d for d in resources(bundle_for(case_id), "DocumentReference") if d["type"]["text"].startswith("AI-drafted")]
+    assert summary["description"].startswith("Outdated: ")
+    assert "Outdated:" in decoded(summary)
