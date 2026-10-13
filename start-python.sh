@@ -10,11 +10,6 @@ if [ ! -f .env ]; then
     echo "Required environment variables:"
     echo "  JWT_SECRET=your-super-secret-jwt-key-here"
     echo "  OPENAI_API_KEY=your-openai-api-key-here"
-    echo "  TWILIO_ACCOUNT_SID=your-twilio-account-sid"
-    echo "  TWILIO_AUTH_TOKEN=your-twilio-auth-token"
-    echo "  TWILIO_PHONE_NUMBER=+1234567890"
-    echo "  SENDGRID_API_KEY=your-sendgrid-api-key"
-    echo "  SENDGRID_FROM_EMAIL=noreply@yourapp.com"
     exit 1
 fi
 

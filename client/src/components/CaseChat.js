@@ -64,11 +64,11 @@ const readEventStream = async (url, headers, signal, onOpen, onMessage) => {
   }
 };
 
-// Pass caseId for a case's thread, or recordingId for the older single-recording flow.
-const CaseChat = ({ caseId, recordingId, className = '' }) => {
-  const threadField = caseId != null ? 'case_id' : 'recording_id';
-  const threadId = caseId != null ? caseId : recordingId;
-  const basePath = caseId != null ? `/api/cases/${caseId}` : `/api/recordings/${recordingId}`;
+// The message thread of one case.
+const CaseChat = ({ caseId, className = '' }) => {
+  const threadField = 'case_id';
+  const threadId = caseId;
+  const basePath = `/api/cases/${caseId}`;
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
   const [status, setStatus] = useState('loading'); // loading | ready | error

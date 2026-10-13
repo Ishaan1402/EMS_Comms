@@ -17,8 +17,7 @@ import database
 from database import init_database, insert_sample_data, query, run
 from middleware.auth import create_access_token
 import openai_config
-import thread_pools
-from routes import cases, recordings
+from routes import cases
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -636,33 +635,20 @@ class TestAuditFixes:
             database.DB_PATH = previous
         assert row == {"status": "failed", "error": "assessed in an earlier format; re-assessing", "summary": "old"}
 
-    def test_old_recording_routes_are_limited_to_their_emt_and_notified_doctors(self):
-        emt_id = query("SELECT id FROM users WHERE username = ?", (EMT,))[0]["id"]
-        recording_id = run("INSERT INTO recordings (emt_id, patient_info, audio_file_path) VALUES (?, 'private', 'x')",
-                           (emt_id,))["id"]
-        assert client.get(f"/api/recordings/{recording_id}", headers=auth(EMT)).status_code == 200
-        assert client.get(f"/api/recordings/{recording_id}", headers=auth(OTHER_EMT)).status_code == 404
-        assert client.get(f"/api/doctors/recording/{recording_id}", headers=auth(DOCTOR)).status_code == 404
-        doctor_id = query("SELECT id FROM users WHERE username = ?", (DOCTOR,))[0]["id"]
-        run("INSERT INTO notifications (recording_id, doctor_id, notification_type) VALUES (?, ?, 'both')",
-            (recording_id, doctor_id))
-        assert client.get(f"/api/doctors/recording/{recording_id}", headers=auth(DOCTOR)).status_code == 200
-        assert client.get(f"/api/recordings/{recording_id}", headers=auth(OTHER_DOCTOR)).status_code == 404
-
-    def test_recording_audio_is_not_served(self):
-        audio = Path("uploads") / "audit-private-recording.wav"  # where the old flow saves audio
-        audio.parent.mkdir(exist_ok=True)
+    def test_clip_audio_is_not_served(self):
+        audio = Path("private_uploads") / "live_segments" / "audit-private-clip.wav"  # where live clips are saved
+        audio.parent.mkdir(parents=True, exist_ok=True)
         audio.write_bytes(b"private audio")
         try:
-            response = client.get(f"/uploads/{audio.name}")
-            assert response.status_code == 404 and response.content != b"private audio"
+            for path in (f"/private_uploads/live_segments/{audio.name}", f"/live_segments/{audio.name}"):
+                response = client.get(path)
+                assert response.status_code == 404 and response.content != b"private audio"
         finally:
             audio.unlink()
 
     def test_scoring_calls_finish_before_they_are_given_up_on(self):
         attempts = openai_config.OPENAI_MAX_RETRIES + 1
         assert attempts * openai_config.SCORING_REQUEST_TIMEOUT_SECONDS < case_assessment.SCORING_TIMEOUT_SECONDS
-        assert case_assessment.assessment_executor is not thread_pools.slow_executor
 
     def test_server_timestamps_never_repeat(self):
         stamps = [database.utc_now_iso() for _ in range(2000)]
@@ -835,14 +821,16 @@ class TestScoringRequest:
 
         def create(**kwargs):
             sent.update(kwargs)
-            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"risk_score": 3}'))])
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(SCORED), refusal=None))],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1))
         monkeypatch.setattr(openai_config, "openai_client",
                             SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
         return sent
 
     def test_request_has_a_timeout_and_reasoning_effort(self, monkeypatch):
         sent = self.capture(monkeypatch)
-        asyncio.run(recordings.analyze_with_llm("transcript", "info"))
+        asyncio.run(case_assessment.score({"input": {"case_id": "case-1", "current_transcript": "x"}}))
         assert sent["model"] == openai_config.SCORING_MODEL
         assert sent["timeout"] == openai_config.SCORING_REQUEST_TIMEOUT_SECONDS
         assert sent["extra_body"]["reasoning_effort"] == "none"
@@ -850,7 +838,7 @@ class TestScoringRequest:
     def test_blank_reasoning_effort_is_not_sent(self, monkeypatch):
         sent = self.capture(monkeypatch)
         monkeypatch.setattr(openai_config, "SCORING_REASONING_EFFORT", "")
-        asyncio.run(recordings.analyze_with_llm("transcript", "info"))
+        asyncio.run(case_assessment.score({"input": {"case_id": "case-1", "current_transcript": "x"}}))
         assert "reasoning_effort" not in sent["extra_body"]
 
 
@@ -954,44 +942,19 @@ class TestCaseMessages:
         assert client.post(f"/api/cases/{case['id']}/messages", json={"body": "x"},
                            headers=auth(OTHER_EMT)).status_code == 404
 
-    def test_client_id_cannot_cross_from_a_recording_thread_to_a_case(self):
-        case = start_case()
-        emt_id = query("SELECT id FROM users WHERE username = ?", (EMT,))[0]["id"]
-        recording_id = run("INSERT INTO recordings (emt_id, audio_file_path) VALUES (?, 'x')", (emt_id,))["id"]
-        first = client.post(f"/api/recordings/{recording_id}/messages", json={"body": "a", "client_id": "m-1"},
+    def test_client_id_cannot_cross_from_one_case_to_another(self):
+        first_case = start_case()
+        first = client.post(f"/api/cases/{first_case['id']}/messages", json={"body": "a", "client_id": "m-1"},
                             headers=auth(EMT))
         assert first.status_code == 201
-        reused = client.post(f"/api/cases/{case['id']}/messages", json={"body": "a", "client_id": "m-1"},
+        second_case = start_case()
+        reused = client.post(f"/api/cases/{second_case['id']}/messages", json={"body": "a", "client_id": "m-1"},
                              headers=auth(EMT))
         assert reused.status_code == 409
 
     def test_a_message_belongs_to_exactly_one_thread(self):
         with pytest.raises(sqlite3.IntegrityError):
             run("INSERT INTO messages (sender_id, sender_role, body) VALUES (1, 'emt', 'orphan')")
-
-
-class TestLegacyRecordingScores:
-    def test_uploaded_recording_has_no_score_until_scored(self):
-        response = client.post(
-            "/api/recordings/upload",
-            files={"audio": ("r.webm", b"audio", "audio/webm")},
-            headers=auth(EMT),
-        )
-        row = query("SELECT risk_score, priority_level FROM recordings WHERE id = ?",
-                    (response.json()["recording"]["id"],))[0]
-        assert row == {"risk_score": None, "priority_level": None}
-
-    def test_missing_model_score_is_not_replaced_by_a_default(self, monkeypatch):
-        monkeypatch.setattr(recordings, "transcribe_audio_sync", lambda path: "patient fell")
-
-        async def no_score(transcription, patient_info=""):
-            return {"chief_complaint": "Fall", "medical_summary": "Fall, unclear injuries"}
-        monkeypatch.setattr(recordings, "analyze_with_llm", no_score)
-        emt_id = query("SELECT id FROM users WHERE username = ?", (EMT,))[0]["id"]
-        recording_id = run("INSERT INTO recordings (emt_id, audio_file_path) VALUES (?, 'x')", (emt_id,))["id"]
-        asyncio.run(recordings.process_recording(recording_id, "x"))
-        row = query("SELECT risk_score, priority_level, chief_complaint FROM recordings WHERE id = ?", (recording_id,))[0]
-        assert row == {"risk_score": None, "priority_level": None, "chief_complaint": "Fall"}
 
 
 class TestMigration:
@@ -1086,8 +1049,8 @@ class TestCaseAccessMatrix:
             before, raw_case = snapshot(), query("SELECT * FROM cases WHERE id = ?", (case["id"],))
             for suffix in ("", "/segments", "/updates", "/vitals", "/assessments", "/findings", "/extractions", "/messages"):
                 denied = client.get(path + suffix, headers=headers)
-                # Messages share the legacy router: unsupported roles reach its case-visibility
-                # check and get 404, while the other routes reject the role with 403 first.
+                # The message routes check case visibility, not role: unsupported roles get 404,
+                # while the other routes reject the role with 403 first.
                 expected = 404 if identity == "wrong_role" and suffix == "/messages" else expected_read
                 assert denied.status_code == expected, (identity, suffix, denied.text)
                 assert set(denied.json()) == {"error"}

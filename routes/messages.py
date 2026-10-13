@@ -10,8 +10,7 @@ import sqlite3
 from database import query, get_db
 from middleware.auth import get_current_user, APIError
 
-# Mounted at /api/recordings (threads of the older single-recording flow) and /api/cases.
-router = APIRouter()
+# Mounted at /api/cases: each case has one message thread.
 case_router = APIRouter()
 
 MAX_MESSAGE_LENGTH = 2000
@@ -29,10 +28,10 @@ _NON_NEGATIVE_INT = re.compile(r"[0-9]+")
 
 
 class Thread:
-    """A message thread: a case, or a recording from the older single-recording flow."""
+    """A case's message thread. (The messages table also has recording_id, from the removed recording flow.)"""
 
     def __init__(self, column: str, thread_id: int):
-        self.column = column  # "case_id" or "recording_id"; never user input
+        self.column = column  # "case_id"; never user input
         self.id = thread_id
 
     @property
@@ -72,29 +71,6 @@ def _parse_id(id: str, not_found: str) -> int:
         raise APIError(404, not_found)
 
 
-def authorize_case(user: dict, recording_id: int) -> None:
-    """
-    The EMT who recorded the case and the doctors notified about it may use its messages.
-    Everyone else gets the same 404 as a missing case, so case ids can't be probed.
-    """
-    role = user.get("role")
-    if role == "emt":
-        rows = query(
-            'SELECT 1 FROM recordings WHERE id = ? AND emt_id = ?',
-            (recording_id, user.get("id"))
-        )
-    elif role == "doctor":
-        rows = query(
-            'SELECT 1 FROM notifications WHERE recording_id = ? AND doctor_id = ? LIMIT 1',
-            (recording_id, user.get("id"))
-        )
-    else:
-        rows = []
-
-    if not rows:
-        raise APIError(404, "Recording not found")
-
-
 def authorize_live_case(user: dict, case_id: int) -> None:
     """Same visibility as the case itself: the EMT who owns it and users of the destination hospital."""
     role = user.get("role")
@@ -111,12 +87,6 @@ def authorize_live_case(user: dict, case_id: int) -> None:
 
     if not rows:
         raise APIError(404, "Case not found")
-
-
-def _recording_thread(id: str, user: dict) -> Thread:
-    recording_id = _parse_id(id, "Recording not found")
-    authorize_case(user, recording_id)
-    return Thread("recording_id", recording_id)
 
 
 def _case_thread(id: str, user: dict) -> Thread:
@@ -286,25 +256,6 @@ def _stream(thread: Thread, request: Request, after_id: Optional[str]):
             "X-Accel-Buffering": "no",
         }
     )
-
-
-@router.get("/{id}/messages")
-async def get_messages(id: str, request: Request, after_id: Optional[str] = Query(None)):
-    """Message history for a recording. after_id returns only newer messages (used to catch up)."""
-    thread = _recording_thread(id, get_current_user(request))
-    return _history(thread, after_id)
-
-
-@router.post("/{id}/messages", status_code=201)
-async def post_message(id: str, request: Request):
-    current_user = get_current_user(request)
-    return await _post(_recording_thread(id, current_user), request, current_user)
-
-
-@router.get("/{id}/messages/stream")
-async def stream_messages(id: str, request: Request, after_id: Optional[str] = Query(None)):
-    thread = _recording_thread(id, get_current_user(request))
-    return _stream(thread, request, after_id)
 
 
 @case_router.get("/{id}/messages")
