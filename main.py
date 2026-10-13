@@ -24,6 +24,7 @@ from routes import alerts
 import case_queue
 import openai_config
 import sas_sync
+from routes import fhir
 
 
 def build_info() -> dict:
@@ -163,6 +164,7 @@ async def version(current_user: dict = Depends(require_role(["emt", "doctor"])))
     return BUILD_INFO or build_info()
 app.include_router(alerts.router, prefix="/api/cases", tags=["alerts"])
 app.include_router(sas.router, prefix="/api/sas", tags=["sas"])
+app.include_router(fhir.router, prefix="/api/cases", tags=["fhir"])
 
 # Serve React app in production
 if os.getenv("NODE_ENV") == "production":

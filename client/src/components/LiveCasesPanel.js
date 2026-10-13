@@ -129,6 +129,20 @@ const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move
   </li>
 );
 
+// The verified handoff as a FHIR R4 Bundle (GET /api/cases/:id/fhir), saved as a file.
+const downloadFhir = async (caseId) => {
+  try {
+    const { data } = await axios.get(`/api/cases/${caseId}/fhir`);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/fhir+json' }));
+    link.download = `case-${caseId}-handoff.fhir.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  } catch (error) {
+    toast.error('Could not export the handoff');
+  }
+};
+
 const LiveCasesPanel = () => {
   const [cases, setCases] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -378,6 +392,10 @@ const LiveCasesPanel = () => {
                     Started {new Date(selected.started_at).toLocaleString()}
                     {selected.closed_at && ` · Closed ${new Date(selected.closed_at).toLocaleTimeString()}`}
                   </p>
+                  <button onClick={() => downloadFhir(selected.id)} className="mt-1 text-xs text-blue-700 underline"
+                          title="The handoff as a FHIR R4 Bundle for the hospital's record system: each extracted fact with the report it quotes">
+                    Download for the EHR (FHIR R4)
+                  </button>
                 </div>
                 {selected.status === 'active' && (
                   <div className="flex flex-wrap gap-2 mb-4">
