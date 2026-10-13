@@ -100,8 +100,9 @@ def run(sql: str, params: tuple = ()):
         cursor.execute(sql, params)
         return {"id": cursor.lastrowid, "changes": cursor.rowcount}
 
-# Messages between the EMT and the receiving hospital team. Each message belongs to exactly
-# one thread: a case (case_id) or, for the older single-recording flow, a recording (recording_id).
+# Messages between the EMT and the receiving hospital team, on a case's thread (case_id).
+# recording_id only holds threads of the removed single-recording flow in databases from before
+# #38; new databases have no recordings table, and older ones keep theirs (nothing is deleted).
 MESSAGES_TABLE = """
     CREATE TABLE IF NOT EXISTS {name} (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,7 +114,6 @@ MESSAGES_TABLE = """
       client_id TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       CHECK ((recording_id IS NULL) != (case_id IS NULL)),
-      FOREIGN KEY (recording_id) REFERENCES recordings (id) ON DELETE CASCADE,
       FOREIGN KEY (case_id) REFERENCES cases (id) ON DELETE CASCADE,
       FOREIGN KEY (sender_id) REFERENCES users (id)
     )"""
@@ -140,42 +140,6 @@ def init_database():
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       -- The hospital a doctor/nurse works at; NULL for EMTs.
       hospital_id INTEGER REFERENCES hospitals (id)
-    );
-
-    -- Recordings table
-    CREATE TABLE IF NOT EXISTS recordings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      emt_id INTEGER,
-      patient_info TEXT,
-      audio_file_path TEXT NOT NULL,
-      transcription TEXT,
-      llm_summary TEXT,
-      urgency_level TEXT DEFAULT 'medium' CHECK (urgency_level IN ('low', 'medium', 'high', 'critical')),
-      risk_score INTEGER DEFAULT 5 CHECK (risk_score >= 0 AND risk_score <= 10),
-      priority_level INTEGER DEFAULT 3 CHECK (priority_level >= 1 AND priority_level <= 5),
-      chief_complaint TEXT,
-      vital_signs TEXT,
-      symptoms TEXT,
-      recommended_actions TEXT,
-      critical_info TEXT,
-      status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'notified', 'error')),
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (emt_id) REFERENCES users (id)
-    );
-
-    -- Notifications table
-    CREATE TABLE IF NOT EXISTS notifications (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      recording_id INTEGER,
-      doctor_id INTEGER,
-      notification_type TEXT NOT NULL CHECK (notification_type IN ('sms', 'email', 'both')),
-      sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      delivered BOOLEAN DEFAULT 0,
-      read_at DATETIME,
-      response TEXT,
-      FOREIGN KEY (recording_id) REFERENCES recordings (id),
-      FOREIGN KEY (doctor_id) REFERENCES users (id)
     );
 
     -- Receiving hospitals an EMT can route a case to.
@@ -472,9 +436,6 @@ def init_database():
     CREATE INDEX IF NOT EXISTS idx_messages_case ON messages(case_id, id);
     -- A retried send with the same client_id returns the original message instead of a duplicate.
     CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_id ON messages(sender_id, client_id) WHERE client_id IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_recordings_emt_id ON recordings(emt_id);
-    CREATE INDEX IF NOT EXISTS idx_recordings_status ON recordings(status);
-    CREATE INDEX IF NOT EXISTS idx_notifications_doctor_id ON notifications(doctor_id);
     CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
     CREATE INDEX IF NOT EXISTS idx_users_available ON users(is_available);
     """
