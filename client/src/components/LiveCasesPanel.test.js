@@ -93,3 +93,20 @@ test('queue rows label the AI category as a suggestion and the board states the 
   expect(container.textContent).toContain('not validated on real EMS audio');
   expect(container.textContent).toContain('0 crew alerts');
 });
+
+test('a pushed clip row from a finished report clears its "reporting…" label', async () => {
+  await act(async () => root.render(<LiveCasesPanel />));
+  await resolve(pendingFor('/api/hospitals/mine')[0], { id: 1, name: 'General' });
+  const initial = { ...inbound(1, 'Medic 1'), info_version: 1 };
+  await resolve(pendingFor('/api/cases')[0], [initial]);
+  await resolve(pendingFor('/api/cases/queue')[0], { ...queue(1, [[1, 'Medic 1']]), cases: [initial] });
+  const clip = { id: 1, case_id: 1, seq: 0, text: 'BP 100 over 64', status: 'completed',
+    recorded_at: at(0), updated_at: at(2), report_id: 'r1', report_complete: 0, info_version: null };
+  await resolve(pendingFor('/api/cases/1/segments')[0], [clip]);
+  expect(container.textContent).toContain('reporting…');
+
+  await act(() => mockHandler('segment.updated', {
+    case_id: 1, segment: { ...clip, report_complete: 1, info_version: 2, updated_at: at(5) },
+  }));
+  expect(container.textContent).not.toContain('reporting…');
+});
