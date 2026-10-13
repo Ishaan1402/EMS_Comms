@@ -63,6 +63,8 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText
           if (!pendingSince.current.has(pendingKey)) pendingSince.current.set(pendingKey, Date.now());
           waitedMs = now - pendingSince.current.get(pendingKey);
         }
+        // Part of a report the crew hasn't sent yet: shown as spoken, not yet new information.
+        const reporting = segment.report_complete === 0;
         const isNew = newSinceVersion != null && segment.info_version != null && segment.info_version > newSinceVersion;
         return (
           <div key={key} className="flex gap-3 text-sm">
@@ -75,7 +77,12 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText
             <div className={`flex-1 border-l-2 pl-3 pb-1 ${isNew ? 'border-blue-500' : 'border-gray-200'}`}>
               {segment.status === 'completed' && (
                 segment.text
-                  ? <p className="text-gray-900 leading-relaxed">{segment.text}{isNew && <NewTag />}</p>
+                  ? (
+                    <p className={`leading-relaxed ${reporting ? 'text-gray-500' : 'text-gray-900'}`}>
+                      {segment.text}{isNew && <NewTag />}
+                      {reporting && <span className="ml-2 text-xs text-gray-400">reporting…</span>}
+                    </p>
+                  )
                   : <p className="text-gray-400 italic">(no speech detected)</p>
               )}
 

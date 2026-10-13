@@ -24,7 +24,7 @@ const extensionFor = (mimeType) => {
  * Upload queue for live-case audio segments. Retries with backoff and keeps the
  * audio of segments that still fail so the EMT can retry them by hand.
  *
- * Items: { caseId, seq, recorded_at, duration_ms, blob }. Each gets a client_id so the
+ * Items: { caseId, seq, recorded_at, duration_ms, report_id?, blob }. Each gets a client_id so the
  * server can tell a retried upload of this clip from a different clip with the same seq.
  * `pending` lists items not yet accepted by the server, with status
  * 'uploading' | 'upload_failed' (shape-compatible with server segments for display).
@@ -54,6 +54,7 @@ export default function useSegmentUploads(onUploaded) {
         form.append('recorded_at', item.recorded_at);
         form.append('sent_at', new Date().toISOString());
         form.append('duration_ms', String(item.duration_ms));
+        if (item.report_id) form.append('report_id', item.report_id);
         const response = await axios.post(`/api/cases/${item.caseId}/segments`, form, { timeout: UPLOAD_TIMEOUT_MS });
         setEntry(item.seq, null);
         onUploadedRef.current(response.data);

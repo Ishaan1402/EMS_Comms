@@ -12,32 +12,33 @@ afterEach(() => act(() => root.unmount()));
 
 const inbound = (overrides = {}) => ({
   status: 'active', operational_status: 'inbound', segment_count: 1,
-  // An old clip does not establish that the report is complete.
   last_segment_at: '2020-01-01T00:00:00Z', preparation_category: 'Can wait',
-  processing: { status: 'completed' },
+  processing: { status: 'completed' }, open_report: null,
   current_assessment: { summary: 'Patient awake.' }, ...overrides,
 });
 
-test('an inbound audio handoff and its queue category stay provisional between clips', () => {
-  act(() => root.render(<CaseOverview liveCase={inbound()} />));
-  expect(container.textContent).toContain('Can wait · provisional');
-  expect(container.textContent).toContain('the radio report may still be incomplete');
+const reporting = { open_report: { id: 'r1', clips: 2, started_at: '2026-10-13T15:00:00Z' } };
+
+test('while the crew is reporting, the handoff says it covers the reports already sent', () => {
+  act(() => root.render(<CaseOverview liveCase={inbound(reporting)} />));
+  expect(container.textContent).toContain('Reporting…');
+  expect(container.textContent).toContain("covers the reports they've already sent");
   expect(container.textContent).toContain('Patient awake.');
-  act(() => root.render(<CategoryBadge liveCase={inbound()} />));
-  expect(container.textContent).toBe('Can wait · provisional');
+  act(() => root.render(<CategoryBadge liveCase={inbound(reporting)} />));
+  expect(container.textContent).toBe('Can wait');
 });
 
 test.each([
-  { segment_count: 0 }, { arrived_at: '2026-10-11T19:00:00Z' }, { status: 'closed' },
-])('the live-radio caveat is limited to inbound audio cases: %j', (overrides) => {
+  {}, { ...reporting, arrived_at: '2026-10-11T19:00:00Z' }, { ...reporting, status: 'closed' },
+])('the reporting caveat is limited to inbound cases with a report in progress: %j', (overrides) => {
   act(() => root.render(<CaseOverview liveCase={inbound(overrides)} />));
+  expect(container.textContent).not.toContain('Reporting');
   expect(container.textContent).not.toContain('provisional');
-  expect(container.textContent).not.toContain('Provisional');
 });
 
-test('an ETA refresh keeps the earlier result visibly outdated and provisional', () => {
+test('an ETA refresh keeps the earlier result visibly outdated', () => {
   act(() => root.render(<CaseOverview liveCase={inbound({ assessment_is_outdated: true })} />));
-  expect(container.textContent).toContain('Can wait · earlier info · provisional');
+  expect(container.textContent).toContain('Can wait · earlier info');
   expect(container.textContent).toContain('based on earlier information or ETA');
 });
 
@@ -49,7 +50,7 @@ test('the handoff identifies its assessment time separately from the live arriva
   expect(container.textContent).toContain('current arrival time shown above');
 });
 
-test('a provisional report with no assessment never invents a category', () => {
+test('a report with no assessment never invents a category', () => {
   act(() => root.render(<CaseOverview liveCase={inbound({
     current_assessment: null, preparation_category: null,
     processing: { status: 'pending', assessment: { status: 'pending' } },

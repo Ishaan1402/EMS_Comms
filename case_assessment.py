@@ -27,6 +27,7 @@ from typing import Callable, Optional
 
 import openai
 
+import case_reports
 from database import get_db, query, run, utc_now_iso
 import openai_config
 
@@ -157,8 +158,9 @@ def read_inputs(case_id: int) -> Optional[dict]:
             (case_id, version),
         ).fetchone()[0]
         segments = conn.execute(
-            """SELECT seq, text, info_version, recorded_at FROM transcript_segments
-               WHERE case_id = ? AND status = 'completed' AND text != '' ORDER BY seq""",
+            f"""SELECT seq, text, info_version, recorded_at FROM transcript_segments
+                WHERE case_id = ? AND status = 'completed' AND text != '' AND {case_reports.FINISHED_CLIP}
+                ORDER BY seq""",
             (case_id,),
         ).fetchall()
         updates = conn.execute(

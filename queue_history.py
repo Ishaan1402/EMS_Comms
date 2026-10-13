@@ -17,7 +17,7 @@ from database import get_db, query, utc_now_iso
 CAUSES = {
     "case_opened", "update_added", "eta_changed", "clip_received", "transcript_added", "transcription_failed",
     "transcription_retried", "failure_handled", "assessment_updated", "acknowledged", "arrived", "closed",
-    "server_started",
+    "report_sent", "report_completed", "server_started",
 }
 
 EVENT_COLUMNS = ("e.id, e.hospital_id, e.revision, e.case_id, c.source_case_id, c.ems_unit, e.change, "

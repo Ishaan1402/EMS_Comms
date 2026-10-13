@@ -320,6 +320,156 @@ class TestSegments:
         assert segment["error"] == "interrupted by a server restart"
 
 
+def end_report(case_id, report_id, clips, username=EMT):
+    return client.post(f"/api/cases/{case_id}/reports/{report_id}/end", json={"clips": clips},
+                       headers=auth_headers(username))
+
+
+def get_case(case_id, username=DOCTOR):
+    return client.get(f"/api/cases/{case_id}", headers=auth_headers(username)).json()
+
+
+def get_segments(case_id, username=DOCTOR):
+    return client.get(f"/api/cases/{case_id}/segments", headers=auth_headers(username)).json()
+
+
+class TestReports:
+    """Clips of one report become new information together, once the report is sent and transcribed."""
+
+    def test_report_is_new_information_once_sent_and_transcribed(self, monkeypatch):
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "58 male, chest pain", 1: "BP 92 over 58"}))
+        case = start_case()
+        assert upload(case["id"], 0, report_id="r1").status_code == 201
+        assert upload(case["id"], 1, report_id="r1").status_code == 201
+
+        # Transcribed and shown, but the crew is still reporting: not new information yet.
+        during = get_case(case["id"])
+        assert during["info_version"] == 1
+        assert during["open_report"] == {"id": "r1", "clips": 2, "started_at": during["open_report"]["started_at"]}
+        segments = get_segments(case["id"])
+        assert [s["text"] for s in segments] == ["58 male, chest pain", "BP 92 over 58"]
+        assert [s["report_id"] for s in segments] == ["r1", "r1"]
+        assert [s["report_complete"] for s in segments] == [0, 0]
+        assert [s["info_version"] for s in segments] == [None, None]
+
+        sent = end_report(case["id"], "r1", 2)
+        assert sent.status_code == 200, sent.text
+        assert sent.json()["completed_at"] and sent.json()["info_version"] == 2
+        after = get_case(case["id"])
+        assert after["info_version"] == 2
+        assert after["open_report"] is None
+        assert [(s["info_version"], s["report_complete"]) for s in get_segments(case["id"])] == [(2, 1), (2, 1)]
+
+    def test_acknowledgment_holds_while_the_crew_is_reporting(self, monkeypatch):
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "pale", 1: "faint"}))
+        case = start_case()
+        client.post(f"/api/cases/{case['id']}/acknowledge", headers=auth_headers(DOCTOR))
+        upload(case["id"], 0, report_id="r1")
+        upload(case["id"], 1, report_id="r1")
+        assert get_case(case["id"])["operational_status"] == "acknowledged"
+
+        end_report(case["id"], "r1", 2)
+        assert get_case(case["id"])["operational_status"] == "inbound"
+
+    def test_report_sent_before_its_clips_arrive(self, monkeypatch):
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "first", 1: "second"}))
+        case = start_case()
+        sent = end_report(case["id"], "r1", 2)
+        assert sent.status_code == 200
+        assert sent.json()["completed_at"] is None
+
+        upload(case["id"], 1, report_id="r1")
+        assert get_case(case["id"])["info_version"] == 1
+        upload(case["id"], 0, report_id="r1")
+        assert get_case(case["id"])["info_version"] == 2
+
+    def test_report_without_text_changes_nothing(self, monkeypatch):
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: ""}))
+        case = start_case()
+        upload(case["id"], 0, report_id="r1")
+        assert end_report(case["id"], "r1", 1).json()["completed_at"]
+        assert get_case(case["id"])["info_version"] == 1
+
+    def test_failed_clip_completes_its_report_and_flags_the_case(self, monkeypatch):
+        def transcribe(audio_path, prompt):
+            if "-seg-1-" in audio_path:
+                raise RuntimeError("boom")
+            return "airway clear"
+
+        monkeypatch.setattr(cases, "transcribe_segment_sync", transcribe)
+        case = start_case()
+        upload(case["id"], 0, report_id="r1")
+        upload(case["id"], 1, report_id="r1")
+        end_report(case["id"], "r1", 2)
+        after = get_case(case["id"])
+        assert after["info_version"] == 2
+        assert after["processing"]["needs_review"]
+
+        # The retried clip arrives after its report completed: it is new information on its own.
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({1: "breathing 28"}))
+        failed = [s for s in get_segments(case["id"]) if s["status"] == "failed"][0]
+        assert client.post(f"/api/cases/{case['id']}/segments/{failed['id']}/retry",
+                           headers=auth_headers(EMT)).status_code == 200
+        assert get_case(case["id"])["info_version"] == 3
+
+    @pytest.mark.parametrize("finish", ["close", "arrive"])
+    def test_closing_or_arrival_ends_an_unsent_report(self, monkeypatch, finish):
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "GCS 14"}))
+        case = start_case()
+        upload(case["id"], 0, report_id="r1")
+        assert get_case(case["id"])["info_version"] == 1
+
+        assert client.post(f"/api/cases/{case['id']}/{finish}", headers=auth_headers(EMT)).status_code == 200
+        after = get_case(case["id"])
+        assert after["info_version"] == 2
+        assert after["open_report"] is None
+
+    def test_restart_ends_reports_of_cases_that_closed(self, monkeypatch):
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "SpO2 88"}))
+        case = start_case()
+        upload(case["id"], 0, report_id="r1")
+        database.run("UPDATE cases SET status = 'closed' WHERE id = ?", (case["id"],))
+
+        cases.settle_reports_after_restart()
+        assert get_case(case["id"])["info_version"] == 2
+
+    def test_sending_a_report_again(self, monkeypatch):
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "stable"}))
+        case = start_case()
+        upload(case["id"], 0, report_id="r1")
+        assert end_report(case["id"], "r1", 1).status_code == 200
+        assert end_report(case["id"], "r1", 1).status_code == 200
+        assert get_case(case["id"])["info_version"] == 2
+        assert end_report(case["id"], "r1", 2).status_code == 409
+
+    def test_report_rejections(self):
+        case = start_case()
+        assert end_report(case["id"], "clip:x", 1).status_code == 400
+        assert end_report(case["id"], "r1", -1).status_code == 400
+        assert end_report(case["id"], "r1", True).status_code == 400
+        assert upload(case["id"], 0, report_id="clip:x").status_code == 400
+        assert end_report(case["id"], "r1", 1, username=DOCTOR).status_code == 403
+        other = start_case(username=OTHER_EMT)
+        assert end_report(other["id"], "r1", 1).status_code == 404
+
+        client.post(f"/api/cases/{case['id']}/close", headers=auth_headers(EMT))
+        assert end_report(case["id"], "r2", 1).status_code == 409
+
+    def test_ai_readers_skip_unfinished_reports(self, monkeypatch):
+        import case_extraction
+        monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "BP 92 over", 1: "58"}))
+        case = start_case(patient_info=None)
+        upload(case["id"], 0, report_id="r1")
+        assert case_assessment.read_inputs(case["id"])["has_information"] is False
+        assert case_extraction.read_new_information(case["id"])["new"] == []
+        assert case_extraction.read_new_information(case["id"])["earlier"] == []
+
+        upload(case["id"], 1, report_id="r1")
+        end_report(case["id"], "r1", 2)
+        assert case_assessment.read_inputs(case["id"])["input"]["current_transcript"] == "BP 92 over 58"
+        assert [i["text"] for i in case_extraction.read_new_information(case["id"])["new"]] == ["BP 92 over", "58"]
+
+
 class TestBroker:
     @pytest.mark.parametrize("change", ["expired", "hospital", "role"])
     def test_open_stream_stops_before_delivering_after_authorization_changes(self, monkeypatch, change):

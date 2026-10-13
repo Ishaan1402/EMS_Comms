@@ -7,7 +7,7 @@ import { mergeNewer, upsertNewer } from '../utils/liveRows';
 import useCaseDetails from '../hooks/useCaseDetails';
 import useCaseFindings from '../hooks/useCaseFindings';
 import LiveTranscript from './LiveTranscript';
-import CaseOverview, { CategoryBadge, OperationalBadge, ProcessingBadge } from './CaseOverview';
+import CaseOverview, { CategoryBadge, OperationalBadge, ProcessingBadge, ReportingBadge } from './CaseOverview';
 import CaseChat from './CaseChat';
 import HospitalWorkflowSettings, { ArrivalHighlight } from './HospitalWorkflowSettings';
 
@@ -102,6 +102,7 @@ const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move
       </div>
       <div className="flex flex-wrap gap-1 mb-1">
         <CategoryBadge liveCase={c} />
+        <ReportingBadge liveCase={c} />
         <ArrivalHighlight liveCase={c} serverNow={serverNow} minutes={arrivalMinutes} />
         {c.status === 'active' && <OperationalBadge status={c.operational_status} />}
         {c.processing?.needs_review && <ProcessingBadge processing={c.processing} />}

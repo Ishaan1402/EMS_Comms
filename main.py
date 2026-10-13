@@ -66,6 +66,7 @@ async def lifespan(app: FastAPI):
     BUILD_INFO.update(build_info())
     init_database()
     cases.fail_interrupted_segments()
+    cases.settle_reports_after_restart()
     case_assessment.fail_interrupted_assessments()
     for case_id in case_assessment.unassessed_open_cases():
         case_assessment.runner.start(case_id, force=True)
