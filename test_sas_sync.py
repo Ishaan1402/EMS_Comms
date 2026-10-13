@@ -374,6 +374,34 @@ class TestCasClient:
             assert run_async(sas_sync.check(SETTINGS))[-len(expected):] == expected
 
 
+    def test_check_closes_the_session_after_a_network_error_and_reports_it(self, monkeypatch):
+        """Astra's Oct 13 audit (R7): a timeout in the action skipped the session close."""
+        closed = []
+
+        class TimingOut:
+            def __init__(self, settings):
+                pass
+
+            async def get(self, path, what):
+                return {"name": "app.test", "items": [{"name": "Public"}]}
+
+            async def open_session(self):
+                return "sess-1"
+
+            async def action(self, *args):
+                raise httpx.ReadTimeout("timed out")
+
+            async def close_session(self, session):
+                closed.append(session)
+
+            async def close(self):
+                pass
+        monkeypatch.setattr(sas_sync, "CasClient", TimingOut)
+        lines = run_async(sas_sync.check(SETTINGS))
+        assert closed == ["sess-1"]
+        assert lines[-2:] == ["CAS action: timed out", "CAS session close: ok"]
+
+
 class TestSync:
     def test_only_changed_tables_are_pushed(self, story):
         fake = FakeSas()
