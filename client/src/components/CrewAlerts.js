@@ -162,16 +162,23 @@ const CrewAlerts = ({ liveCase }) => {
   const [choice, setChoice] = useState(null);
   const [clock, setClock] = useState('');
   const [sending, setSending] = useState(false);
-  // Reused if the same submission is retried, so the server stores it once.
-  const clientId = useRef(newClientId());
+  // An id is reused only when the very same change is retried, so the server stores it once; a
+  // different change gets a new id (reusing one would return the old change instead of doing this one).
+  const pending = useRef(null);
   const alerts = liveCase.crew_alerts || { active: [] };
   const active = Object.fromEntries(alerts.active.map((a) => [a.alert, a]));
 
   const send = async (body, done) => {
+    const key = JSON.stringify(body);
+    if (pending.current?.key !== key) pending.current = { key, id: newClientId() };
     setSending(true);
     try {
-      await axios.post(`/api/cases/${liveCase.id}/alerts`, { ...body, client_id: clientId.current });
-      clientId.current = newClientId();
+      const { data } = await axios.post(`/api/cases/${liveCase.id}/alerts`, { ...body, client_id: pending.current.id });
+      pending.current = null;
+      if (data?.action !== body.action) {
+        toast.error('The alert on record is different from what you sent. Check it and try again.');
+        return;
+      }
       done();
     } catch (error) {
       toast.error(error.response?.data?.error || 'Could not send the alert — try again');

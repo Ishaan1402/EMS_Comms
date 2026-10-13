@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import axios from 'axios';
+import toast from 'react-hot-toast';
 import CrewAlerts, { CrewAlertBadges, CrewAlertPanel, CrewAlertSound, keyTimeFromClock } from './CrewAlerts';
 
 jest.mock('axios', () => ({ __esModule: true, default: { post: jest.fn() } }));
@@ -76,7 +77,7 @@ test('the hospital acknowledges the alert change it is looking at', async () => 
 });
 
 test('the crew calls an alert with the key time it typed', async () => {
-  axios.post.mockResolvedValue({ data: {} });
+  axios.post.mockResolvedValue({ data: { action: 'called' } });
   act(() => root.render(<CrewAlerts liveCase={withAlerts(1, [], null, false)} />));
   const strokeButton = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Stroke');
   act(() => strokeButton.click());
@@ -91,6 +92,23 @@ test('the crew calls an alert with the key time it typed', async () => {
   expect(body).toMatchObject({ alert: 'stroke', action: 'called' });
   expect(new Date(body.key_time).getHours()).toBe(14);
   expect(body.client_id).toBeTruthy();
+});
+
+test('after a lost reply, a different change gets a new id and a mismatched reply is not called success', async () => {
+  // From Astra's Oct 13 audit (R3): the call committed but its reply was lost; the live stream shows the call.
+  axios.post.mockRejectedValueOnce(new Error('reply lost'));
+  act(() => root.render(<CrewAlerts liveCase={withAlerts(1, [], null, false)} />));
+  act(() => [...container.querySelectorAll('button')].find((b) => b.textContent === 'Stroke').click());
+  await act(async () => container.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  act(() => root.render(<CrewAlerts liveCase={withAlerts(1, [stroke(3)], 3)} />));
+  window.confirm = jest.fn(() => true);
+  axios.post.mockResolvedValueOnce({ data: stroke(3) });  // a server answering with the old call
+  await act(async () => [...container.querySelectorAll('button')].find((b) => b.textContent === 'Cancel').click());
+  const [first, second] = axios.post.mock.calls.map(([, body]) => body);
+  expect([first.action, second.action]).toEqual(['called', 'cancelled']);
+  expect(second.client_id).not.toBe(first.client_id);
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(toast.error).toHaveBeenCalled();
 });
 
 test('a typed key time later than now means yesterday', () => {
