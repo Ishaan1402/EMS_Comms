@@ -13,6 +13,7 @@ import uuid
 import openai
 import case_assessment
 import case_extraction
+import case_reports
 import case_queue
 import queue_history
 from case_assessment import ASSESSMENT_COLUMNS, VITAL_SIGNS
@@ -55,6 +56,9 @@ CASE_SELECT = """
            (SELECT COUNT(*) FROM transcript_segments s WHERE s.case_id = c.id AND s.status = 'pending') AS pending_segment_count,
            (SELECT COUNT(*) FROM transcript_segments s
             WHERE s.case_id = c.id AND s.status = 'failed' AND s.dismissed_at IS NULL) AS failed_segment_count,
+           -- The report the crew is recording now, if any (case_reports.py).
+           (SELECT r.id FROM case_reports r WHERE r.case_id = c.id AND r.clip_count IS NULL
+            ORDER BY r.id DESC LIMIT 1) AS open_report_row,
            -- What the AI compares against: the latest acknowledgment of earlier information.
            (SELECT MAX(a.info_version) FROM case_acknowledgments a
             WHERE a.case_id = c.id AND a.info_version < c.info_version) AS baseline_version
@@ -66,7 +70,12 @@ CASE_SELECT = """
 SEGMENT_COLUMNS = (
     "id, case_id, seq, client_id, recorded_at, duration_ms, status, text, error, attempts, "
     "created_at, transcribed_at, updated_at, info_version, dismissed_at, dismissed_by, "
-    "(SELECT first_name || ' ' || last_name FROM users WHERE users.id = dismissed_by) AS dismissed_by_name"
+    "(SELECT first_name || ' ' || last_name FROM users WHERE users.id = dismissed_by) AS dismissed_by_name, "
+    # The device's id for the clip's report, and whether the report is complete (1 for clips from
+    # before reports existed). Until it is, the clip's text is shown but isn't new information yet.
+    "(SELECT client_id FROM case_reports WHERE case_reports.id = transcript_segments.report_id) AS report_id, "
+    "COALESCE((SELECT completed_at IS NOT NULL FROM case_reports "
+    "WHERE case_reports.id = transcript_segments.report_id), 1) AS report_complete"
 )
 
 UPDATE_SELECT = """
@@ -239,9 +248,22 @@ def describe_cases(rows: list) -> list:
         ids,
     )
 
+    open_rows = [row["open_report_row"] for row in rows if row["open_report_row"]]
+    open_reports = {}
+    if open_rows:
+        placeholders = ",".join("?" * len(open_rows))
+        open_reports = {r["id"]: r for r in query(
+            f"""SELECT r.id, r.client_id, r.started_at,
+                       (SELECT COUNT(*) FROM transcript_segments s WHERE s.report_id = r.id) AS clips
+                FROM case_reports r WHERE r.id IN ({placeholders})""", tuple(open_rows))}
+
     described = []
     for row in rows:
         case = dict(row)
+        report = open_reports.get(case.pop("open_report_row"))
+        # The crew is recording a report: its clips show live but aren't new information yet.
+        case["open_report"] = report and {"id": report["client_id"], "clips": report["clips"],
+                                          "started_at": report["started_at"]}
         ack = acks.get(case["id"])
         case["acknowledgment"] = ack and {
             "info_version": ack["info_version"],
@@ -565,27 +587,86 @@ async def get_case_details(case_id: str, current_user: dict = Depends(require_ro
     return get_case_for_user(case_id, current_user)
 
 
+def end_reports(conn, case_id: int, now: str, background_tasks: BackgroundTasks) -> None:
+    """Closing or arrival ends the case's unfinished reports with the clips they have."""
+    if case_reports.end_all(conn, case_id, now):
+        request_processing(background_tasks, case_id)
+
+
 @router.post("/{case_id}/close")
-async def close_case(case_id: str, current_user: dict = Depends(require_role(["emt"]))):
+async def close_case(case_id: str, background_tasks: BackgroundTasks,
+                     current_user: dict = Depends(require_role(["emt"]))):
     case = get_case_for_user(case_id, current_user)
     if case["status"] == "active":
         now = utc_now_iso()
-        run("UPDATE cases SET status = 'closed', closed_at = ?, updated_at = ? WHERE id = ?", (now, now, case["id"]))
+        with get_db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("UPDATE cases SET status = 'closed', closed_at = ?, updated_at = ? WHERE id = ?",
+                         (now, now, case["id"]))
+            end_reports(conn, case["id"], now, background_tasks)
         case = get_case(case["id"])
         publish_case("case.updated", case, "closed")
     return case
 
 
 @router.post("/{case_id}/arrive")
-async def mark_arrived(case_id: str, current_user: dict = Depends(require_role(["emt", "doctor"]))):
+async def mark_arrived(case_id: str, background_tasks: BackgroundTasks,
+                       current_user: dict = Depends(require_role(["emt", "doctor"]))):
     """The EMT or the hospital marks the patient as handed over. Idempotent."""
     case = get_case_for_user(case_id, current_user)
     if not case["arrived_at"]:
         now = utc_now_iso()
-        run("UPDATE cases SET arrived_at = ?, updated_at = ? WHERE id = ? AND arrived_at IS NULL", (now, now, case["id"]))
+        with get_db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("UPDATE cases SET arrived_at = ?, updated_at = ? WHERE id = ? AND arrived_at IS NULL",
+                         (now, now, case["id"]))
+            end_reports(conn, case["id"], now, background_tasks)
         case = get_case(case["id"])
         publish_case("case.updated", case, "arrived")
     return case
+
+
+@router.post("/{case_id}/reports/{report_id}/end")
+async def end_report(
+    case_id: str,
+    report_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(require_role(["emt"])),
+):
+    """
+    The EMT sent a report: body {"clips": N}, the number of clips it was recorded as. It can arrive
+    before the clips do; the report becomes new information once all N are transcribed. Sending it
+    again with the same N returns the report; a different N is a 409.
+    """
+    case = get_case_for_user(case_id, current_user)
+    if not 0 < len(report_id) <= MAX_CLIENT_ID_LENGTH or report_id.startswith(case_reports.SINGLE_CLIP_PREFIX):
+        raise APIError(400, "Invalid report id")
+    body = await read_json_body(request)
+    clips = body.get("clips")
+    if isinstance(clips, bool) or not isinstance(clips, int) or not 0 <= clips <= MAX_SEQ:
+        raise APIError(400, f"clips must be a whole number between 0 and {MAX_SEQ}")
+    now = utc_now_iso()
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute("SELECT clip_count FROM case_reports WHERE case_id = ? AND client_id = ?",
+                                (case["id"], report_id)).fetchone()
+        if existing is None or existing["clip_count"] is None:
+            if conn.execute("SELECT status FROM cases WHERE id = ?", (case["id"],)).fetchone()["status"] != "active":
+                raise APIError(409, "Case is closed")
+        try:
+            report, changed = case_reports.end(conn, case["id"], report_id, clips, now)
+        except case_reports.ClipCountMismatch:
+            raise APIError(409, "This report was already sent with a different number of clips")
+        if existing is None or existing["clip_count"] is None:
+            conn.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case["id"]))
+    if changed:
+        request_processing(background_tasks, case["id"])
+    if existing is None or existing["clip_count"] is None:
+        publish_case("case.updated", get_case(case["id"]), "report_completed" if changed else "report_sent")
+    return {"id": report["client_id"], "clips": report["clip_count"], "started_at": report["started_at"],
+            "ended_at": report["ended_at"], "completed_at": report["completed_at"],
+            "info_version": report["info_version"]}
 
 
 @router.post("/{case_id}/acknowledge")
@@ -892,10 +973,13 @@ async def upload_segment(
     recorded_at: Optional[str] = Form(None),
     sent_at: Optional[str] = Form(None),
     duration_ms: Optional[str] = Form(None),
+    report_id: Optional[str] = Form(None),
     current_user: dict = Depends(require_role(["emt"])),
 ):
     """
     Upload one audio segment of a live case for transcription.
+    - report_id: the device's id for the report this clip belongs to (case_reports.py). Without
+      one, the clip is a report of its own, as every clip was before reports existed.
     - seq: 0-based position of the segment in the case; defines transcript order.
     - client_id: unique id of this recorded clip. Re-sending the same (seq, client_id)
       returns the stored segment with 200; a different clip with a taken seq is a 409.
@@ -909,6 +993,9 @@ async def upload_segment(
     seq_value = parse_bounded_int(seq, "seq", MAX_SEQ)
     if not client_id or len(client_id) > 64:
         raise APIError(400, "client_id is required (max 64 characters)")
+    if report_id is not None and (not 0 < len(report_id) <= MAX_CLIENT_ID_LENGTH
+                                  or report_id.startswith(case_reports.SINGLE_CLIP_PREFIX)):
+        raise APIError(400, "Invalid report id")
     duration_value = parse_bounded_int(duration_ms, "duration_ms", MAX_DURATION_MS) if duration_ms else None
 
     duplicate = existing_upload(case["id"], seq_value, client_id)
@@ -937,29 +1024,34 @@ async def upload_segment(
 
     now = utc_now_iso()
     try:
-        # Inserting only while the case is active makes the check atomic with a concurrent close.
-        result = run(
-            """INSERT INTO transcript_segments
-                   (case_id, seq, client_id, recorded_at, duration_ms, audio_file_path, status, created_at, updated_at)
-               SELECT ?, ?, ?, ?, ?, ?, 'pending', ?, ?
-               WHERE EXISTS (SELECT 1 FROM cases WHERE id = ? AND status = 'active')""",
-            (case["id"], seq_value, client_id, server_recorded_at(recorded_at, sent_at), duration_value,
-             str(audio_path), now, now, case["id"]),
-        )
+        with get_db() as conn:
+            # Checking the case is still open under the write lock makes it atomic with a concurrent close.
+            conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute("SELECT 1 FROM cases WHERE id = ? AND status = 'active'", (case["id"],)).fetchone():
+                raise APIError(409, "Case is closed")
+            report_row = case_reports.report_for_clip(conn, case["id"], report_id, client_id, now)
+            segment_id = conn.execute(
+                """INSERT INTO transcript_segments
+                       (case_id, seq, client_id, recorded_at, duration_ms, audio_file_path, status, created_at,
+                        updated_at, report_id)
+                   VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)""",
+                (case["id"], seq_value, client_id, server_recorded_at(recorded_at, sent_at), duration_value,
+                 str(audio_path), now, now, report_row),
+            ).lastrowid
+            # Bumping the case lets clients see its new segment_count / last_segment_at as a newer version.
+            conn.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case["id"]))
     except sqlite3.IntegrityError:
-        # A concurrent upload of the same seq won the race.
+        # A concurrent upload of the same seq won the race, or this clip was already stored under another seq.
         audio_path.unlink(missing_ok=True)
-        return existing_upload(case["id"], seq_value, client_id)
+        duplicate = existing_upload(case["id"], seq_value, client_id)
+        if duplicate is None:
+            raise APIError(409, "This clip was already uploaded as another segment")
+        return duplicate
     except Exception:
         audio_path.unlink(missing_ok=True)
         raise
-    if result["changes"] == 0:
-        audio_path.unlink(missing_ok=True)
-        raise APIError(409, "Case is closed")
 
-    # Bumping the case lets clients see its new segment_count / last_segment_at as a newer version.
-    run("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case["id"]))
-    segment = get_segment(result["id"])
+    segment = get_segment(segment_id)
     publish_segment("segment.created", segment, case)
     publish_case("case.updated", get_case(case["id"]), "clip_received")
     background_tasks.add_task(transcribe_segment, segment["id"])
@@ -1069,7 +1161,7 @@ def previous_segment_text(segment: dict) -> Optional[str]:
 async def transcribe_segment(segment_id: int):
     """Transcribe one segment, store the result, and publish it. Never leaves the segment pending."""
     rows = query(
-        """SELECT s.id, s.case_id, s.seq, s.audio_file_path, c.emt_id, c.destination_hospital_id
+        """SELECT s.id, s.case_id, s.seq, s.audio_file_path, s.report_id, c.emt_id, c.destination_hospital_id
            FROM transcript_segments s JOIN cases c ON s.case_id = c.id
            WHERE s.id = ?""",
         (segment_id,),
@@ -1087,6 +1179,8 @@ async def transcribe_segment(segment_id: int):
     now = utc_now_iso()
     text = str(text).strip() if text is not None else None
     with get_db() as conn:
+        # Write lock first, so two clips of one report finishing together complete it once.
+        conn.execute("BEGIN IMMEDIATE")
         if text is not None:
             conn.execute(
                 """UPDATE transcript_segments
@@ -1098,22 +1192,33 @@ async def transcribe_segment(segment_id: int):
                 "UPDATE transcript_segments SET status = 'failed', error = ?, failed_at = ?, updated_at = ? WHERE id = ?",
                 (error_message, now, now, segment_id),
             )
-        # New transcript text is new patient information; in the same transaction, so the
-        # version an assessment reads always matches the transcript it sees.
-        if text:
-            conn.execute(
-                "UPDATE cases SET info_version = info_version + 1, last_update_at = ?, updated_at = ? WHERE id = ?",
-                (now, now, segment["case_id"]),
-            )
-            conn.execute(
-                "UPDATE transcript_segments SET info_version = (SELECT info_version FROM cases WHERE id = ?) WHERE id = ?",
-                (segment["case_id"], segment_id),
-            )
+        # A report's text is new patient information once the whole report is in (case_reports.py);
+        # in the same transaction, so the version an assessment reads always matches the transcript it sees.
+        if segment["report_id"] is None:
+            # Stored before reports existed: its text is information on its own, as it always was.
+            changed = bool(text)
+            if changed:
+                conn.execute(
+                    "UPDATE cases SET info_version = info_version + 1, last_update_at = ?, updated_at = ? WHERE id = ?",
+                    (now, now, segment["case_id"]),
+                )
+                conn.execute(
+                    "UPDATE transcript_segments SET info_version = (SELECT info_version FROM cases WHERE id = ?) WHERE id = ?",
+                    (segment["case_id"], segment_id),
+                )
+            whole_report = False
         else:
+            changed = case_reports.settle(conn, segment["report_id"], now)
+            whole_report = not case_reports.is_single_clip(conn, segment["report_id"])
+        if not changed:
             conn.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, segment["case_id"]))
     publish_segment("segment.updated", get_segment(segment_id), segment)
-    publish_case("case.updated", get_case(segment["case_id"]), "transcript_added" if text else "transcription_failed")
-    if text:
+    if changed and whole_report:
+        cause = "report_completed"
+    else:
+        cause = "transcript_added" if text else "transcription_failed"
+    publish_case("case.updated", get_case(segment["case_id"]), cause)
+    if changed:
         await asyncio.gather(case_assessment.runner.request(segment["case_id"]),
                              case_extraction.runner.request(segment["case_id"]))
 
@@ -1135,6 +1240,20 @@ async def run_transcription(segment: dict):
             if not transient or attempt == MAX_TRANSCRIPTION_ATTEMPTS:
                 return None, error_message
             await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+
+
+def settle_reports_after_restart() -> None:
+    """
+    Called at startup, after fail_interrupted_segments: reports whose last clips were interrupted are
+    complete now, and reports of closed or arrived cases end with the clips they have. The startup
+    re-assessment and re-extraction then pick up the new information.
+    """
+    now = utc_now_iso()
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        changed = case_reports.settle_after_restart(conn, now)
+    if changed:
+        print(f"⚠️  Completed reports for {len(changed)} case(s) after a restart")
 
 
 def fail_interrupted_segments() -> None:

@@ -25,6 +25,7 @@ from typing import Optional
 
 from case_assessment import (VITAL_SIGNS, CaseRunner, ScoringRefused, ScoringUnavailable, UNREADABLE_ERROR,
                              assessment_executor, describe_error, estimate_cost)
+import case_reports
 from database import get_db, query, run, utc_now_iso
 from routes import recordings
 
@@ -152,8 +153,9 @@ def read_new_information(case_id: int) -> Optional[dict]:
             "SELECT MAX(to_version) FROM extraction_runs WHERE case_id = ? AND status = 'completed'", (case_id,),
         ).fetchone()[0] or 0
         segments = conn.execute(
-            """SELECT id, seq, text, info_version, recorded_at FROM transcript_segments
-               WHERE case_id = ? AND status = 'completed' AND text != ''""", (case_id,),
+            f"""SELECT id, seq, text, info_version, recorded_at FROM transcript_segments
+                WHERE case_id = ? AND status = 'completed' AND text != '' AND {case_reports.FINISHED_CLIP}""",
+            (case_id,),
         ).fetchall()
         # Typed vitals are already structured; notes and corrections are free text.
         updates = conn.execute(

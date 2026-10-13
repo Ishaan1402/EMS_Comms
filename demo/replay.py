@@ -264,7 +264,11 @@ class Replay:
         self.log(f"[{event['minute']:>4}] {patient['emt']} started case #{case['id']} ({event['patient']})")
 
     def _upload(self, event, chunks: list, name: str) -> None:
-        """Upload WAV clips as consecutive segments, timed as if the report had just been spoken."""
+        """
+        Upload WAV clips as consecutive segments of one report, timed as if it had just been spoken,
+        then send the report, as the EMT's Send button does.
+        """
+        report_id = f"{self.run_id}-{name}-{self.next_seq[event['patient']]}"
         durations = [clip_duration_ms(c) for c in chunks]
         now = datetime.now(timezone.utc)
         spoken_from = now - timedelta(milliseconds=sum(durations))
@@ -280,8 +284,11 @@ class Replay:
                     "recorded_at": iso(spoken_from + timedelta(milliseconds=sum(durations[:index]))),
                     "sent_at": iso(datetime.now(timezone.utc)),
                     "duration_ms": str(duration),
+                    "report_id": report_id,
                 },
             )
+        self.call("POST", f"/api/cases/{self._case(event)}/reports/{report_id}/end", self._emt(event),
+                  json={"clips": len(chunks)})
 
     def audio_report(self, event) -> None:
         if self.typed:

@@ -4,13 +4,14 @@ import LiveCaseRecorder from './LiveCaseRecorder';
 
 // Every GET waits until the test answers it, so responses can be delivered in any order.
 const mockRequests = [];
+const mockPosts = [];
 let mockHandler = null;
 
 jest.mock('axios', () => ({
   __esModule: true,
   default: {
     get: (url) => new Promise((resolve, reject) => mockRequests.push({ url, resolve, reject })),
-    post: () => new Promise(() => {}),
+    post: (url, body) => { mockPosts.push({ url, body }); return new Promise(() => {}); },
     defaults: { headers: { common: {} } },
   },
 }));
@@ -55,6 +56,7 @@ let container;
 let root;
 beforeEach(() => {
   mockRequests.length = 0;
+  mockPosts.length = 0;
   container = document.createElement('div');
   root = createRoot(container);
 });
@@ -119,4 +121,24 @@ test('only the latest open-case check applies its answer', async () => {
   await answerAll('/api/cases/1/segments', [segment(1, 11, 0, 'A first report')]);
   expect(container.textContent).toContain('B first report');
   expect(container.textContent).not.toContain('A first report');
+});
+
+test('after a reload mid-report, the open report is sent with the clips the server has', async () => {
+  await act(async () => root.render(<LiveCaseRecorder />));
+  await answer('/api/hospitals', []);
+  const open = { ...patient(1, 'Patient A: fever', 5), open_report: { id: 'r1', clips: 2, started_at: at(1) } };
+  await answer('/api/cases?status=active', [open]);
+  await answer('/api/cases/1/segments', [segment(1, 11, 0, 'BP 92 over'), segment(1, 12, 1, '58')]);
+  expect(mockPosts).toEqual([{ url: '/api/cases/1/reports/r1/end', body: { clips: 2 } }]);
+});
+
+test("a reconnect doesn't send a report another device may still be recording", async () => {
+  await act(async () => root.render(<LiveCaseRecorder />));
+  await answer('/api/hospitals', []);
+  await answer('/api/cases?status=active', []);
+  await send('case.opened', { case: patient(2, 'Patient B: chest pain', 7) });
+  const open = { ...patient(2, 'Patient B: chest pain', 7), open_report: { id: 'r9', clips: 1, started_at: at(7) } };
+  await answer('/api/cases?status=active', [open]);
+  await answer('/api/cases/2/segments', [segment(2, 21, 0, 'B first words')]);
+  expect(mockPosts).toEqual([]);
 });

@@ -294,7 +294,8 @@ def init_database():
     -- seq is assigned by the EMT client and defines chronological order within a case;
     -- client_id identifies one recorded clip so a re-upload is told apart from a seq collision.
     -- updated_at changes on every state change so clients can keep the newest version of a row.
-    -- info_version is the case version this segment's text created (NULL until transcribed).
+    -- info_version is the case version this segment's text created: NULL until its report
+    -- (report_id, case_reports) completes, so half a report is never new information.
     -- A failed segment can be dismissed (e.g. its content was re-sent as text); it stays on
     -- record but no longer flags the case for review.
     CREATE TABLE IF NOT EXISTS transcript_segments (
@@ -316,7 +317,26 @@ def init_database():
       dismissed_at TEXT,
       dismissed_by INTEGER REFERENCES users (id),
       failed_at TEXT,
+      report_id INTEGER REFERENCES case_reports (id),
       UNIQUE (case_id, seq),
+      FOREIGN KEY (case_id) REFERENCES cases (id)
+    );
+
+    -- Reports: the clips an EMT records between "Record report" and "Send", like one radio call.
+    -- client_id comes from the device. clip_count is set when the report ends (Send, or the case
+    -- closing or arriving); the report completes once that many clips have finished transcribing.
+    -- On completion, a report with any text raises the case's info_version once (info_version
+    -- here). A clip uploaded without a report gets a report of its own that has already ended.
+    CREATE TABLE IF NOT EXISTS case_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      client_id TEXT NOT NULL,
+      clip_count INTEGER,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      completed_at TEXT,
+      info_version INTEGER,
+      UNIQUE (case_id, client_id),
       FOREIGN KEY (case_id) REFERENCES cases (id)
     );
 
@@ -407,6 +427,7 @@ def init_database():
     CREATE INDEX IF NOT EXISTS idx_cases_emt_id ON cases(emt_id);
     CREATE INDEX IF NOT EXISTS idx_cases_destination ON cases(destination_hospital_id, status);
     CREATE INDEX IF NOT EXISTS idx_case_findings_segment_id ON case_findings(segment_id);
+    CREATE INDEX IF NOT EXISTS idx_transcript_segments_report ON transcript_segments(report_id);
     CREATE INDEX IF NOT EXISTS idx_case_findings_case ON case_findings(case_id, recorded_at);
     CREATE INDEX IF NOT EXISTS idx_extraction_runs_case ON extraction_runs(case_id, id);
     CREATE INDEX IF NOT EXISTS idx_queue_events_hospital ON queue_events(hospital_id, revision);
@@ -470,6 +491,8 @@ ADDED_COLUMNS = {
         ("dismissed_at", "TEXT"),
         ("dismissed_by", "INTEGER REFERENCES users (id)"),
         ("failed_at", "TEXT"),
+        # NULL for clips stored before reports existed; they keep the versions they were given.
+        ("report_id", "INTEGER REFERENCES case_reports (id)"),
     ],
     "case_findings": [
         ("run_id", "INTEGER REFERENCES extraction_runs (id)"),
