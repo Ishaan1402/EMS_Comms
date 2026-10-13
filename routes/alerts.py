@@ -72,7 +72,7 @@ async def change_alert(case_id: str, request: Request, current_user: dict = Depe
         ).lastrowid
         # Screens keep the newest copy of a case, so the case must look newer.
         conn.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case["id"]))
-    publish_case("case.updated", get_case(case["id"]), "update_added")
+    publish_case("case.updated", get_case(case["id"]), f"alert_{action}")
     return _change(case["id"], change_id)
 
 
@@ -105,7 +105,7 @@ async def acknowledge_alerts(case_id: str, request: Request, current_user: dict 
         )
         conn.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case["id"]))
     case = get_case(case["id"])
-    publish_case("case.updated", case, "acknowledged")
+    publish_case("case.updated", case, "alert_acknowledged")
     return case
 
 

@@ -178,8 +178,8 @@ def test_alert_changes_are_recorded_in_the_queue_history(monkeypatch):
     before = len(history())
     call_alert(late, "emt.garcia", "stemi")
     acknowledge_alerts(late)
-    assert moves(history()[before:]) == [(late, "moved", 2, 1, "update_added", late),
-                                         (early, "moved", 1, 2, "update_added", late)]
+    assert moves(history()[before:]) == [(late, "moved", 2, 1, "alert_called", late),
+                                         (early, "moved", 1, 2, "alert_called", late)]
     assert history()[-1]["rule_version"] == "draft-4"
 
 

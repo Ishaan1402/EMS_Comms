@@ -302,6 +302,17 @@ def _events_table(keys: dict, cases: list, queue_events: list) -> list:
     for row in query("""SELECT a.id, a.case_id, a.info_version, a.acknowledged_at, u.role
                         FROM case_acknowledgments a JOIN users u ON u.id = a.user_id"""):
         event(f"ack:{row['id']}", row["case_id"], "acknowledged", row["acknowledged_at"], row["info_version"], row["role"])
+    # Crew alerts (case_alerts.py), which order the queue under rule draft-4. DETAIL is the alert
+    # (stroke / stemi / trauma / sepsis, never free text); its key time is an event of its own, at that time.
+    for row in query("SELECT id, case_id, alert, action, key_time, created_at FROM case_alerts"):
+        event(f"alert:{row['id']}", row["case_id"], f"alert_{row['action']}", row["created_at"],
+              actor_role="emt", detail=row["alert"])
+        if row["action"] == "called":
+            event(f"alert:{row['id']}:key_time", row["case_id"], "alert_key_time", row["key_time"], detail=row["alert"])
+    for row in query("""SELECT k.id, k.case_id, k.acknowledged_at, a.alert, u.role FROM case_alert_acknowledgments k
+                        JOIN case_alerts a ON a.id = k.through_alert_id JOIN users u ON u.id = k.user_id"""):
+        event(f"alert_ack:{row['id']}", row["case_id"], "alert_acknowledged", row["acknowledged_at"],
+              actor_role=row["role"], detail=row["alert"])
     for row in query("SELECT id, case_id, sender_role, created_at FROM messages WHERE case_id IS NOT NULL"):
         event(f"message:{row['id']}", row["case_id"], "message_sent", row["created_at"], actor_role=row["sender_role"])
     # Queue position changes (queue_history.py); DETAIL is the cause, VALUE the new position.

@@ -169,9 +169,9 @@ Each case has a message thread. It's open to the EMT who owns the case and to th
 | Table (`SAS_CASLIB`, default `Public`) | One row per |
 |---|---|
 | `ASC_CASES` | case, current state (transport status, AI processing, category, acknowledgment) |
-| `ASC_EVENTS` | thing that happened: case started/arrived/closed, update, clip uploaded/transcribed/failed/dismissed, assessment, patient information extraction, acknowledgment, message |
+| `ASC_EVENTS` | thing that happened: case started/arrived/closed, update, clip uploaded/transcribed/failed/dismissed, assessment, patient information extraction, acknowledgment, message, crew alert called/cancelled/acknowledged and its key time, queue move (with its cause) |
 | `ASC_ASSESSMENTS` | AI assessment attempt, with tokens, latency and cost |
-| `ASC_QUEUE` | change to a hospital's queue order: a patient entering, moving or leaving, with positions before and after, the cause (e.g. `update_added`, `acknowledged`) and whose case caused it |
+| `ASC_QUEUE` | change to a hospital's queue order: a patient entering, moving or leaving, with positions before and after, the cause (e.g. `report_completed`, `acknowledged`, `alert_called`) and whose case caused it |
 | `ASC_VITALS` | vital-sign reading, typed or extracted from a report (`SOURCE`: typed vitals / radio / typed note / case opened) |
 
 - **Joins:** rows carry `CASE_ID`, `SOURCE_CASE_ID` and `SOURCE_RUN_ID`, so they join with the evaluation datasets.
