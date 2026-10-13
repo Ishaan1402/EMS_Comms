@@ -343,6 +343,36 @@ class TestCasClient:
         assert [p for _, p in fake.calls()].count("/SASLogon/oauth/token") == 1
 
 
+    def test_an_issued_access_token_is_used_as_is_without_signing_in(self):
+        settings = sas_sync.Settings(url="https://viya.test", client_id="", client_secret="",
+                                     access_token="issued-tok", enabled=True)
+        assert settings.configured
+        fake = FakeSas()
+
+        async def go():
+            c = sas_sync.CasClient(settings, transport=httpx.MockTransport(fake))
+            try:
+                await c.replace_tables({"CASES": b"x\n1\n"})
+            finally:
+                await c.close()
+        run_async(go())
+        assert "/SASLogon/oauth/token" not in [p for _, p in fake.calls()]
+        assert {r.headers["Authorization"] for r in fake.requests} == {"Bearer issued-tok"}
+        assert "issued-tok" not in json.dumps(sas_sync.SasSync(settings).status)
+
+    def test_check_reports_whether_a_cas_session_opens(self, monkeypatch):
+        original = sas_sync.CasClient.__init__
+        for fake, expected in ((FakeSas(), ["CAS action: ok", "CAS session close: ok"]),
+                               # Oct 13: the session opens, but every action and the close are refused.
+                               (FakeSas(http_error={"/cas/sessions/sess-1": 403}),
+                                ["CAS action: builtins.serverStatus: HTTP 403", "CAS session close: close CAS session: HTTP 403"]),
+                               (FakeSas(http_error={"/cas/sessions": 403}), ["CAS session: open CAS session: HTTP 403"])):
+            monkeypatch.setattr(sas_sync.CasClient, "__init__",
+                                lambda self, settings, transport=None, fake=fake:
+                                original(self, settings, transport=httpx.MockTransport(fake)))
+            assert run_async(sas_sync.check(SETTINGS))[-len(expected):] == expected
+
+
 class TestSync:
     def test_only_changed_tables_are_pushed(self, story):
         fake = FakeSas()
