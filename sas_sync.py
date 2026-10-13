@@ -669,13 +669,18 @@ async def check(settings: Settings) -> list:
         except SasError as error:
             lines.append(f"CAS session: {error}")
             return lines
-        for step, call in (("CAS action", client.action(session, "builtins.serverStatus", {})),
-                           ("CAS session close", client.close_session(session))):
+        # Every outcome of the action, including a network error, still tries to close the session.
+        try:
+            await client.action(session, "builtins.serverStatus", {})
+            lines.append("CAS action: ok")
+        except (SasError, httpx.HTTPError) as error:
+            lines.append(f"CAS action: {error or type(error).__name__}")
+        finally:
             try:
-                await call
-                lines.append(f"{step}: ok")
-            except SasError as error:
-                lines.append(f"{step}: {error}")
+                await client.close_session(session)
+                lines.append("CAS session close: ok")
+            except (SasError, httpx.HTTPError) as error:
+                lines.append(f"CAS session close: {error or type(error).__name__}")
         return lines
     finally:
         await client.close()
