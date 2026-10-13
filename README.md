@@ -55,7 +55,6 @@ The database is a SQLite file, `asclepius.db`, created when the server starts. O
 | `ASCLEPIUS_DB_PATH` | `asclepius.db` next to the code | Database file |
 | `SEED_DEMO_USERS` | off | `1` creates the demo accounts on startup |
 | `SAS_SYNC_ENABLED` and the other `SAS_*` settings | off | [SAS Viya sync](#sas-viya-sync) |
-| `TWILIO_*`, `SENDGRID_*`, `FRONTEND_URL` | none | Only the [older endpoints](#older-endpoints) |
 
 The server starts even with settings missing, and warns about the main ones.
 
@@ -87,7 +86,7 @@ A real-model run on Oct 11 measured, on the server, about 1 s from a clip arrivi
 
 ### Live case transcription
 
-The EMT dashboard records the conversation in ~8-second clips. Each clip is a complete audio file, uploaded and transcribed on its own (`OPENAI_TRANSCRIPTION_MODEL`). Every clip is timestamped, stored under its case, and pushed to the hospital dashboard twice: when it's uploaded, and again when its transcript is ready.
+The EMT records one report at a time (Record Report, then Send Report), in ~8-second clips. Each clip is a complete audio file, uploaded and transcribed on its own (`OPENAI_TRANSCRIPTION_MODEL`). Every clip is timestamped, stored under its case, and pushed to the hospital dashboard twice: when it's uploaded, and again when its transcript is ready.
 
 - **Storage:** the `cases` and `transcript_segments` tables. An EMT can have only one open case at a time.
   - A clip's `seq` is assigned by the client, is unique per case, and sets the order.
@@ -95,6 +94,7 @@ The EMT dashboard records the conversation in ~8-second clips. Each clip is a co
   - `recorded_at` is when the EMT started recording, corrected to the server clock using the upload's `sent_at`.
   - Every row has an `updated_at`, and clients keep the newest version of each row, so a slow fetch never overwrites a newer pushed update.
   - Audio is saved under `private_uploads/` with random file names and is never served over HTTP.
+- **Reports** (`case_reports.py`): the clips between Record Report and Send Report form one report, and `POST /api/cases/:id/reports/:report_id/end` with the clip count closes it. The hospital sees "Reporting…" and the unsent words dimmed until then; the case gets new information (and a new AI handoff) once per sent report, not every 8 seconds. The send may arrive before its clips, sending twice is harmless, and closing the case or marking arrival ends an unsent report. A clip uploaded without a report id is a report of its own.
 - **Push:** Server-Sent Events at `GET /api/cases/events`, authenticated with the normal `Authorization: Bearer` header.
   - Hospital users receive the cases routed to their hospital; EMTs receive only their own.
   - Each (re)connect starts with a `ready` event, and clients re-fetch state at that point, because events sent while a client is disconnected aren't replayed.
@@ -119,7 +119,7 @@ The case is the main object. One transport is one case, and everything about the
   - `{"kind": "eta", "eta_minutes"}`
 
   An optional `client_id` makes retries idempotent. `GET /api/cases/:id/updates` and `GET /api/cases/:id/vitals` return the history.
-- **`info_version`** goes up by one whenever new patient information arrives: a note, vitals, a correction, or a transcribed clip with text. Opening the case is version 1. ETA changes are logistics and don't change it, but they do re-run the AI handoff, so it never quotes an old arrival time.
+- **`info_version`** goes up by one whenever new patient information arrives: a note, vitals, a correction, or a sent report with text. Opening the case is version 1. ETA changes are logistics and don't change it, but they do re-run the AI handoff, so it never quotes an old arrival time.
 - **Two kinds of status, kept apart** (KAN-11):
   - `operational_status`: `inbound` → `acknowledged` (a hospital user has seen the latest `info_version`) → `arrived` → `closed`.
     - `POST /api/cases/:id/acknowledge` (hospital user) takes an optional `{"info_version": n}`, the version their screen showed.
@@ -132,7 +132,7 @@ The case is the main object. One transport is one case, and everything about the
   - **What "earlier" means.** Earlier information is what the hospital had acknowledged, so `meaningful_change` answers "what changed since the earlier acknowledged report". Before any acknowledgment, everything counts as current, as in a first report. Acknowledging an earlier version while newer information exists re-assesses the case against it. Information is put in the order it was spoken or typed; text with no recorded version (from before upgrading) counts as not yet seen.
   - **Cannot assess.** `Cannot assess` (the prompt's "Unsure") marks the case Needs Review. An answer that doesn't follow the format is a retryable failure, and the last usable assessment stays current. Nothing is filled with a default.
   - **Every attempt is kept.** Each is a row in `risk_assessments` with the `info_version` it read, its `baseline_version`, the ETA it saw (`input_eta_at`), `input_tokens`, `output_tokens`, `latency_ms` and a list-price `cost_usd`. The case's `current_assessment` is the usable one with the highest version, so a slow result for older information never replaces a newer one. A failure keeps the previous assessment (`assessment_is_outdated: true`) and can be retried (`POST /api/cases/:id/assessments/retry`). `GET /api/cases/:id/assessments` lists every attempt.
-  - **Timing.** The assessment first waits 2 s, plus up to 60 s for clips still being transcribed. A report uploaded as several clips at once is therefore assessed once, whole. Information arriving during a run is assessed once more afterwards. With a live microphone, clips arrive while the medic is still talking, so a handoff can be built from part of a report (see [Limits](#limits)). On startup, open cases whose current information has no usable assessment are re-assessed.
+  - **Timing.** The assessment first waits 2 s, plus up to 60 s for clips still being transcribed. Reports that haven't been sent are skipped, so a handoff is never built from half a report. Information arriving during a run is assessed once more afterwards. On startup, open cases whose current information has no usable assessment are re-assessed.
   - **Models:** `OPENAI_SCORING_MODEL` and `OPENAI_TRANSCRIPTION_MODEL`.
 - **Patient information** (`case_extraction.py`, KAN-8) is its own pipeline step, next to the assessment: audio → transcript → patient information. It runs, fails and is retried on its own.
   - **What it pulls out:** the chief complaint; vitals (added to the case's vital-sign trend next to typed ones, with BP as 110/70 and "on room air" kept); findings (present / absent / not assessed); treatments (given / planned).
@@ -142,13 +142,15 @@ The case is the main object. One transport is one case, and everything about the
   - **API:** `GET /api/cases/:id/findings`, `GET /api/cases/:id/extractions` (every attempt) and `POST /api/cases/:id/findings/retry`. Changes are pushed as `findings.updated` events.
   - **The assessment still reads the reports themselves.** That's the contract the evaluation measures; feeding it extracted facts would need its own evaluation first.
   - **Model:** `OPENAI_EXTRACTION_MODEL`, defaulting to the scoring model.
-- **Hospital queue** (`case_queue.py`, rule draft-3, not yet clinician-approved):
-  - `GET /api/cases/queue` orders the hospital user's inbound cases on the server, with the reasons for each position.
+- **Crew alerts** (`case_alerts.py`, `routes/alerts.py`): the crew can call Stroke (last known well), STEMI (symptom onset), Trauma (time of injury) or Sepsis (symptom onset), with that key time or "not stated", change it, or cancel it. The hospital acknowledges alerts separately from the reports, and an optional sound plays only when a crew calls one. Alerts never go into the AI's input.
+- **Hospital queue** (`case_queue.py`, rule draft-4, not yet clinician-approved):
+  - `GET /api/cases/queue` orders the hospital user's inbound cases on the server, with the reasons for each position: unacknowledged information, an unacknowledged crew alert or a processing failure first, then active crew alerts, then the earliest expected arrival. **The AI's preparation category is shown as "AI suggests" but never changes the order**, which keeps ranking patients with the people who know them (see the FDA's clinical decision support guidance).
   - **The order depends only on stored state, never on the clock,** so it changes only when something is committed.
   - **Every change is recorded** (`queue_history.py`, KAN-29) as a revision. Each revision lists who entered, moved or left, the cause, and whose case caused it.
   - **Reading the queue never records anything.**
   - `GET /api/cases/queue/history` returns the history, and the SAS export has it as `ASC_QUEUE`.
   - **Arrival highlight** (KAN-34): `PATCH /api/hospitals/mine` sets how early a patient is flagged "Arriving soon", from 1 to 60 minutes (default 5) per hospital. It only changes that badge, never the AI or the order.
+- **Export for the hospital's record** (`fhir_export.py`): `GET /api/cases/:id/fhir` returns the handoff as a FHIR R4 Bundle: patient, encounter, the reports, vital signs, treatments, and a Provenance for each AI-extracted fact that holds the crew's exact words and the model version. The AI's category is left out. It validates against the `fhir.resources` R4B models but hasn't been tried with an EHR.
 
 ### Case messaging (EMT ↔ hospital team)
 
@@ -157,8 +159,6 @@ Each case has a message thread. It's open to the EMT who owns the case and to th
 - `GET /api/cases/:id/messages?after_id=N` returns the history, oldest first, up to 500 at a time.
 - `POST /api/cases/:id/messages` with `{"body": "...", "client_id": "optional-uuid"}` sends a message. A retry with the same `client_id` returns the original message instead of a duplicate.
 - `GET /api/cases/:id/messages/stream?after_id=N` is a Server-Sent Events stream of new messages. It honours `Last-Event-ID` and needs the usual `Authorization` header.
-
-Recordings from the [older single-recording flow](#older-endpoints) have their own threads at the same paths under `/api/recordings/:id/messages`.
 
 ### SAS Viya sync
 
@@ -212,6 +212,10 @@ EMTs act on their own cases; hospital users act on cases routed to their hospita
 | `GET /api/cases/:id/assessments`, `POST /api/cases/:id/assessments/retry` | EMT / hospital user | Every AI handoff attempt; retry a failed one |
 | `GET /api/cases/:id/findings`, `GET /api/cases/:id/extractions`, `POST /api/cases/:id/findings/retry` | EMT / hospital user | Extracted patient information and every attempt; retry a failed one |
 | `GET /api/cases/:id/messages`, `POST /api/cases/:id/messages`, `GET /api/cases/:id/messages/stream` | EMT / hospital user | Case messages |
+| `POST /api/cases/:id/reports/:reportId/end` | EMT | Close a report (`{"clips": N}`) |
+| `GET /api/cases/:id/alerts`, `POST /api/cases/:id/alerts` | EMT / hospital user; POST EMT | Crew alerts: history; call, change or cancel |
+| `POST /api/cases/:id/alerts/acknowledge` | hospital user | Acknowledge the crew's alerts |
+| `GET /api/cases/:id/fhir` | EMT / hospital user | The handoff as a FHIR R4 Bundle |
 | `GET /api/cases/queue`, `GET /api/cases/queue/history[?after_revision=N]` | hospital user | Inbound queue with reasons, and its history |
 | `GET /api/cases/events` | EMT / hospital user | Live events (SSE): `ready`, `case.opened`, `case.updated`, `segment.created`, `segment.updated`, `update.created`, `findings.updated`, `hospital.updated`, `auth.expired` |
 | `GET /api/sas/status[?check=true]` | hospital user | State of the SAS sync |
@@ -223,22 +227,12 @@ EMTs act on their own cases; hospital users act on cases routed to their hospita
   - Anyone can sign up as a hospital user for any hospital.
   - Logins last 24 hours in browser storage.
   - Audio is stored unencrypted, with no retention policy.
-  - The older endpoints have known holes (listed in #34).
   - CORS allows any origin.
 - **One server process.** Live events and the AI steps run in memory, so run a single worker.
-- **Auto-reload is always on.** `python3 main.py` starts the server with auto-reload, so saving a `.py` file or switching branches restarts it, and clips in flight are marked failed.
-- **Information is counted per clip, not per report.** With a live microphone, a case can fall back to "not acknowledged", move up the queue, and get a new AI handoff while the medic is still talking. The replay uploads each report's clips at once, so the scripted demo doesn't show this.
+- **Auto-reload in development.** `python3 main.py` reloads when a `.py` file changes, unless `NODE_ENV=production` (the demo setting), so don't develop in the checkout that serves a demo without it.
 - **Unsent audio lives only in the open page.** Audio waiting to upload is lost if the EMT's page reloads or closes.
 
 [docs/architecture-review.md](docs/architecture-review.md) has the planned changes for each of these.
-
-## Older endpoints
-
-The first version of the app took one recording per patient, scored it on a 0–10 risk scale with its own prompt, and could text or email doctors. Its endpoints are still mounted, but no screen uses them, and they're due to be removed (KAN-15):
-- `/api/recordings`: upload, my-recordings, `:id`, and recording message threads
-- `/api/doctors/*` and `/api/notifications/*`: Twilio SMS and SendGrid email, configured with `TWILIO_*`, `SENDGRID_*` and `FRONTEND_URL`
-
-Don't expose them publicly; #34 lists their known problems.
 
 ## License
 

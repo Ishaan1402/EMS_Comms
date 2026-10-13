@@ -59,7 +59,8 @@ ASCLEPIUS_DB_PATH=demo-rehearsal-01.db SEED_DEMO_USERS=1 SAS_SYNC_ENABLED=0 NODE
 - **Log in fresh before presenting:** the live feed ends when a login expires (after 24 hours).
 
 1. **Doctor:** open http://localhost:5001 and log in as `dr.smith`.
-2. **EMT:** open a **private window or another browser** and log in as `emt.wilson`. Logins are per browser profile, so one window can't be both. The EMT screen picks up the case when the replay opens it.
+2. **EMT:** open a **private window or another browser** and log in as `emt.lee` (Medic 8, the patient whose radio drops out and who gets the sepsis alert). Logins are per browser profile, so one window can't be both. The EMT screen picks up the case when the replay opens it.
+   On the doctor's screen, switch on **Sound for crew alerts** if you want the chime.
 3. **Run the story:**
    ```bash
    .venv/bin/python demo/replay.py --base-url http://localhost:5001 --seconds-per-minute 10
@@ -68,12 +69,14 @@ ASCLEPIUS_DB_PATH=demo-rehearsal-01.db SEED_DEMO_USERS=1 SAS_SYNC_ENABLED=0 NODE
 
 | Real time | What to point at |
 |---|---|
-| 0:00–0:25 | Three crews open cases (Medic 8, 2, 10). Radio text reaches the doctor about 1 s after each clip. Vitals and findings fill in from the radio (hover a value for the medic's words). Cases go "Assessing…" → a category. The queue orders them, with "Why here". |
-| 0:30 | The doctor acknowledges. Mike Wilson's screen shows "Seen by John Smith". |
+| 0:00–0:25 | Three crews open cases (Medic 8, 2, 10). Radio text reaches the doctor about 1 s after each clip. Vitals and findings fill in from the radio (hover a value for the medic's words). Cases go "Assessing…" → "AI suggests" a category. The queue orders them by a written rule (new information first, then crew alerts, then arrival time), never by the AI's label, and says "Why here". |
+| 0:30 | The doctor acknowledges. Jordan Lee's screen (Medic 8) shows "Seen by John Smith". |
 | 0:40 | Messages between the doctor and Medic 10. |
-| 1:10–1:20 | **Visible failure.** Medic 8's radio drops out: red "1 transcript segment failed", and Medic 8 jumps to the top (↑). The crew re-sends the update as text, and the AI moves Medic 8 to Prepare now (HR 118→128, BP 110/70→92/58, temp 39.1). The crew marks the lost clip handled, and it stays on record. |
+| 1:10–1:20 | **Visible failure.** Medic 8's radio drops out: red "1 transcript segment failed", and Medic 8 jumps to the top (↑). The crew re-sends the update as text, and the AI now suggests Prepare now (HR 118→128, BP 110/70→92/58, temp 39.1). The crew marks the lost clip handled, and it stays on record. Both screens show all of it. |
 | 1:30, 1:50 | Medic 2 and Medic 10 get worse on the radio. Rows show "↑ from #3" and what changed. Open one: the AI handoff compares with what the doctor acknowledged, and **NEW** tags mark exactly what arrived since. Medic 10, 11 min out, ends up first. |
 | 2:00 | The doctor acknowledges everything. The EMT sees the toast. |
+| after the summary | **Crew alert.** On the EMT window, tap **Sepsis**, set the symptom onset or leave it blank ("not stated"), and tap **Call Sepsis alert**. Medic 8 jumps to #1 with "Crew alert not yet acknowledged". Open Medic 8 and tap **Acknowledge crew alert**: it stays at the top while the alert is active, and the EMT sees "Acknowledged by John Smith". Do this after the replay so its recorded queue stays clean for scoring. |
+| then | **Export.** In Medic 8's case, **Download for the EHR (FHIR R4)**: a standard file a hospital record system can take in. Every AI-extracted fact carries the crew's exact words and the model version; the AI's category is left out. |
 | end | The terminal prints the model cost (about $0.002), the transcription estimate, and the time on the server: about 1 s from a clip arriving to its transcript being pushed, about 4 s to the assessment. Say "on the server" if you quote it. It also writes `demo/runs/<run_id>.json` and `<run_id>-predictions.json`. |
 
 **If asked:**
@@ -81,9 +84,11 @@ ASCLEPIUS_DB_PATH=demo-rehearsal-01.db SEED_DEMO_USERS=1 SAS_SYNC_ENABLED=0 NODE
 - **"What happens when the ETA changes?"** The AI re-assesses with the new ETA (prompt `awareness_v3`), and the doctor doesn't need to acknowledge again, because no new patient information came in. Until the new handoff is ready, the old one is marked "earlier info". The handoff shows when it was assessed; the live ETA is shown separately. Because the model reads the ETA, an ETA change alone can change the category; that's on the list for the clinician.
 - **"How do you know the extracted facts are real?"** Each fact quotes the crew's own words, and the app checks that the quote really is in the clip or note it cites (hover a fact to see it). A bad quote fails that extraction visibly, with a retry, and earlier facts stay. It proves where a fact came from, not that the AI read it right.
 - **Hospital setting (KAN-34):** "Arrival highlight" above the queue sets how early a patient is flagged "Arriving soon", per hospital: 1 to 60 minutes, default 5. It only changes the badge, never the AI or the order. To show it, set General to 15 as `dr.smith`; Northside (`dr.jones`) keeps its own value.
-- **A first report sometimes comes back "Cannot assess"** (fever without a temperature). The AI says what's missing instead of guessing. Once the doctor acknowledges it, it ranks below known Prepare-now patients but above Can wait (queue rule draft-3, still to be agreed with the clinician).
-- **"Why did that patient move when the doctor acknowledged?"** Under the draft rule, unacknowledged information comes first, so acknowledging a patient lets the others' new information go ahead of it. Every move is recorded with its cause, and the terminal prints each patient's path at the end. Whether acknowledgment should reorder the board at all is an open question for the clinician.
-- **The queue order comes from a rule, not the model.** The model only labels each patient.
+- **A first report sometimes comes back "Cannot assess"** (fever without a temperature). The AI says what's missing instead of guessing, and the case is flagged for review until the doctor acknowledges it. Like every AI label, it never changes the order.
+- **"Why did that patient move when the doctor acknowledged?"** Under the draft rule (draft-4), unacknowledged information comes first, so acknowledging a patient lets the others' new information go ahead of it. Every move is recorded with its cause, and the terminal prints each patient's path at the end. Whether acknowledgment should reorder the board at all is an open question for the clinician.
+- **"Why doesn't the AI set the order?"** On purpose. FDA's January 2026 guidance on clinical decision support says software meant for time-critical decisions may not let the clinician independently check its basis, so it may count as a medical device. So the order follows people's calls (crew alerts) and arrival time. The AI suggests a category and shows its sources, and the clinician decides. The rule (draft-4) still needs our clinician's agreement.
+- **"How is this different from Pulsara?"** For moving the case, the ETA and messages, it isn't; Pulsara does that well. The difference is what the hospital receives: a handoff it can check. It shows what changed since you last acknowledged, what's missing, and "Cannot assess" when there isn't enough, and ties every extracted fact to the crew's exact words, which the app checks. Pulsara's AI (June 2026) fills in fields from typed or dictated notes for the crew to confirm. Its route into the hospital record is a manual PDF upload or a custom API on a paid tier; ours is a standard FHIR file with the sources attached. *(Pulsara facts checked on its own pages, Oct 13.)*
+- **"Does it work with Epic?"** It exports the handoff as FHIR R4, the standard Epic and other record systems use, and the file validates against the official FHIR models. We haven't connected it to a real Epic system yet, so don't claim integration.
 
 ## The story (`three_patients.json`)
 
