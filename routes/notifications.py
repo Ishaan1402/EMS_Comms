@@ -263,9 +263,12 @@ async def get_notification_status(
                 content={"error": "Notification not found"}
             )
         
+        # Only the doctor it was sent to and the EMT whose recording it was about; anyone else
+        # gets the same 404 as for a missing notification.
         notifications = query(
-            'SELECT * FROM notifications WHERE id = ?',
-            (notification_id,)
+            """SELECT n.* FROM notifications n LEFT JOIN recordings r ON r.id = n.recording_id
+               WHERE n.id = ? AND (n.doctor_id = ? OR r.emt_id = ?)""",
+            (notification_id, current_user["id"], current_user["id"])
         )
         
         if len(notifications) == 0:

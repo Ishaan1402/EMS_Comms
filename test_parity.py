@@ -13,6 +13,7 @@ from main import app
 import database
 from database import query, run, get_db, init_database, insert_sample_data
 from routes import recordings, notifications
+from middleware.auth import create_access_token
 
 REAL_DB_PATH = Path(database.__file__).parent / "asclepius.db"
 
@@ -212,24 +213,32 @@ class TestRoleBasedAccess:
 class TestDoctorsEndpoints:
     """Test doctors endpoints."""
     
-    def test_get_available_doctors_no_auth(self):
-        """GET /api/doctors/available - Public endpoint, no auth required."""
-        response = client.get("/api/doctors/available")
+    def test_available_doctors_need_a_login_and_hide_contact_details(self):
+        """GET /api/doctors/available - signed-in users only; no phone or email."""
+        assert client.get("/api/doctors/available").status_code == 401
+        emt = query("SELECT id, username, role FROM users WHERE username = 'emt.wilson'")[0]
+        response = client.get("/api/doctors/available",
+                              headers={"Authorization": f"Bearer {create_access_token(emt)}"})
         assert response.status_code == 200
+        assert "access-control-allow-origin" not in response.headers
         doctors = response.json()
-        assert isinstance(doctors, list)
         # Should have dr.smith and dr.jones
         assert len(doctors) >= 2
-        # Check structure
-        if len(doctors) > 0:
-            doctor = doctors[0]
-            assert "id" in doctor
-            assert "first_name" in doctor
-            assert "last_name" in doctor
-            assert "specialty" in doctor
-            assert "phone" in doctor
-            assert "email" in doctor
-    
+        assert all(set(doctor) == {"id", "first_name", "last_name", "specialty"} for doctor in doctors)
+
+    def test_notification_status_only_for_its_doctor_and_crew(self):
+        """GET /api/notifications/status/:id - other users get 404, as if it didn't exist."""
+        recording_id = create_recording("emt.wilson")
+        doctor_id = query("SELECT id FROM users WHERE username = 'dr.smith'")[0]["id"]
+        notification_id = run("INSERT INTO notifications (recording_id, doctor_id, notification_type) VALUES (?, ?, 'sms')",
+                               (recording_id, doctor_id))["id"]
+        for username, expected in (("dr.smith", 200), ("emt.wilson", 200), ("dr.jones", 404), ("emt.garcia", 404)):
+            user = query("SELECT id, username, role FROM users WHERE username = ?", (username,))[0]
+            response = client.get(f"/api/notifications/status/{notification_id}",
+                                  headers={"Authorization": f"Bearer {create_access_token(user)}"})
+            assert response.status_code == expected, username
+        assert client.get(f"/api/notifications/status/{notification_id}").status_code == 401
+
     def test_notifications_sorting(self):
         """GET /api/doctors/notifications - Test sorting options."""
         doctor_response = client.post("/api/auth/login", json={

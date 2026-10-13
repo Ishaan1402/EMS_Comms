@@ -16,17 +16,13 @@ class ResponseRequest(BaseModel):
     response: Optional[str] = None
 
 @router.get("/available")
-async def get_available_doctors(request: Request):
-    """Get all available doctors (public endpoint)."""
+async def get_available_doctors(current_user: dict = Depends(require_role(["emt", "doctor"]))):
+    """Available doctors for signed-in users. Phone and email stay on the server, which uses
+    them to send notifications."""
     try:
-        doctors = query(
-            'SELECT id, first_name, last_name, specialty, phone, email FROM users WHERE role = ? AND is_available = ?',
+        return query(
+            'SELECT id, first_name, last_name, specialty FROM users WHERE role = ? AND is_available = ?',
             ('doctor', 1)
-        )
-        # Sent even when the request has no Origin header.
-        return JSONResponse(
-            content=doctors,
-            headers={"Access-Control-Allow-Origin": "*"}
         )
     
     except Exception as error:
