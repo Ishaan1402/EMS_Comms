@@ -258,4 +258,6 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 5000))
     print(f"🏥 Asclepius EMT System running on port {port}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    # Auto-reload restarts the server whenever a .py file in the folder changes, which would cut
+    # off a running demo (clips in flight are marked failed), so it is for development only.
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=os.getenv("NODE_ENV") != "production")
