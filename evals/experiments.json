@@ -1,0 +1,28 @@
+{
+  "dataset_version": "pilot_v1",
+  "purpose": "development",
+  "repeats": 3,
+  "prompt_versions": ["awareness_v1", "awareness_v2"],
+  "queue_prompt_version": "queue_v1",
+  "max_output_tokens": 1024,
+  "timeout_seconds": 45,
+  "max_retries": 0,
+  "random_seed": 20261006,
+  "pricing_checked": "2026-10-06",
+  "models": [
+    {"id": "qwen9b", "provider": "ollama", "model": "qwen3.5:9b", "think": false, "temperature": 0.2, "context_tokens": 16384,
+     "input_usd_per_million": 0, "output_usd_per_million": 0},
+    {"id": "gemma26b", "provider": "ollama", "model": "gemma4:26b", "think": false, "temperature": 0.2, "context_tokens": 16384,
+     "input_usd_per_million": 0, "output_usd_per_million": 0},
+    {"id": "gptoss20b", "provider": "ollama", "model": "gpt-oss:20b", "think": "low", "temperature": 0.2, "context_tokens": 16384,
+     "input_usd_per_million": 0, "output_usd_per_million": 0},
+    {"id": "openai_luna", "provider": "openai", "model": "gpt-6-luna", "reasoning_effort": "none",
+     "input_usd_per_million": 0.1, "output_usd_per_million": 0.5},
+    {"id": "openai_sol", "provider": "openai", "model": "gpt-6.1-sol", "reasoning_effort": "low",
+     "input_usd_per_million": 2, "output_usd_per_million": 10},
+    {"id": "gemini_lite", "provider": "gemini", "model": "gemini-3.1-flash-lite", "thinking_level": "MINIMAL", "temperature": 0.2,
+     "input_usd_per_million": 0.25, "output_usd_per_million": 1.5},
+    {"id": "claude_haiku", "provider": "anthropic", "model": "claude-haiku-4-5-20251001", "temperature": 0.2,
+     "input_usd_per_million": 1, "output_usd_per_million": 5}
+  ]
+}
