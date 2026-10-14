@@ -70,11 +70,8 @@ const CaseStatusBadge = ({ liveCase, serverNow }) => {
   if (liveCase.arrived_at) return null;  // the Arrived badge says it; it's no longer live
   const idleMs = serverNow - Date.parse(liveCase.last_segment_at || liveCase.started_at);
   if (idleMs > IDLE_AFTER_MS) {
-    return (
-      <span className="px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-100 rounded-full">
-        Open · no audio for {Math.floor(idleMs / 60000)}m
-      </span>
-    );
+    // Quiet on purpose: a crew between reports is normal, not something to act on.
+    return <span className="text-xs text-gray-400">last audio {Math.floor(idleMs / 60000)}m ago</span>;
   }
   return <span className="px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full animate-pulse">LIVE</span>;
 };
