@@ -123,7 +123,7 @@ const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move
       )}
       <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
         <Clock className="h-3 w-3" />
-        Case #{c.id} · started {clockTime(c.started_at)} · EMT {c.emt_first_name} {c.emt_last_name}
+        #{c.id} · {clockTime(c.started_at)} · {c.emt_first_name} {c.emt_last_name}
       </p>
     </button>
   </li>
@@ -347,11 +347,14 @@ const LiveCasesPanel = () => {
             <span className="text-slate-900"><span className="font-bold">{queue.counts.crew_alerts}</span> crew alert{queue.counts.crew_alerts === 1 ? '' : 's'}</span>
           )}
           <span className="text-red-700"><span className="font-bold">{queue.counts.prepare_now}</span> AI suggests prepare now</span>
-          <p className="w-full text-xs text-gray-600">
-            Order ({queue.rule_version}): {queue.rule} AI suggestions come from a language model reading the
-            crew&apos;s reports; they are not validated on real EMS audio. Check each one against the quotes and
-            missing items in the handoff.
-          </p>
+          <details className="w-full text-xs text-gray-600">
+            <summary className="cursor-pointer text-gray-500">How this order is set</summary>
+            <p className="mt-1">
+              Order ({queue.rule_version}): {queue.rule} AI suggestions come from a language model reading the
+              crew&apos;s reports; they are not validated on real EMS audio. Check each one against the quotes and
+              missing items in the handoff.
+            </p>
+          </details>
         </div>
       )}
 
@@ -389,13 +392,14 @@ const LiveCasesPanel = () => {
                   </h3>
                   <p className="text-sm text-gray-600">{selected.patient_info || 'No patient info provided'}</p>
                   <p className="text-xs text-gray-500 mt-1">
-                    Started {new Date(selected.started_at).toLocaleString()}
-                    {selected.closed_at && ` · Closed ${new Date(selected.closed_at).toLocaleTimeString()}`}
+                    Started {clockTime(selected.started_at)}
+                    {selected.closed_at && ` · Closed ${clockTime(selected.closed_at)}`}
+                    {' · '}
+                    <button onClick={() => downloadFhir(selected.id)} className="text-blue-700 underline"
+                            title="The handoff as a FHIR R4 Bundle for the hospital's record system: each extracted fact with the report it quotes">
+                      Export FHIR
+                    </button>
                   </p>
-                  <button onClick={() => downloadFhir(selected.id)} className="mt-1 text-xs text-blue-700 underline"
-                          title="The handoff as a FHIR R4 Bundle for the hospital's record system: each extracted fact with the report it quotes">
-                    Download for the EHR (FHIR R4)
-                  </button>
                 </div>
                 {selected.status === 'active' && (
                   <div className="flex flex-wrap gap-2 mb-4">
@@ -404,7 +408,7 @@ const LiveCasesPanel = () => {
                         onClick={acknowledge}
                         className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
                       >
-                        <CheckCircle className="h-4 w-4" /> Acknowledge latest update
+                        <CheckCircle className="h-4 w-4" /> Acknowledge
                       </button>
                     )}
                     {!selected.arrived_at && (
