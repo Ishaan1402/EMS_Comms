@@ -225,7 +225,7 @@ const LiveCaseRecorder = () => {
       nextSeqRef.current = 0;
       reportRef.current = null;
       if (stream) startReport(stream);
-      toast.success(`Case #${response.data.id} started`);
+      toast.success(`Case #${response.data.id} started — the hospital can follow along`);
     } catch (error) {
       if (stream) stream.getTracks().forEach((track) => track.stop());
       if (error.response?.status === 409) {
@@ -328,7 +328,7 @@ const LiveCaseRecorder = () => {
     <div className="bg-white rounded-lg shadow-md p-6 mb-8">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-          <Radio className="h-5 w-5 text-red-600" /> Patient Case
+          <Radio className="h-5 w-5 text-red-600" /> Patient Case — Keep the Hospital Updated
         </h2>
         {isOpen && (
           <span className={`text-xs font-medium ${connection === 'live' ? 'text-green-700' : 'text-orange-600'}`}>
@@ -386,7 +386,7 @@ const LiveCaseRecorder = () => {
               className="flex items-center space-x-2 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <Radio className="h-5 w-5" />
-              <span>{busyMessage || 'Start Case & Record'}</span>
+              <span>{busyMessage || 'Start Case & Record Report'}</span>
             </button>
             <button
               onClick={() => startLiveCase(false)}
@@ -414,7 +414,7 @@ const LiveCaseRecorder = () => {
           {!busyMessage && recorder.isRecording && (
             <>
               <span className="flex items-center gap-2 text-red-600 animate-pulse">
-                <span className="h-2 w-2 rounded-full bg-red-600" /> Recording report
+                <span className="h-2 w-2 rounded-full bg-red-600" /> Recording report — the hospital sees the words as you speak
               </span>
               <button
                 onClick={sendReport}
@@ -468,7 +468,7 @@ const LiveCaseRecorder = () => {
       {activeCase && (
         <div className="mt-4">
           <h3 className="text-sm font-semibold text-gray-700 mb-2">
-            {isOpen ? 'Transcript' : `Transcript · Case #${activeCase.id} (closed)`}
+            {isOpen ? 'Transcript (what the doctor sees)' : `Transcript — Case #${activeCase.id} (closed)`}
           </h3>
           <LiveTranscript
             segments={transcriptItems}
