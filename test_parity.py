@@ -331,7 +331,7 @@ class TestExpressContractParity:
     
     def test_jwt_has_iat_claim(self):
         """JWT should include 'iat' and 'exp' claims."""
-        import jwt as pyjwt
+        from jose import jwt as jose_jwt
         login_response = client.post("/api/auth/login", json={
             "username": "emt.wilson",
             "password": "password123"
@@ -339,7 +339,7 @@ class TestExpressContractParity:
         token = login_response.json()["token"]
         
         # Decode without verification to check payload
-        decoded = pyjwt.decode(token, options={"verify_signature": False})
+        decoded = jose_jwt.get_unverified_claims(token)
         assert "iat" in decoded
         assert "exp" in decoded
     
