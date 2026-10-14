@@ -77,7 +77,7 @@ cd client && CI=true npm test -- --watchAll=false --runInBand      # frontend
 ## How it works
 
 1. **The EMT opens a case:** the destination hospital, the unit, an ETA and a short summary.
-2. **The crew talks or types.** The browser records ~8-second clips. Each one is uploaded, transcribed and shown to the hospital as soon as it's ready. Typed notes, vitals, corrections and ETA changes go in as updates.
+2. **The crew talks or types.** The browser records one intact report (up to two minutes). Send uploads it for transcription; the hospital sees the transcript as soon as it is ready. Typed notes, vitals, corrections and ETA changes go in as updates.
 3. **Each new piece of patient information gets a version number.** The AI writes a short handoff that compares it with what the hospital last acknowledged. A separate step pulls out vitals, findings and treatments, each quoting the words it came from.
 4. **The hospital** sees its inbound patients in an order set by a stated rule, acknowledges what it has seen, and can message the crew.
 5. **Nothing is overwritten:** a correction is a new row. Case data can be exported to SAS Viya without any free text.
@@ -86,7 +86,7 @@ A real-model run on Oct 11 measured, on the server, about 1 s from a clip arrivi
 
 ### Live case transcription
 
-The EMT records one report at a time (Record Report, then Send Report), in ~8-second clips. Each clip is a complete audio file, uploaded and transcribed on its own (`OPENAI_TRANSCRIPTION_MODEL`). Every clip is timestamped, stored under its case, and pushed to the hospital dashboard twice: when it's uploaded, and again when its transcript is ready.
+The EMT records one report at a time (Record Report, then Send Report). A single MediaRecorder keeps the report intact: it is uploaded and transcribed as one complete file (`OPENAI_TRANSCRIPTION_MODEL`). This avoids cutting a spoken number across separate transcription calls. It does not establish speech accuracy; check the transcript and correct it when needed. Each report is timestamped, stored under its case, and pushed to the hospital when uploaded and when its transcript is ready. The two-minute limit stops recording and asks the crew to Send; it never silently begins another cut. Audio awaiting upload is kept in this page's memory, so keep the page open until delivery completes.
 
 - **Storage:** the `cases` and `transcript_segments` tables. An EMT can have only one open case at a time.
   - A clip's `seq` is assigned by the client, is unique per case, and sets the order.
@@ -94,7 +94,7 @@ The EMT records one report at a time (Record Report, then Send Report), in ~8-se
   - `recorded_at` is when the EMT started recording, corrected to the server clock using the upload's `sent_at`.
   - Every row has an `updated_at`, and clients keep the newest version of each row, so a slow fetch never overwrites a newer pushed update.
   - Audio is saved under `private_uploads/` with random file names and is never served over HTTP.
-- **Reports** (`case_reports.py`): the clips between Record Report and Send Report form one report, and `POST /api/cases/:id/reports/:report_id/end` with the clip count closes it. The hospital sees "Reporting…" and the unsent words dimmed until then; the case gets new information (and a new AI handoff) once per sent report, not every 8 seconds. The send may arrive before its clips, sending twice is harmless, and closing the case or marking arrival ends an unsent report. A clip uploaded without a report id is a report of its own.
+- **Reports** (`case_reports.py`): the clips between Record Report and Send Report form one report, and `POST /api/cases/:id/reports/:report_id/end` with the clip count closes it. Older multi-clip clients and the replay can still show "Reporting…" with unsent words dimmed; new microphone reports appear after Send; the case gets new information (and a new AI handoff) once per sent report, once all its audio is transcribed. A failed Send remains visible and can be retried with the same report id and clip count. The send may arrive before its clips, sending twice is harmless, and closing the case or marking arrival ends an unsent report. A clip uploaded without a report id is a report of its own.
 - **Push:** Server-Sent Events at `GET /api/cases/events`, authenticated with the normal `Authorization: Bearer` header.
   - Hospital users receive the cases routed to their hospital; EMTs receive only their own.
   - Each (re)connect starts with a `ready` event, and clients re-fetch state at that point, because events sent while a client is disconnected aren't replayed.

@@ -1,141 +1,86 @@
 import { useEffect, useRef, useState } from 'react';
 
 const MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
-
+export const MAX_REPORT_MS = 120000;
 const pickMimeType = () =>
   MIME_CANDIDATES.find((type) => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || '';
 
 export const getMicrophone = () =>
   navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
 
-const isLive = (stream) => stream.getAudioTracks().some((track) => track.readyState === 'live');
-
 /**
- * Records a microphone stream as back-to-back segments of `segmentMs`.
- * Each segment uses a fresh MediaRecorder, so every blob is a complete,
- * independently decodable file (timeslice chunks after the first lack headers).
- *
- * onSegment({ blob, recordedAt, durationMs }) fires once per finished segment,
- * including the partial one captured when recording stops.
- * onError(message) fires if recording stops on its own (device lost, recorder error).
+ * One uninterrupted MediaRecorder per report. Its timeslice chunks share an encoder and
+ * headers, so they are assembled into one complete file and uploaded only on Send.
+ * Cutting into independently transcribed files can split a spoken number.
+ * onSegment fires once, including when the microphone or the page closes.
  */
-export default function useSegmentRecorder({ segmentMs, onSegment, onError }) {
+export default function useSegmentRecorder({ onSegment, onError }) {
   const [isRecording, setIsRecording] = useState(false);
   const callbacks = useRef({ onSegment, onError });
   callbacks.current = { onSegment, onError };
+  const session = useRef(null);
 
-  const streamRef = useRef(null);
-  const recorderRef = useRef(null);
-  const timerRef = useRef(null);
-  const activeRef = useRef(false);
-  const onStoppedRef = useRef(null);
-
-  const finish = () => {
-    activeRef.current = false;
-    if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-    recorderRef.current = null;
-    setIsRecording(false);
-    if (onStoppedRef.current) onStoppedRef.current();
-    onStoppedRef.current = null;
+  const stop = () => {
+    const current = session.current;
+    if (!current) return Promise.resolve();
+    clearTimeout(current.timer);
+    if (current.recorder.state === 'recording') current.recorder.stop();
+    return current.finished;
   };
 
-  const recordNextSegment = () => {
-    const stream = streamRef.current;
-    if (!isLive(stream)) {
-      callbacks.current.onError('Microphone disconnected — recording stopped');
-      finish();
-      return;
-    }
-
-    const mimeType = pickMimeType();
-    let recorder;
-    try {
-      recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    } catch (error) {
-      console.error('Could not create MediaRecorder:', error);
-      callbacks.current.onError('Audio recording is not supported here — recording stopped');
-      finish();
-      return;
-    }
-    const chunks = [];
-    const startedAt = new Date();
-
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    };
-    recorder.onerror = (event) => {
-      console.error('MediaRecorder error:', event.error);
-      if (activeRef.current) callbacks.current.onError('Recording error — recording stopped');
-      activeRef.current = false;
-    };
-    recorder.onstop = () => {
-      clearTimeout(timerRef.current);
-      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });
-      if (blob.size > 0) {
-        callbacks.current.onSegment({
-          blob,
-          recordedAt: startedAt.toISOString(),
-          durationMs: Date.now() - startedAt.getTime(),
-        });
-      }
-      if (activeRef.current) recordNextSegment();
-      else finish();
-    };
-
-    recorderRef.current = recorder;
-    try {
-      recorder.start();
-    } catch (error) {
-      console.error('Could not start MediaRecorder:', error);
-      callbacks.current.onError('Recording failed to start — recording stopped');
-      finish();
-      return;
-    }
-    timerRef.current = setTimeout(() => {
-      if (recorder.state === 'recording') recorder.stop();
-    }, segmentMs);
-  };
-
-  /**
-   * Begin recording from a stream obtained with getMicrophone(); this hook takes ownership of it.
-   * Returns false (and releases the stream) if a recording is already running.
-   */
   const start = (stream) => {
-    if (streamRef.current) {
+    if (session.current) {
       stream.getTracks().forEach((track) => track.stop());
       return false;
     }
-    streamRef.current = stream;
-    activeRef.current = true;
-    setIsRecording(true);
-    recordNextSegment();
-    return true;
+    const mimeType = pickMimeType();
+    const current = { stream, startedAt: new Date(), chunks: [] };
+    current.finished = new Promise((resolve) => { current.resolve = resolve; });
+    const finish = () => {
+      clearTimeout(current.timer);
+      stream.getTracks().forEach((track) => track.stop());
+      if (session.current === current) session.current = null;
+      setIsRecording(false);
+      current.resolve();
+    };
+    try {
+      const recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 128000 });
+      current.recorder = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) current.chunks.push(event.data);
+      };
+      recorder.onerror = () => callbacks.current.onError('Recording error — send the captured audio or record again');
+      recorder.onstop = () => {
+        try {
+          const blob = new Blob(current.chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });
+          if (blob.size) callbacks.current.onSegment({ blob, recordedAt: current.startedAt.toISOString(),
+            durationMs: Date.now() - current.startedAt.getTime() });
+        } finally {
+          finish();
+        }
+      };
+      session.current = current;
+      recorder.start(1000);
+      setIsRecording(true);
+      current.timer = setTimeout(() => {
+        callbacks.current.onError('Two-minute limit reached. Send this report before recording more.');
+        stop();
+      }, MAX_REPORT_MS);
+      return true;
+    } catch (error) {
+      finish();
+      callbacks.current.onError('Could not start recording. Check microphone permissions and browser support.');
+      return false;
+    }
   };
 
-  /** Stop recording. Resolves after the final partial segment has been passed to onSegment. */
-  const stop = () => new Promise((resolve) => {
-    activeRef.current = false;
-    clearTimeout(timerRef.current);
-    const recorder = recorderRef.current;
-    // recorderRef is cleared or replaced only inside onstop, so a recorder here still has a
-    // segment to hand off, even if the segment timer already called stop() on it.
-    if (recorder) {
-      onStoppedRef.current = resolve;
-      if (recorder.state === 'recording') recorder.stop();
-    } else {
-      finish();
-      resolve();
-    }
-  });
-
-  // Unmounting hands off the last partial segment and releases the microphone.
+  // Finish the original report on unmount; its upload owner is captured by useCaseRecording.
   useEffect(() => () => {
-    activeRef.current = false;
-    clearTimeout(timerRef.current);
-    const recorder = recorderRef.current;
-    if (recorder && recorder.state === 'recording') recorder.stop();
-    else if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop());
+    const current = session.current;
+    if (!current) return;
+    clearTimeout(current.timer);
+    if (current.recorder.state === 'recording') current.recorder.stop();
+    current.stream.getTracks().forEach((track) => track.stop());
   }, []);
 
   return { isRecording, start, stop };

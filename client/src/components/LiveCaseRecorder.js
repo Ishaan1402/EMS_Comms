@@ -16,8 +16,6 @@ import CaseUpdateForm from './CaseUpdateForm';
 import CrewAlerts from './CrewAlerts';
 import CaseChat from './CaseChat';
 
-const SEGMENT_MS = 8000;
-
 const CONNECTION_LABELS = {
   connecting: 'Connecting…',
   live: '● Connected',
@@ -61,7 +59,7 @@ const LiveCaseRecorder = () => {
   }, []);
   const uploads = useSegmentUploads(addSegment);
   const recorder = useCaseRecording({
-    caseRef, nextSeqRef, uploads, segmentMs: SEGMENT_MS,
+    caseRef, nextSeqRef, uploads,
     hasUnsentReport: !!reports.pending,
     onError: (message) => toast.error(message),
   });
@@ -263,7 +261,7 @@ const LiveCaseRecorder = () => {
     await stopRecording();
     await uploads.waitForIdle();
     if (uploads.failedCount()) {
-      toast.error('Some audio has not uploaded. Retry it below, then retry Send.');
+      toast.error('Some audio has not uploaded. Retry it below, then Send Report.');
       return;
     }
     await endReport();
@@ -443,7 +441,7 @@ const LiveCaseRecorder = () => {
           {!busyMessage && recorder.isRecording && (
             <>
               <span className="flex items-center gap-2 text-red-600 animate-pulse">
-                <span className="h-2 w-2 rounded-full bg-red-600" /> Recording report — the hospital sees the words as you speak
+                <span className="h-2 w-2 rounded-full bg-red-600" /> Recording report — tap Send when finished (up to 2 minutes)
               </span>
               <button
                 onClick={sendReport}
@@ -461,7 +459,7 @@ const LiveCaseRecorder = () => {
                 className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
               >
                 <Play className="h-4 w-4" />
-                <span>{reports.pending ? 'Retry Send Report' : 'Record Report'}</span>
+                <span>{reports.pending ? (reports.error ? 'Retry Send Report' : 'Send Report') : 'Record Report'}</span>
               </button>
               <button
                 onClick={endCaseAnyway}
@@ -513,7 +511,7 @@ const LiveCaseRecorder = () => {
             caseStartedAt={activeCase.started_at}
             onRetry={isOpen ? retry : undefined}
             onDismiss={dismissSegment}
-            emptyText={recorder.isRecording ? 'Listening… first transcript arrives in a few seconds.' : 'No transcript yet.'}
+            emptyText={recorder.isRecording ? 'Recording on this device. The hospital receives the transcript after Send.' : 'No transcript yet.'}
           />
         </div>
       )}

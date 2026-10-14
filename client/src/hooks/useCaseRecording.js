@@ -2,14 +2,13 @@ import { useCallback, useEffect, useRef } from 'react';
 import useSegmentRecorder from './useSegmentRecorder';
 
 /** Keep one microphone session and its final clip bound to the patient it started for. */
-export default function useCaseRecording({ caseRef, nextSeqRef, uploads, segmentMs, onError, hasUnsentReport }) {
+export default function useCaseRecording({ caseRef, nextSeqRef, uploads, onError, hasUnsentReport }) {
   const owner = useRef(null);
   const currentRecorder = useRef(null);
   const caseId = caseRef.current?.id;
   const status = caseRef.current?.status;
   const arrivedAt = caseRef.current?.arrived_at;
   const recorder = useSegmentRecorder({
-    segmentMs,
     onSegment: ({ blob, recordedAt, durationMs }) => {
       const session = owner.current;
       if (!session) return;

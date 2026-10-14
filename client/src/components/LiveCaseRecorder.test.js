@@ -314,9 +314,9 @@ test('Send waits for uploads and keeps its report when an upload fails', async (
   mockFailedCount = 1;
   await click('Send Report');
   expect(mockPosts.filter((r) => r.url.includes('/reports/'))).toEqual([]);
-  expect(container.textContent).toContain('Retry Send Report');
+  expect(container.textContent).toContain('Send Report');
   mockFailedCount = 0;
-  await click('Retry Send Report');
+  await click('Send Report');
   expect(mockPosts.filter((r) => r.url.includes('/reports/')).map((r) => r.body)).toEqual([{ clips: 1 }]);
   expect(mockStop).toHaveBeenCalledTimes(1);
 });
