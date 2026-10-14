@@ -63,6 +63,12 @@ The server starts even with settings missing, and warns about the main ones.
 - **Accounts** (password `password123`): `dr.smith` (General Hospital), `dr.jones` (Northside), `emt.wilson`, `emt.garcia` and `emt.lee`. They're created only with `SEED_DEMO_USERS=1`, or by running `python3 database.py --seed`.
 - **[demo/README.md](demo/README.md)** has the three-patient replay, the presenter's run sheet, and how to score a run against the clinician's answers.
 
+### Synthetic clinician-review pilot
+
+The [simplified clinician guide and annotation notebook](docs/clinician-annotation/README.md) include live Google Doc/Sheet links, a one-page PDF guide, and an XLSX notebook. The 10 reports are fictional AI-authored fixtures; clinician answers are not prefilled. These materials support a hackathon evaluation pilot, not clinical validation.
+
+The [evaluation pipeline](evals/README.md) and [evaluation notebook](analytics/ems_evaluation.ipynb) import that workbook, compare model outputs with approved clinician references, and export a dashboard plus CSVs for Python/SAS. Mock mode tests the pipeline while annotations are pending; it does not report clinical performance. [Model comparison](evals/MODEL_COMPARISON.md) adds opt-in OpenAI, Claude, Gemini, and local Ollama adapters; planning is offline and does not run inference.
+
 ## Tests
 
 ```bash
@@ -71,7 +77,7 @@ The server starts even with settings missing, and warns about the main ones.
 cd client && CI=true npm test -- --watchAll=false --runInBand      # frontend
 ```
 
-- Backend tests use temporary databases and need no API keys. Two skip until Vrishank's branch, with the evaluation contract and the pilot cases, is merged.
+- Backend tests use temporary databases and need no API keys. The evaluation contract and pilot fixtures are included. Install `evals/requirements.txt` for optional workbook import, then run `python -m pytest evals/tests` too.
 - The backend began as a port of a Node/Express server, which has since been removed. `test_parity.py` still checks the API contract the port kept, such as error codes and messages.
 
 ## How it works
