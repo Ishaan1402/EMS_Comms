@@ -19,9 +19,9 @@ const PanelButton = ({ open, controls, onClick, children }) => (
 
 /**
  * Everything above the queue in one strip: the counts, how the queue is ordered (Standard, Smart (AI)
- * or Manual, with what each means one click away), and the hospital's settings in a panel below it.
- * The settings panel stays mounted while closed, so an unsaved arrival-highlight draft survives
- * opening and closing it.
+ * or Manual, with what each means one click away), and a Settings panel below it: the custom risk
+ * fields (always showing their list and add form), then the arrival highlight. The panel stays
+ * mounted while closed, so an unsaved arrival-highlight draft survives opening and closing it.
  */
 const QueueStrip = ({ queue, hospital, riskFields, onHospitalChange, onModeChange }) => {
   const [panel, setPanel] = useState(null);
@@ -51,7 +51,7 @@ const QueueStrip = ({ queue, hospital, riskFields, onHospitalChange, onModeChang
           )}
           {linked && (
             <PanelButton open={panel === 'settings'} controls="queue-settings" onClick={() => toggle('settings')}>
-              ⚙ Queue settings
+              ⚙ Settings
             </PanelButton>
           )}
         </div>
@@ -59,9 +59,13 @@ const QueueStrip = ({ queue, hospital, riskFields, onHospitalChange, onModeChang
 
       {linked && (
         <div id="queue-settings" hidden={panel !== 'settings'}
-          className="px-6 py-2 border-b border-gray-200 text-sm text-gray-700 [&>details]:px-0 [&>details]:py-1 [&>details]:border-b-0">
-          {hospital.settings_version && <HospitalWorkflowSettings hospital={hospital} onChange={onHospitalChange} />}
+          className="px-6 py-4 border-b border-gray-200 text-sm text-gray-700 space-y-4 [&_details]:px-0 [&_details]:py-1 [&_details]:border-b-0">
           <RiskFieldSettings fields={riskFields} />
+          {hospital.settings_version && (
+            <div className="pt-3 border-t border-gray-100">
+              <HospitalWorkflowSettings hospital={hospital} onChange={onHospitalChange} />
+            </div>
+          )}
         </div>
       )}
     </>
