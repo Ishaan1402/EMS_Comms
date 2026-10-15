@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { BellRing, CheckCircle } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { Pill } from './ui';
 
 // Crew alerts (case_alerts.py): the crew's call, never the AI's. Shown in ink, apart from the
 // status colours the AI's labels use, so the two never read as the same thing.
@@ -44,14 +45,14 @@ export const CrewAlertBadges = ({ liveCase, serverNow }) => {
   return (
     <div className="flex flex-wrap items-center gap-1 mb-1">
       {alerts.active.map((alert) => (
-        <span key={alert.alert} className="px-2 py-0.5 text-xs font-bold text-white bg-slate-900 rounded-full">
+        <Pill key={alert.alert} tone="crew" bold>
           Crew alert: {alert.label} · {keyTimeText(alert, serverNow)}
-        </span>
+        </Pill>
       ))}
       {alerts.unacknowledged && (
-        <span className="px-2 py-0.5 text-xs font-medium text-slate-900 bg-amber-200 rounded-full">
+        <Pill tone="attention">
           {alerts.active.length ? 'Alert not yet acknowledged' : 'Alert cancelled · not yet acknowledged'}
-        </span>
+        </Pill>
       )}
     </div>
   );
@@ -86,7 +87,7 @@ export const CrewAlertPanel = ({ liveCase, serverNow, onChanged }) => {
           <li key={alert.alert} className="text-slate-900">
             <span className="font-bold">{alert.label}</span> · {alert.key_time_label}:{' '}
             {alert.key_time ? `${clockTime(alert.key_time)} (${Math.max(0, Math.round((serverNow - Date.parse(alert.key_time)) / 60000))} min ago)`
-              : <span className="text-purple-800">not stated</span>}
+              : <span className="text-amber-800">not stated</span>}
             <span className="text-xs text-slate-600"> · called by {alert.author_name} at {clockTime(alert.created_at)}</span>
           </li>
         ))}
@@ -237,7 +238,7 @@ const CrewAlerts = ({ liveCase }) => {
         </ul>
       )}
       {alerts.latest_change_id && (
-        <p className={`mt-1 text-xs ${alerts.unacknowledged ? 'text-orange-700' : 'text-green-800'}`}>
+        <p className={`mt-1 text-xs ${alerts.unacknowledged ? 'text-amber-800' : 'text-green-800'}`}>
           {alerts.unacknowledged ? 'The hospital has not acknowledged the latest alert yet'
             : `Acknowledged by ${alerts.acknowledgment.user_name} · ${clockTime(alerts.acknowledgment.acknowledged_at)}`}
         </p>

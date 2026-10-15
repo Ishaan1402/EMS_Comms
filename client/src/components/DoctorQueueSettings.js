@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useState } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { SectionLabel } from './ui';
 
 const KIND_LABELS = { yes_no: 'Yes / no', number: 'Number', text: 'Short text' };
 
@@ -141,7 +142,7 @@ export function CaseRiskFields({ caseId, fields, liveValues }) {
 
   return (
     <div className="mb-4 p-3 border border-gray-200 rounded-lg">
-      <h4 className="text-sm font-semibold text-gray-700 mb-2">Risk fields</h4>
+      <SectionLabel className="mb-2">Risk fields</SectionLabel>
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
         {fields.map((field) => (
           <div key={field.id} className="flex items-center gap-2">

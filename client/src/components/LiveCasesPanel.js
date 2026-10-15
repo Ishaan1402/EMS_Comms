@@ -7,7 +7,9 @@ import { mergeNewer, upsertNewer } from '../utils/liveRows';
 import useCaseDetails from '../hooks/useCaseDetails';
 import useCaseFindings from '../hooks/useCaseFindings';
 import LiveTranscript from './LiveTranscript';
-import CaseOverview, { CategoryBadge, OperationalBadge, ProcessingBadge, ReportingBadge } from './CaseOverview';
+import CaseOverview from './CaseOverview';
+import { CategoryBadge, OperationalBadge, ProcessingBadge, ReportingBadge } from './CaseBadges';
+import { SectionLabel } from './ui';
 import CaseChat from './CaseChat';
 import HospitalWorkflowSettings, { ArrivalHighlight } from './HospitalWorkflowSettings';
 import { CrewAlertBadges, CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
@@ -59,7 +61,7 @@ const ConnectionBadge = ({ status }) =>
       <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" /> Live updates
     </span>
   ) : (
-    <span className="flex items-center gap-1 text-xs font-medium text-orange-600">
+    <span className="flex items-center gap-1 text-xs font-medium text-amber-800">
       <WifiOff className="h-3 w-3" /> {OFFLINE_LABELS[status]}
     </span>
   );
@@ -72,7 +74,7 @@ const CaseStatusBadge = ({ liveCase, serverNow }) => {
   const idleMs = serverNow - Date.parse(liveCase.last_segment_at || liveCase.started_at);
   if (idleMs > IDLE_AFTER_MS) {
     // Quiet on purpose: a crew between reports is normal, not something to act on.
-    return <span className="text-xs text-gray-400">last audio {Math.floor(idleMs / 60000)}m ago</span>;
+    return <span className="text-xs text-gray-500">last audio {Math.floor(idleMs / 60000)}m ago</span>;
   }
   return <span className="px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full animate-pulse">LIVE</span>;
 };
@@ -87,7 +89,7 @@ const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move
       <div className="flex items-start justify-between gap-2 mb-1">
         <span className="flex flex-wrap items-baseline gap-x-2 text-gray-900">
           <span className="font-semibold whitespace-nowrap">
-            {c.queue_position && <span className="mr-2 text-gray-400">#{c.queue_position}</span>}
+            {c.queue_position && <span className="mr-2 text-gray-500">#{c.queue_position}</span>}
             {c.ems_unit || `Case #${c.id}`}
           </span>
           {c.status === 'active' && !c.arrived_at && (
@@ -375,8 +377,8 @@ const LiveCasesPanel = () => {
       {queue.counts && (
         <div className="px-6 py-3 border-b border-gray-200 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
           <span><span className="font-bold text-gray-900">{queue.counts.inbound}</span> inbound</span>
-          <span className="text-purple-700"><span className="font-bold">{queue.counts.needs_review}</span> need review</span>
-          <span className="text-orange-700"><span className="font-bold">{queue.counts.unacknowledged}</span> not acknowledged</span>
+          <span className="text-amber-800"><span className="font-bold">{queue.counts.needs_review}</span> need review</span>
+          <span className="text-amber-800"><span className="font-bold">{queue.counts.unacknowledged}</span> not acknowledged</span>
           {queue.counts.crew_alerts !== undefined && (
             <span className="text-slate-900"><span className="font-bold">{queue.counts.crew_alerts}</span> crew alert{queue.counts.crew_alerts === 1 ? '' : 's'}</span>
           )}
@@ -475,7 +477,7 @@ const LiveCasesPanel = () => {
                     markNew
                   />
                 </div>
-                <h4 className="text-sm font-semibold text-gray-700 mb-2">Transcript</h4>
+                <SectionLabel className="mb-2">Transcript</SectionLabel>
                 <LiveTranscript
                   segments={segments}
                   caseStartedAt={selected.started_at}
