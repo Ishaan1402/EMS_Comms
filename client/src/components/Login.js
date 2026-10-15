@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Eye, EyeOff, User, Lock } from 'lucide-react';
+import { Activity, Eye, EyeOff, User, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const Login = () => {
@@ -46,10 +46,10 @@ const Login = () => {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div>
-          <div className="mx-auto h-12 w-12 flex items-center justify-center rounded-full bg-red-100">
-            <span className="text-2xl">🏥</span>
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
+            <Activity className="h-5 w-5" />
           </div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+          <h2 className="mt-6 text-center text-xl font-semibold text-gray-900">
             Sign in to Asclepius
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">

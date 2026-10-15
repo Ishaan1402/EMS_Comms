@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { BellRing, CheckCircle } from 'lucide-react';
+import { Bell, BellOff, BellRing, CheckCircle } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
-import { Pill } from './ui';
+import { CrewChip, StatusText } from './ui';
 
 // Crew alerts (case_alerts.py): the crew's call, never the AI's. Shown in ink, apart from the
 // status colours the AI's labels use, so the two never read as the same thing.
@@ -38,23 +38,21 @@ export const keyTimeFromClock = (value, now = Date.now()) => {
   return time.toISOString();
 };
 
-/** Queue row: one badge per active crew alert, with its key time counting up. */
+/** Queue row: one chip per active crew alert, with its key time counting up, and whether it still needs acknowledging. */
 export const CrewAlertBadges = ({ liveCase, serverNow }) => {
   const alerts = liveCase.crew_alerts;
   if (!alerts?.active?.length && !alerts?.unacknowledged) return null;
   return (
-    <div className="flex flex-wrap items-center gap-1 mb-1">
+    <>
       {alerts.active.map((alert) => (
-        <Pill key={alert.alert} tone="crew" bold>
-          Crew alert: {alert.label} · {keyTimeText(alert, serverNow)}
-        </Pill>
+        <CrewChip key={alert.alert}>Crew alert: {alert.label} · {keyTimeText(alert, serverNow)}</CrewChip>
       ))}
       {alerts.unacknowledged && (
-        <Pill tone="attention">
+        <StatusText tone="attention">
           {alerts.active.length ? 'Alert not yet acknowledged' : 'Alert cancelled · not yet acknowledged'}
-        </Pill>
+        </StatusText>
       )}
-    </div>
+    </>
   );
 };
 
@@ -85,7 +83,7 @@ export const CrewAlertPanel = ({ liveCase, serverNow, onChanged }) => {
       <ul>
         {alerts.active.map((alert) => (
           <li key={alert.alert} className="text-slate-900">
-            <span className="font-bold">{alert.label}</span> · {alert.key_time_label}:{' '}
+            <span className="font-semibold">{alert.label}</span> · {alert.key_time_label}:{' '}
             {alert.key_time ? `${clockTime(alert.key_time)} (${Math.max(0, Math.round((serverNow - Date.parse(alert.key_time)) / 60000))} min ago)`
               : <span className="text-amber-800">not stated</span>}
             <span className="text-xs text-slate-600"> · called by {alert.author_name} at {clockTime(alert.created_at)}</span>
@@ -152,9 +150,11 @@ export const CrewAlertSound = ({ cases, play = chime }) => {
     return !on;
   });
   return (
-    <label className="flex items-center gap-1 text-xs text-gray-700 cursor-pointer">
-      <input type="checkbox" checked={enabled} onChange={toggle} /> Sound for crew alerts
-    </label>
+    <button type="button" onClick={toggle} aria-pressed={enabled} aria-label="Sound for crew alerts"
+      title={enabled ? 'Sound for crew alerts is on' : 'Play a sound when a crew calls an alert'}
+      className={`rounded-md p-1.5 hover:bg-gray-100 ${enabled ? 'text-blue-600' : 'text-gray-500'}`}>
+      {enabled ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+    </button>
   );
 };
 
@@ -230,7 +230,7 @@ const CrewAlerts = ({ liveCase }) => {
         <ul className="mt-2 text-sm text-slate-900">
           {alerts.active.map((alert) => (
             <li key={alert.alert} className="flex flex-wrap items-center gap-2">
-              <span className="font-bold">{alert.label}</span>
+              <span className="font-semibold">{alert.label}</span>
               <span>{alert.key_time_label}: {alert.key_time ? clockTime(alert.key_time) : 'not stated'}</span>
               <button type="button" onClick={() => cancel(alert)} disabled={sending} className="text-xs underline text-slate-700">Cancel</button>
             </li>

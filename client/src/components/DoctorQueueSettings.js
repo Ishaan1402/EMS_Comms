@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useState } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { SectionLabel } from './ui';
 
 const KIND_LABELS = { yes_no: 'Yes / no', number: 'Number', text: 'Short text' };
@@ -8,7 +9,7 @@ const KIND_LABELS = { yes_no: 'Yes / no', number: 'Number', text: 'Short text' }
 const errorText = (error, fallback) => error.response?.data?.error || fallback;
 
 /** The risk fields this hospital's doctors fill in on each case: add and remove them here. */
-export function RiskFieldSettings({ fields }) {
+export function RiskFieldSettings({ fields, onChanged }) {
   const id = useId();
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState('yes_no');
@@ -19,7 +20,8 @@ export function RiskFieldSettings({ fields }) {
     setSaving(true);
     try {
       await axios.post('/api/hospitals/mine/risk-fields', { label, kind });
-      setLabel('');  // the list updates from the live event
+      setLabel('');  // the other screens update from the live event; this one asks its page to reload
+      if (onChanged) onChanged();
     } catch (error) {
       toast.error(errorText(error, 'Could not add the field'));
     } finally {
@@ -31,6 +33,7 @@ export function RiskFieldSettings({ fields }) {
     if (!window.confirm(`Remove "${field.label}"? Values already recorded are kept but no longer shown.`)) return;
     try {
       await axios.delete(`/api/hospitals/mine/risk-fields/${field.id}`);
+      if (onChanged) onChanged();
     } catch (error) {
       toast.error(errorText(error, 'Could not remove the field'));
     }
@@ -73,9 +76,13 @@ export function RiskFieldSettings({ fields }) {
 export const MoveButtons = ({ onMove, first, last }) => (
   <div className="flex flex-col justify-center border-b border-gray-100 px-1">
     <button type="button" onClick={() => onMove(-1)} disabled={first} aria-label="Move up"
-      className="h-8 w-8 rounded text-gray-600 hover:bg-gray-100 hover:text-gray-900 disabled:opacity-25">▲</button>
+      className="flex h-7 w-7 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:opacity-25">
+      <ChevronUp className="h-4 w-4" />
+    </button>
     <button type="button" onClick={() => onMove(1)} disabled={last} aria-label="Move down"
-      className="h-8 w-8 rounded text-gray-600 hover:bg-gray-100 hover:text-gray-900 disabled:opacity-25">▼</button>
+      className="flex h-7 w-7 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:opacity-25">
+      <ChevronDown className="h-4 w-4" />
+    </button>
   </div>
 );
 

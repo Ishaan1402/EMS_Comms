@@ -25,7 +25,7 @@ test('while the crew is reporting, the handoff says it covers the reports alread
   expect(container.textContent).toContain("covers the reports they've already sent");
   expect(container.textContent).toContain('Patient awake.');
   act(() => root.render(<CategoryBadge liveCase={inbound(reporting)} />));
-  expect(container.textContent).toBe('Can wait');
+  expect(container.textContent).toBe('AI: Can wait');
 });
 
 test.each([
@@ -55,7 +55,7 @@ test('a report with no assessment never invents a category', () => {
     current_assessment: null, preparation_category: null,
     processing: { status: 'pending', assessment: { status: 'pending' } },
   })} />));
-  expect(container.textContent).toContain('Assessing…');
+  expect(container.textContent).toContain('assessing…');
   expect(container.textContent).not.toContain('Can wait');
 });
 

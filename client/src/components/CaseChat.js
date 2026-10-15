@@ -253,7 +253,7 @@ const CaseChat = ({ caseId, className = '' }) => {
                 <div className={`text-xs mb-1 ${mine ? 'text-right' : ''} text-gray-500`}>
                   <span className="font-medium text-gray-700">{mine ? 'You' : senderLabel(message)}</span>
                   {' · '}
-                  <span className="uppercase">{message.sender_role === 'doctor' ? 'Hospital' : 'EMT'}</span>
+                  <span>{message.sender_role === 'doctor' ? 'Hospital' : 'EMT'}</span>
                   {' · '}
                   <span>{formatTime(message.created_at)}</span>
                 </div>

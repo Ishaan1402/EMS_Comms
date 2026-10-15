@@ -26,17 +26,20 @@ const lastUpdate = (c) => c.last_update_at || c.updated_at || c.started_at || un
 const byPosition = (a, b) => (a.queue_position ?? 0) - (b.queue_position ?? 0);
 
 export const SORTS = {
-  queue: { label: 'Queue order', compare: byPosition },
+  queue: { label: 'Queue', description: "The hospital's order", compare: byPosition },
   eta: {
-    label: 'Soonest arrival',
+    label: 'ETA',
+    description: 'Soonest arrival first',
     compare: (a, b) => (Number(!a.eta_at) - Number(!b.eta_at)) || (a.eta_at || '').localeCompare(b.eta_at || '') || byPosition(a, b),
   },
   recent: {
-    label: 'Newest update',
+    label: 'Updated',
+    description: 'Latest information first',
     compare: (a, b) => lastUpdate(b).localeCompare(lastUpdate(a)) || byPosition(a, b),
   },
   waiting: {
-    label: 'Waiting longest to be acknowledged',
+    label: 'Waiting',
+    description: 'Longest without acknowledgment first',
     // Cases whose latest information nobody has acknowledged, the one that has waited longest first.
     compare: (a, b) => (Number(Boolean(a.latest_update_acknowledged)) - Number(Boolean(b.latest_update_acknowledged)))
       || (a.latest_update_acknowledged ? 0 : lastUpdate(a).localeCompare(lastUpdate(b))) || byPosition(a, b),
