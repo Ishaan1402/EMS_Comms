@@ -282,6 +282,7 @@ def init_database():
       dismissed_by INTEGER REFERENCES users (id),
       failed_at TEXT,
       report_id INTEGER REFERENCES case_reports (id),
+      is_preview INTEGER NOT NULL DEFAULT 0,
       UNIQUE (case_id, seq),
       FOREIGN KEY (case_id) REFERENCES cases (id)
     );
@@ -516,6 +517,7 @@ ADDED_COLUMNS = {
         ("source_run_id", "TEXT"),
     ],
     "transcript_segments": [
+        ("is_preview", "INTEGER NOT NULL DEFAULT 0"),
         ("info_version", "INTEGER"),
         ("dismissed_at", "TEXT"),
         ("dismissed_by", "INTEGER REFERENCES users (id)"),

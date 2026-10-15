@@ -14,7 +14,8 @@ export default function HospitalWorkflowSettings({ hospital, onChange }) {
   const [minutes, setMinutes] = useState(hospital.arrival_highlight_minutes);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
-  useEffect(() => setMinutes(hospital.arrival_highlight_minutes), [hospital]);
+  useEffect(() => setMinutes(hospital.arrival_highlight_minutes),
+    [hospital.id, hospital.arrival_highlight_minutes, hospital.settings_version]);
 
   const save = async (event) => {
     event.preventDefault();

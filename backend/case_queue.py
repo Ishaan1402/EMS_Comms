@@ -38,9 +38,10 @@ QUEUE_RULE = ("Unacknowledged information, an unacknowledged crew alert or a pro
 # The AI category's tier in AI-assisted: draft-3's ranking. No assessment yet and Cannot assess share
 # the "unknown" tier, as the evaluation harness maps Cannot assess to Unsure.
 AI_ASSISTED_RULE_VERSION = "ai-assisted-1"
-AI_ASSISTED_RULE = ("Same as Standard, but among cases that don't need a person first and have no active crew alert, "
-              "the AI's suggested category comes before arrival time: Prepare now, then not yet known "
-              "(including Cannot assess), Can wait, Routine.")
+AI_ASSISTED_RULE = ("Unacknowledged information, an unacknowledged crew alert or a processing failure first, "
+              "then active crew alerts. Among cases tied on both priorities, the AI's suggested category "
+              "comes before arrival time: Prepare now, then not yet known (including Cannot assess), "
+              "Can wait, Routine.")
 CATEGORY_RANK = {"Prepare now": 0, None: 1, "Cannot assess": 1, "Can wait": 2, "Routine": 3}
 
 NO_ALERTS = {"active": [], "unacknowledged": False}

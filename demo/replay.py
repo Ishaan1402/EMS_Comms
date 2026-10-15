@@ -195,6 +195,8 @@ class Replay:
     def _headers(self, username: str) -> dict:
         if username not in self.tokens:
             response = self.client.post("/api/auth/login", json={"username": username, "password": self.password})
+            if response.status_code >= 500:
+                raise ReplayError(f"Login failed for {username} ({response.status_code}). Check that the server has JWT_SECRET set.")
             if response.status_code != 200:
                 raise ReplayError(f"Login failed for {username} ({response.status_code}). Start the server with SEED_DEMO_USERS=1.")
             self.tokens[username] = response.json()["token"]

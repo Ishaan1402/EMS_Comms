@@ -280,21 +280,24 @@ def _events_table(keys: dict, cases: list, queue_events: list) -> list:
                         FROM case_updates cu JOIN users u ON u.id = cu.author_id"""):
         event(f"update:{row['id']}", row["case_id"], "update_added", row["created_at"],
               row["info_version"], row["role"], row["kind"])
-    for row in query("""SELECT s.id, s.case_id, s.seq, s.status, s.error, s.duration_ms, s.info_version,
+    for row in query("""SELECT s.id, s.case_id, s.seq, s.is_preview, s.status, s.error, s.duration_ms, s.info_version,
                                s.created_at, s.transcribed_at, s.failed_at, s.updated_at, s.dismissed_at,
                                u.role AS dismissed_by_role
                         FROM transcript_segments s LEFT JOIN users u ON u.id = s.dismissed_by"""):
+        prefix = "live draft " if row["is_preview"] else ""
+        detail = f"{prefix}seq {row['seq']}"
         event(f"segment:{row['id']}:uploaded", row["case_id"], "segment_uploaded", row["created_at"],
-              actor_role="emt", detail=f"seq {row['seq']}", value=row["duration_ms"])
+              actor_role="emt", detail=detail, value=row["duration_ms"])
         if row["status"] == "completed":
             event(f"segment:{row['id']}:transcribed", row["case_id"], "segment_transcribed", row["transcribed_at"],
-                  row["info_version"], detail=f"seq {row['seq']}")
+                  row["info_version"], detail=detail)
         # failed_at survives a later retry; before it existed, a failed row's updated_at was the failure time.
         failed_at = row["failed_at"] or (row["updated_at"] if row["status"] == "failed" and not row["dismissed_at"] else None)
         if failed_at:
-            event(f"segment:{row['id']}:failed", row["case_id"], "segment_failed", failed_at, detail=row["error"])
+            event(f"segment:{row['id']}:failed", row["case_id"], "segment_failed", failed_at,
+                  detail=f"{prefix}{row['error']}" if row["error"] else prefix.strip() or None)
         event(f"segment:{row['id']}:dismissed", row["case_id"], "segment_dismissed", row["dismissed_at"],
-              actor_role=row["dismissed_by_role"], detail=f"seq {row['seq']}")
+              actor_role=row["dismissed_by_role"], detail=detail)
     for row in query("""SELECT id, case_id, based_on_version, status, preparation_category, error,
                                latency_ms, completed_at FROM risk_assessments WHERE completed_at IS NOT NULL"""):
         event(f"assessment:{row['id']}", row["case_id"], f"assessment_{row['status']}", row["completed_at"],

@@ -2,7 +2,7 @@
 
 A repeatable run of the KAN-6 demo story through the real app. It does the same things an EMT and a doctor would: it creates cases, radios audio, sends updates and messages, and acknowledges new information. It talks only to the HTTP API, so it tests the real live-transcription, messaging, acknowledgment and failure-handling code.
 
-**No real patient data.** The reports are fictional, AI-authored EMS reports from `docs/clinician-annotation/pilot_cases.json` (on `vrishank-branch` until it is merged). The update reports are copied verbatim; each initial report is the case's "earlier" information with its time phrase removed. `tests/test_demo_replay.py` checks this against the pilot file once it is in the repo.
+**No real patient data.** The reports are fictional, AI-authored EMS reports from `docs/clinician-annotation/pilot_cases.json`. The update reports are copied verbatim; each initial report is the case's "earlier" information with its time phrase removed. `tests/test_demo_replay.py` checks this against the included pilot fixture.
 
 ## Run it
 
@@ -80,7 +80,7 @@ ASCLEPIUS_DB_PATH=demo-rehearsal-01.db SEED_DEMO_USERS=1 SAS_SYNC_ENABLED=0 NODE
 | end | The terminal prints the model cost (about $0.002), the transcription estimate, and the time on the server: about 1 s from a clip arriving to its transcript being pushed, about 4 s to the assessment. Say "on the server" if you quote it. It also writes `demo/runs/<run_id>.json` and `<run_id>-predictions.json`. |
 
 **If asked:**
-- **"When does the hospital see a report?"** The words appear as the crew speaks, marked "reporting…". The report becomes new information only when the crew taps Send and every clip is transcribed. Only then does the case need acknowledging, move in the queue, and get a new AI handoff, so it never works from half a report. The replay sends each report the same way.
+- **"When does the hospital see a report?"** Live draft words arrive during recording, in roughly eight-second batches plus transcription time. Send transcribes the complete recording again, so a number cut between draft clips is heard with its full context. Only the completed report updates the AI handoff and needs acknowledgment. The draft label matters: words can change, and transcription can still make mistakes. Crew alerts and typed updates remain immediate. The prepared replay uses clips cut at pauses; it does not measure microphone latency.
 - **"What happens when the ETA changes?"** The AI re-assesses with the new ETA (prompt `awareness_v3`), and the doctor doesn't need to acknowledge again, because no new patient information came in. Until the new handoff is ready, the old one is marked "earlier info". The handoff shows when it was assessed; the live ETA is shown separately. Because the model reads the ETA, an ETA change alone can change the category; that's on the list for the clinician.
 - **"How do you know the extracted facts are real?"** Each fact quotes the crew's own words, and the app checks that the quote really is in the clip or note it cites (hover a fact to see it). A bad quote fails that extraction visibly, with a retry, and earlier facts stay. It proves where a fact came from, not that the AI read it right.
 - **Hospital setting (KAN-34):** "Settings" in the navbar, then "Arrival alert", sets how early a patient is flagged "Arriving soon", per hospital: 1 to 60 minutes, default 5. It only changes the badge, never the AI or the order. To show it, set General to 15 as `dr.smith`; Northside (`dr.jones`) keeps its own value.

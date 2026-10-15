@@ -25,6 +25,22 @@ const edit = (value) => {
 const submit = () => act(async () => container.querySelector('form')
   .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 
+test('a reconnect with unchanged settings preserves the unsaved edit', () => {
+  const onChange = jest.fn();
+  act(() => root.render(<HospitalWorkflowSettings hospital={hospital} onChange={onChange} />));
+  edit('15');
+  act(() => root.render(<HospitalWorkflowSettings hospital={{ ...hospital }} onChange={onChange} />));
+  expect(container.querySelector('input').value).toBe('15');
+});
+
+test('a newer saved version replaces the edit, including when the saved value is unchanged', () => {
+  const onChange = jest.fn();
+  act(() => root.render(<HospitalWorkflowSettings hospital={hospital} onChange={onChange} />));
+  edit('15');
+  act(() => root.render(<HospitalWorkflowSettings hospital={{ ...hospital, settings_version: 2 }} onChange={onChange} />));
+  expect(container.querySelector('input').value).toBe('5');
+});
+
 test('two hospitals highlight the same arrival differently, including the exact boundary', () => {
   act(() => root.render(<ArrivalHighlight liveCase={inbound} serverNow={now} minutes={5} />));
   expect(container.textContent).toBe('');
