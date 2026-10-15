@@ -12,12 +12,12 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
 from main import app
-import case_assessment
-import database
-from database import init_database, insert_sample_data, query, run
-from middleware.auth import create_access_token
-import openai_config
-from routes import cases
+from backend import case_assessment
+from backend import database
+from backend.database import init_database, insert_sample_data, query, run
+from backend.middleware.auth import create_access_token
+from backend import openai_config
+from backend.routes import cases
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -1098,7 +1098,7 @@ class TestDatabasePath:
         monkeypatch.setenv("ASCLEPIUS_DB_PATH", str(tmp_path / "demo.db"))
         assert database.configured_db_path() == tmp_path / "demo.db"
         monkeypatch.delenv("ASCLEPIUS_DB_PATH")
-        assert database.configured_db_path() == Path(database.__file__).parent / "asclepius.db"
+        assert database.configured_db_path() == Path(database.__file__).parent.parent / "asclepius.db"
 
 
 class TestBuildInfo:

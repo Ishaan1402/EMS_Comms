@@ -20,7 +20,7 @@ For a clean screen (no closed cases from earlier runs in the doctor's list), giv
 ASCLEPIUS_DB_PATH=demo-rehearsal-01.db SEED_DEMO_USERS=1 python3 main.py
 ```
 
-Export that run for SAS with the same database setting: `ASCLEPIUS_DB_PATH=demo-rehearsal-01.db python -m sas_sync csv sas_export/`.
+Export that run for SAS with the same database setting: `ASCLEPIUS_DB_PATH=demo-rehearsal-01.db python -m backend.sas_sync csv sas_export/`.
 
 - `--typed` sends every report as a typed note: no audio files and no Whisper needed.
 - `--finish` marks every patient arrived and closes the cases afterwards.

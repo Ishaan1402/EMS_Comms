@@ -21,9 +21,9 @@ chief complaint, vitals, documents, ETA); not tested against an Epic system.
 import base64
 import uuid
 
-from case_assessment import VITAL_SIGNS
-from database import query, utc_now_iso
-import case_extraction
+from backend.case_assessment import VITAL_SIGNS
+from backend.database import query, utc_now_iso
+from backend import case_extraction
 
 SYSTEM = "https://github.com/Ishaan1402/EMS_Comms"
 QUOTE_EXTENSION = f"{SYSTEM}/fhir/StructureDefinition/source-quote"

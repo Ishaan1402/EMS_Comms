@@ -11,18 +11,18 @@ import math
 import time
 import uuid
 import openai
-import case_alerts
-import case_assessment
-import case_extraction
-import case_reports
-import case_queue
-import openai_config
-import queue_history
-from case_assessment import ASSESSMENT_COLUMNS, VITAL_SIGNS
-from database import get_db, query, run, to_iso, utc_now_iso
-from middleware.auth import require_role, APIError
-from realtime import broker, format_sse
-from thread_pools import fast_executor
+from backend import case_alerts
+from backend import case_assessment
+from backend import case_extraction
+from backend import case_reports
+from backend import case_queue
+from backend import openai_config
+from backend import queue_history
+from backend.case_assessment import ASSESSMENT_COLUMNS, VITAL_SIGNS
+from backend.database import get_db, query, run, to_iso, utc_now_iso
+from backend.middleware.auth import require_role, APIError
+from backend.realtime import broker, format_sse
+from backend.thread_pools import fast_executor
 
 router = APIRouter()
 hospitals_router = APIRouter()
@@ -570,7 +570,7 @@ async def hospital_queue(current_user: dict = Depends(require_role(["doctor"])))
     The user's hospital's inbound queue, ordered on the server (case_queue.py), with each
     case's position and the reasons for it. Arrived and closed cases are not in it.
     """
-    from routes import doctor_config  # imports this module, so it can't be imported at the top
+    from backend.routes import doctor_config  # imports this module, so it can't be imported at the top
     hospital_id = user_hospital_id(current_user)
     as_of = utc_now_iso()  # before reading, so a later snapshot always carries a later as_of
     ordered = hospital_queue_cases(hospital_id)

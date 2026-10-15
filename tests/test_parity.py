@@ -10,11 +10,11 @@ from types import SimpleNamespace
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
 from main import app
-import database
-from database import query, run, get_db, init_database, insert_sample_data
-import openai_config
+from backend import database
+from backend.database import query, run, get_db, init_database, insert_sample_data
+from backend import openai_config
 
-REAL_DB_PATH = Path(database.__file__).parent / "asclepius.db"
+REAL_DB_PATH = Path(database.__file__).parent.parent / "asclepius.db"
 
 # Global error handler responses are 500s; inspect them instead of re-raising.
 client = TestClient(app, raise_server_exceptions=False)
@@ -34,7 +34,7 @@ def temp_database(tmp_path_factory):
 @pytest.fixture(autouse=True)
 def no_external_services(monkeypatch, tmp_path):
     """Run with no OpenAI client, and keep any clip audio in a temp dir."""
-    from routes import cases
+    from backend.routes import cases
     monkeypatch.setattr(openai_config, "openai_client", None)
     monkeypatch.setattr(cases, "SEGMENT_DIR", tmp_path / "segments")
 

@@ -2,10 +2,10 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-import case_alerts
-from database import get_db, utc_now_iso
-from middleware.auth import APIError, require_role
-from routes.cases import MAX_CLIENT_ID_LENGTH, get_case, get_case_for_user, publish_case, read_json_body
+from backend import case_alerts
+from backend.database import get_db, utc_now_iso
+from backend.middleware.auth import APIError, require_role
+from backend.routes.cases import MAX_CLIENT_ID_LENGTH, get_case, get_case_for_user, publish_case, read_json_body
 
 router = APIRouter()
 

@@ -15,13 +15,13 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
 from main import app
-import database
-from database import init_database, insert_sample_data, query
-from middleware.auth import create_access_token
-from realtime import EventBroker
-import case_assessment
-import openai_config
-from routes import cases
+from backend import database
+from backend.database import init_database, insert_sample_data, query
+from backend.middleware.auth import create_access_token
+from backend.realtime import EventBroker
+from backend import case_assessment
+from backend import openai_config
+from backend.routes import cases
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -457,7 +457,7 @@ class TestReports:
         assert end_report(case["id"], "r2", 1).status_code == 409
 
     def test_ai_readers_skip_unfinished_reports(self, monkeypatch):
-        import case_extraction
+        from backend import case_extraction
         monkeypatch.setattr(cases, "transcribe_segment_sync", fake_transcriber({0: "BP 92 over", 1: "58"}))
         case = start_case(patient_info=None)
         upload(case["id"], 0, report_id="r1")
@@ -575,7 +575,7 @@ class TestBroker:
         assert 'data: {"n":1}' in message
 
     def test_slow_subscriber_is_dropped_with_close_signal(self, monkeypatch):
-        import realtime
+        from backend import realtime
         monkeypatch.setattr(realtime, "MAX_QUEUED_EVENTS", 2)
 
         async def scenario():
@@ -662,7 +662,7 @@ class TestLiveStream:
         assert response.status_code == 401
 
     def test_disconnected_stream_unsubscribes(self, live_server):
-        from realtime import broker
+        from backend.realtime import broker
 
         before = broker.subscriber_count
         with httpx.Client(base_url=live_server, timeout=10) as http:

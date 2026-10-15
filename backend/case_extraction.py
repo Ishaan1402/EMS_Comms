@@ -23,11 +23,11 @@ import re
 import time
 from typing import Optional
 
-from case_assessment import (VITAL_SIGNS, CaseRunner, ScoringRefused, ScoringUnavailable, UNREADABLE_ERROR,
+from backend.case_assessment import (VITAL_SIGNS, CaseRunner, ScoringRefused, ScoringUnavailable, UNREADABLE_ERROR,
                              assessment_executor, describe_error, estimate_cost)
-import case_reports
-from database import get_db, query, run, utc_now_iso
-import openai_config
+from backend import case_reports
+from backend.database import get_db, query, run, utc_now_iso
+from backend import openai_config
 
 PROMPT_VERSION = "extraction_v3"
 EXTRACTION_MODEL = os.getenv("OPENAI_EXTRACTION_MODEL") or openai_config.SCORING_MODEL

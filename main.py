@@ -15,17 +15,17 @@ import json
 
 load_dotenv()
 
-from middleware.auth import APIError, require_role
-from routes import auth, messages, cases, sas
-from database import init_database, insert_sample_data, utc_now_iso
-import case_assessment
-import case_extraction
-from routes import alerts
-import case_queue
-import openai_config
-import sas_sync
-from routes import fhir
-from routes import doctor_config
+from backend.middleware.auth import APIError, require_role
+from backend.routes import auth, messages, cases, sas
+from backend.database import init_database, insert_sample_data, utc_now_iso
+from backend import case_assessment
+from backend import case_extraction
+from backend.routes import alerts
+from backend import case_queue
+from backend import openai_config
+from backend import sas_sync
+from backend.routes import fhir
+from backend.routes import doctor_config
 
 
 def build_info() -> dict:

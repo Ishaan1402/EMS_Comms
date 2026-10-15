@@ -5,9 +5,9 @@ from typing import Optional
 import asyncio
 import bcrypt
 import json
-from database import query, run
-from middleware.auth import create_access_token, get_current_user, APIError
-from thread_pools import fast_executor
+from backend.database import query, run
+from backend.middleware.auth import create_access_token, get_current_user, APIError
+from backend.thread_pools import fast_executor
 
 router = APIRouter()
 

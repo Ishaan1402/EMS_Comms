@@ -22,10 +22,10 @@ client), SAS_SYNC_ENABLED=1 to run in the server, and optionally
 SAS_CAS_SERVER (cas-shared-default), SAS_CASLIB (Public), SAS_TABLE_PREFIX (ASC_),
 SAS_SYNC_INTERVAL_SECONDS (10), SAS_SAVE_TABLES (1: also save to disk so tables survive a CAS restart).
 
-    python -m sas_sync check     # sign in, read the CAS server and caslibs, open and close a
+    python -m backend.sas_sync check     # sign in, read the CAS server and caslibs, open and close a
                                  # CAS session and run one read-only action; writes no tables
-    python -m sas_sync push      # push every table now
-    python -m sas_sync csv DIR   # write the tables as CSV files + schema.json; load them as
+    python -m backend.sas_sync push      # push every table now
+    python -m backend.sas_sync csv DIR   # write the tables as CSV files + schema.json; load them as
                                  # yourself with sas/load_csvs.py (no app credentials needed)
 """
 import asyncio
@@ -43,8 +43,8 @@ from typing import Optional
 
 import httpx
 
-import database
-from database import query, read_snapshot, utc_now_iso
+from backend import database
+from backend.database import query, read_snapshot, utc_now_iso
 
 SAS_EPOCH = datetime(1960, 1, 1, tzinfo=timezone.utc)
 DATETIME_FORMAT = "DATETIME22.3"
@@ -196,7 +196,7 @@ def build_tables() -> dict:
 
 
 def _build_tables() -> dict:
-    from routes.cases import CASE_SELECT, describe_cases
+    from backend.routes.cases import CASE_SELECT, describe_cases
 
     hospitals = {row["id"]: row["code"] for row in query("SELECT id, code FROM hospitals")}
     cases = describe_cases(query(CASE_SELECT + " ORDER BY c.id"))
@@ -366,7 +366,7 @@ def _vitals_table(keys: dict) -> list:
     Typed vitals and vitals extracted from the reports (case_extraction.py), in time order.
     The extracted ones carry their source but not the spoken words or qualifier (no free text).
     """
-    from case_assessment import VITAL_SIGNS
+    from backend.case_assessment import VITAL_SIGNS
 
     readings = [(row["measured_at"], row["case_id"], row["name"], row["value"],
                  {"READING_ID": row["id"], "SOURCE": "typed vitals", "UPDATE_ID": row["update_id"]})
@@ -739,6 +739,6 @@ def main(argv: list) -> int:
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).parent / ".env")
+    load_dotenv(Path(__file__).parent.parent / ".env")
     database.DB_PATH = database.configured_db_path()  # .env may name a different database
     sys.exit(main(sys.argv))

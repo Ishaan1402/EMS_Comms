@@ -6,12 +6,12 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
-import case_assessment
-import database
-import openai_config
-from database import init_database, insert_sample_data, query
+from backend import case_assessment
+from backend import database
+from backend import openai_config
+from backend.database import init_database, insert_sample_data, query
 from main import app
-from middleware.auth import create_access_token
+from backend.middleware.auth import create_access_token
 
 client = TestClient(app, raise_server_exceptions=False)
 
