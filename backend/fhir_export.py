@@ -112,7 +112,7 @@ def build(case: dict) -> dict:
         title = "EMS correction typed by the crew" if update["kind"] == "correction" else "EMS note typed by the crew"
         report(("update", update["id"]), title, update["body"], update["created_at"], update["info_version"])
     for segment in query("""SELECT id, seq, text, recorded_at, info_version FROM transcript_segments
-                            WHERE case_id = ? AND status = 'completed' AND text != '' ORDER BY seq""", (case_id,)):
+                            WHERE case_id = ? AND is_preview = 0 AND status = 'completed' AND text != '' ORDER BY seq""", (case_id,)):
         report(("segment", segment["id"]), f"EMS radio report transcript, clip {segment['seq'] + 1}",
                segment["text"], segment["recorded_at"], segment["info_version"])
 

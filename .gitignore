@@ -116,3 +116,8 @@ sas_export/
 
 # React production build (built locally; see demo/README.md)
 client/build/
+
+# Local evaluation annotations and generated reports
+evals/local/
+evals/results/
+analytics/results/

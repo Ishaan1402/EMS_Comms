@@ -43,24 +43,29 @@ export default function useSegmentUploads(onUploaded) {
     rerender();
   };
 
+  const requestUpload = (item) => {
+    const form = new FormData();
+    form.append('audio', item.blob, `segment-${item.seq}.${extensionFor(item.blob.type)}`);
+    form.append('seq', String(item.seq));
+    form.append('client_id', item.client_id);
+    form.append('recorded_at', item.recorded_at);
+    form.append('sent_at', new Date().toISOString());
+    form.append('duration_ms', String(item.duration_ms));
+    if (item.is_preview) form.append('preview', 'true');
+    if (item.report_id) form.append('report_id', item.report_id);
+    return axios.post(`/api/cases/${item.caseId}/segments`, form, { timeout: UPLOAD_TIMEOUT_MS });
+  };
+
   const upload = async (item) => {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       setEntry(item.seq, { ...item, status: 'uploading', attempt });
       try {
-        const form = new FormData();
-        form.append('audio', item.blob, `segment-${item.seq}.${extensionFor(item.blob.type)}`);
-        form.append('seq', String(item.seq));
-        form.append('client_id', item.client_id);
-        form.append('recorded_at', item.recorded_at);
-        form.append('sent_at', new Date().toISOString());
-        form.append('duration_ms', String(item.duration_ms));
-        if (item.report_id) form.append('report_id', item.report_id);
-        const response = await axios.post(`/api/cases/${item.caseId}/segments`, form, { timeout: UPLOAD_TIMEOUT_MS });
+        const response = await requestUpload(item);
         setEntry(item.seq, null);
         onUploadedRef.current(response.data);
         return;
       } catch (error) {
-        console.error(`Segment ${item.seq} upload attempt ${attempt} failed:`, error);
+        console.warn(`Segment ${item.seq} upload attempt ${attempt} failed (${error.response?.status || 'network'})`);
         if (!isRetryable(error)) break;
         if (attempt < MAX_ATTEMPTS) await sleep(1000 * 2 ** (attempt - 1));
       }
@@ -69,6 +74,14 @@ export default function useSegmentUploads(onUploaded) {
   };
 
   const enqueue = (item) => {
+    if (item.is_preview) {
+      // Draft delivery never delays or replaces the complete recording. No retries on a weak
+      // connection: reserve them for the authoritative audio retained in the upload queue.
+      requestUpload({ client_id: newClientId(), ...item })
+        .then((response) => onUploadedRef.current(response.data))
+        .catch(() => console.warn('Live draft upload failed; complete recording is still retained.'));
+      return;
+    }
     const promise = upload({ client_id: newClientId(), ...item }).finally(() => inFlight.current.delete(promise));
     inFlight.current.add(promise);
   };

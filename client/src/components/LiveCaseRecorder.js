@@ -3,7 +3,9 @@ import { Radio, Square, Play, FilePlus } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import useCaseEvents from '../hooks/useCaseEvents';
-import useSegmentRecorder, { getMicrophone } from '../hooks/useSegmentRecorder';
+import { getMicrophone } from '../hooks/useSegmentRecorder';
+import useCaseRecording from '../hooks/useCaseRecording';
+import useReportDelivery from '../hooks/useReportDelivery';
 import useSegmentUploads from '../hooks/useSegmentUploads';
 import { mergeNewer, upsertNewer } from '../utils/liveRows';
 import useCaseDetails from '../hooks/useCaseDetails';
@@ -13,8 +15,6 @@ import CaseOverview from './CaseOverview';
 import CaseUpdateForm from './CaseUpdateForm';
 import CrewAlerts from './CrewAlerts';
 import CaseChat from './CaseChat';
-
-const SEGMENT_MS = 8000;
 
 const CONNECTION_LABELS = {
   connecting: 'Connecting…',
@@ -29,12 +29,6 @@ const microphoneErrorMessage = (error) => (error.name === 'NotAllowedError'
 
 const nextSeqAfter = (segments) => segments.reduce((max, s) => Math.max(max, s.seq + 1), 0);
 
-const newReportId = () => (window.crypto?.randomUUID
-  ? window.crypto.randomUUID()
-  : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
-
-const END_REPORT_ATTEMPTS = 3;
-
 const LiveCaseRecorder = () => {
   const [patientInfo, setPatientInfo] = useState('');
   const [hospitals, setHospitals] = useState([]);
@@ -47,53 +41,39 @@ const LiveCaseRecorder = () => {
   const [busyMessage, setBusyMessage] = useState(null);
   const caseRef = useRef(null);
   const nextSeqRef = useRef(0);
-  // The report being recorded: { caseId, id, clips }. Its clips become new information for the
-  // hospital together, once it is sent with its clip count.
-  const reportRef = useRef(null);
+  const delivery = useRef(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const reports = useReportDelivery();
+  const { keep: keepReport, send: endReport } = reports;
   // The acknowledgment last announced, so each one is announced once.
   const announcedAck = useRef(null);
   caseRef.current = activeCase;
 
-  const addSegment = useCallback((segment) => setSegments((list) => upsertNewer(list, segment)), []);
+  const addSegment = useCallback((segment) => {
+    if (segment.case_id !== caseRef.current?.id) return;
+    nextSeqRef.current = Math.max(nextSeqRef.current, segment.seq + 1);
+    setSegments((list) => upsertNewer(list, segment));
+  }, []);
   const uploads = useSegmentUploads(addSegment);
-  const recorder = useSegmentRecorder({
-    segmentMs: SEGMENT_MS,
-    onSegment: ({ blob, recordedAt, durationMs }) => {
-      const report = reportRef.current;
-      if (report) report.clips += 1;
-      uploads.enqueue({
-        caseId: caseRef.current.id,
-        seq: nextSeqRef.current++,
-        recorded_at: recordedAt,
-        duration_ms: durationMs,
-        report_id: report?.id,
-        blob,
-      });
-    },
+  const recorder = useCaseRecording({
+    caseRef, nextSeqRef, uploads,
+    hasUnsentReport: !!reports.pending,
     onError: (message) => toast.error(message),
   });
-
-  // Tells the server how many clips the report has. If this keeps failing, ending the case or
-  // marking arrival still ends the report on the server with the clips it received.
-  const endReport = useCallback(async (report) => {
-    for (let attempt = 1; attempt <= END_REPORT_ATTEMPTS; attempt += 1) {
-      try {
-        await axios.post(`/api/cases/${report.caseId}/reports/${report.id}/end`, { clips: report.clips });
-        return true;
-      } catch (error) {
-        if (error.response && error.response.status < 500) break;
-        await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
-      }
-    }
-    toast.error('Could not send the report. It will be sent when you end the case.');
-    return false;
-  }, []);
+  delivery.current = { recorder, uploads, reports };
+  const { stop: stopRecording } = recorder;
 
   const startReport = (stream) => {
-    // A report left open (the microphone dropped out, say) is sent before the next one starts.
-    if (reportRef.current) endReport(reportRef.current);
-    reportRef.current = { caseId: caseRef.current.id, id: newReportId(), clips: 0 };
-    recorder.start(stream);
+    const report = reports.begin(caseRef.current.id);
+    if (!report) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    if (!recorder.start(stream, report)) reports.clear();
   };
 
   const runBusy = async (message, action) => {
@@ -111,13 +91,22 @@ const LiveCaseRecorder = () => {
   const loadSeq = useRef(0);
   const loadOpenCase = useCallback(async ({ sendOpenReport = false } = {}) => {
     const seq = ++loadSeq.current;
-    const stillCurrent = () => seq === loadSeq.current && caseRef.current?.status !== 'active';
+    const stillCurrent = () => mounted.current && seq === loadSeq.current && caseRef.current?.status !== 'active';
     setOpenCaseCheck('checking');
     try {
       const open = (await axios.get('/api/cases?status=active')).data[0];
       if (open) {
         const existing = (await axios.get(`/api/cases/${open.id}/segments`)).data;
         if (!stillCurrent()) return;
+        await stopRecording();
+        await delivery.current.uploads.waitForIdle();
+        if (!stillCurrent()) return;
+        if (delivery.current.uploads.failedCount() > 0) {
+          setOpenCaseCheck('audio_pending');
+          return;
+        }
+        // A remote close settles the old report; no audio is lost when all uploads succeeded.
+        delivery.current.reports.clear();
         nextSeqRef.current = nextSeqAfter(existing);
         caseRef.current = open;
         setSegments(existing);
@@ -125,7 +114,8 @@ const LiveCaseRecorder = () => {
         // This page was reloaded mid-report: the clips it hadn't uploaded are gone, so send the
         // report with what the server has.
         if (sendOpenReport && open.open_report) {
-          endReport({ caseId: open.id, id: open.open_report.id, clips: open.open_report.clips });
+          keepReport({ caseId: open.id, id: open.open_report.id, clips: open.open_report.clips });
+          endReport();
         }
       }
       if (seq === loadSeq.current) setOpenCaseCheck('done');
@@ -133,7 +123,7 @@ const LiveCaseRecorder = () => {
       console.error('Error checking for an open case:', error);
       if (seq === loadSeq.current) setOpenCaseCheck('failed');
     }
-  }, [endReport]);
+  }, [endReport, keepReport, stopRecording]);
 
   useEffect(() => {
     loadOpenCase({ sendOpenReport: true });
@@ -165,7 +155,11 @@ const LiveCaseRecorder = () => {
       const caseId = current.id;
       const stillShown = () => caseRef.current?.id === caseId;
       axios.get(`/api/cases/${caseId}/segments`)
-        .then((response) => stillShown() && setSegments((list) => mergeNewer(list, response.data)))
+        .then((response) => {
+          if (!stillShown()) return;
+          nextSeqRef.current = Math.max(nextSeqRef.current, nextSeqAfter(response.data));
+          setSegments((list) => mergeNewer(list, response.data));
+        })
         .catch((error) => console.error('Error re-syncing transcript:', error));
       axios.get(`/api/cases/${caseId}`)
         .then((response) => stillShown() && setActiveCase((c) => (c && c.id === caseId && c.updated_at < response.data.updated_at ? response.data : c)))
@@ -195,9 +189,14 @@ const LiveCaseRecorder = () => {
 
   // Always connected, so a case opened elsewhere shows up here too.
   const connection = useCaseEvents(handleEvent);
+  useEffect(() => {
+    if (connection === 'unauthorized') stopRecording();
+  }, [connection, stopRecording]);
 
   // withAudio: open the microphone and start streaming; otherwise the case starts from typed information.
   const startLiveCase = (withAudio) => runBusy('Starting case…', async () => {
+    if (uploads.pending.length) return;
+    const previousCaseId = caseRef.current?.id;
     if (!destinationId) {
       toast.error('Choose the destination hospital');
       return;
@@ -206,6 +205,10 @@ const LiveCaseRecorder = () => {
     if (withAudio) {
       try {
         stream = await getMicrophone();
+        if (!mounted.current || caseRef.current?.id !== previousCaseId || caseRef.current?.status === 'active') {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
       } catch (error) {
         toast.error(microphoneErrorMessage(error));
         return;
@@ -218,12 +221,18 @@ const LiveCaseRecorder = () => {
         ems_unit: emsUnit.trim() || null,
         eta_minutes: etaMinutes === '' ? null : Number(etaMinutes),
       });
+      if (!mounted.current) {
+        if (stream) stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      loadSeq.current += 1;
+      setOpenCaseCheck('done');
       caseRef.current = response.data;
       setActiveCase(response.data);
       setSegments([]);
       uploads.reset();
       nextSeqRef.current = 0;
-      reportRef.current = null;
+      reports.clear();
       if (stream) startReport(stream);
       toast.success(`Case #${response.data.id} started — the hospital can follow along`);
     } catch (error) {
@@ -239,8 +248,14 @@ const LiveCaseRecorder = () => {
   });
 
   const recordReport = () => runBusy('Connecting microphone…', async () => {
+    const caseId = caseRef.current?.id;
     try {
-      startReport(await getMicrophone());
+      const stream = await getMicrophone();
+      if (!mounted.current || caseRef.current?.id !== caseId || caseRef.current?.status !== 'active') {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      startReport(stream);
     } catch (error) {
       toast.error(microphoneErrorMessage(error));
     }
@@ -248,18 +263,24 @@ const LiveCaseRecorder = () => {
 
   // The hospital gets the report as one update once all its clips are in.
   const sendReport = () => runBusy('Sending report…', async () => {
-    await recorder.stop();
-    const report = reportRef.current;
-    reportRef.current = null;
-    if (report) await endReport(report);
+    await stopRecording();
+    await uploads.waitForIdle();
+    if (uploads.failedCount()) {
+      toast.error('Some audio has not uploaded. Retry it below, then Send Report.');
+      return;
+    }
+    await endReport();
   });
 
   const closeCase = async () => {
+    const caseId = caseRef.current.id;
     try {
-      const response = await axios.post(`/api/cases/${caseRef.current.id}/close`);
+      const response = await axios.post(`/api/cases/${caseId}/close`);
+      if (!mounted.current || caseRef.current?.id !== caseId) return;
+      caseRef.current = response.data;
       setActiveCase(response.data);
       uploads.reset();
-      reportRef.current = null;
+      reports.clear();
       setPatientInfo('');
       setEtaMinutes('');
       toast.success(`Case #${response.data.id} closed`);
@@ -269,16 +290,19 @@ const LiveCaseRecorder = () => {
     }
   };
 
-  const endCaseAnyway = () => {
+  const endCaseAnyway = () => runBusy('Ending case…', async () => {
+    await stopRecording();
+    await uploads.waitForIdle();
     const lost = uploads.failedCount();
-    if (lost > 0 && !window.confirm(`${lost} audio segment(s) were never uploaded and will be lost. End the case anyway?`)) {
-      return;
-    }
-    runBusy('Ending case…', async () => {
-      await uploads.waitForIdle();
+    if (lost > 0 && !window.confirm(`${lost} audio segment(s) for Case #${caseRef.current.id} were never uploaded and will be lost. Discard them and continue?`)) return;
+    if (caseRef.current.status === 'closed') {
+      uploads.reset();
+      reports.clear();
+      await loadOpenCase();
+    } else {
       await closeCase();
-    });
-  };
+    }
+  });
 
   const retry = async (segment) => {
     if (segment.status === 'upload_failed') {
@@ -310,18 +334,26 @@ const LiveCaseRecorder = () => {
     }
   };
 
-  const markArrived = async () => {
+  const markArrived = () => runBusy('Sending report before arrival…', async () => {
+    const caseId = caseRef.current.id;
+    await stopRecording();
+    await uploads.waitForIdle();
+    if (uploads.failedCount() || !(await endReport())) {
+      toast.error('Send the remaining report before marking arrival.');
+      return;
+    }
     try {
-      setActiveCase((await axios.post(`/api/cases/${activeCase.id}/arrive`)).data);
+      const response = await axios.post(`/api/cases/${caseId}/arrive`);
+      if (caseRef.current?.id === caseId) setActiveCase(response.data);
     } catch (error) {
       toast.error('Could not mark the patient as arrived');
     }
-  };
+  });
 
   const isOpen = activeCase?.status === 'active';
   const transcriptItems = [
     ...segments,
-    ...uploads.pending.filter((item) => !segments.some((s) => s.seq === item.seq)),
+    ...uploads.pending.filter((item) => item.caseId === activeCase?.id && !segments.some((s) => item.client_id && s.client_id === item.client_id && s.seq === item.seq)),
   ];
 
   return (
@@ -382,7 +414,7 @@ const LiveCaseRecorder = () => {
           <div className="flex flex-wrap items-center gap-4">
             <button
               onClick={() => startLiveCase(true)}
-              disabled={openCaseCheck !== 'done' || !!busyMessage}
+              disabled={openCaseCheck !== 'done' || !!busyMessage || uploads.pending.length > 0}
               className="flex items-center space-x-2 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <Radio className="h-5 w-5" />
@@ -390,7 +422,7 @@ const LiveCaseRecorder = () => {
             </button>
             <button
               onClick={() => startLiveCase(false)}
-              disabled={openCaseCheck !== 'done' || !!busyMessage}
+              disabled={openCaseCheck !== 'done' || !!busyMessage || uploads.pending.length > 0}
               className="flex items-center space-x-2 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <FilePlus className="h-5 w-5" />
@@ -414,7 +446,7 @@ const LiveCaseRecorder = () => {
           {!busyMessage && recorder.isRecording && (
             <>
               <span className="flex items-center gap-2 text-red-600 animate-pulse">
-                <span className="h-2 w-2 rounded-full bg-red-600" /> Recording report — the hospital sees the words as you speak
+                <span className="h-2 w-2 rounded-full bg-red-600" /> Recording — live words are a draft. Send the complete report when finished (up to 2 minutes)
               </span>
               <button
                 onClick={sendReport}
@@ -428,11 +460,11 @@ const LiveCaseRecorder = () => {
           {!busyMessage && !recorder.isRecording && (
             <>
               <button
-                onClick={recordReport}
+                onClick={reports.pending ? sendReport : recordReport}
                 className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
               >
                 <Play className="h-4 w-4" />
-                <span>Record Report</span>
+                <span>{reports.pending ? (reports.error ? 'Retry Send Report' : 'Send Report') : 'Record Report'}</span>
               </button>
               <button
                 onClick={endCaseAnyway}
@@ -443,10 +475,19 @@ const LiveCaseRecorder = () => {
             </>
           )}
           {!activeCase.arrived_at && (
-            <button onClick={markArrived} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+            <button onClick={markArrived} disabled={!!busyMessage} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
               Mark Arrived
             </button>
           )}
+        </div>
+      )}
+      {reports.error && <p role="alert" className="my-3 text-sm text-red-700">{reports.error}</p>}
+      {!isOpen && uploads.pending.length > 0 && (
+        <div role="alert" className="my-3 text-sm text-red-700">
+          Unsent audio belongs to Case #{activeCase?.id}. Keep this page open until it is handled.
+          <button onClick={endCaseAnyway} disabled={!!busyMessage} className="ml-2 underline">
+            Discard unsent audio and continue
+          </button>
         </div>
       )}
       {isOpen && <CrewAlerts liveCase={activeCase} />}
@@ -475,7 +516,7 @@ const LiveCaseRecorder = () => {
             caseStartedAt={activeCase.started_at}
             onRetry={isOpen ? retry : undefined}
             onDismiss={dismissSegment}
-            emptyText={recorder.isRecording ? 'Listening… first transcript arrives in a few seconds.' : 'No transcript yet.'}
+            emptyText={recorder.isRecording ? 'Listening… live draft words arrive as you speak. Send delivers the complete report.' : 'No transcript yet.'}
           />
         </div>
       )}

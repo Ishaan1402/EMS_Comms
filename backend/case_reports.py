@@ -1,11 +1,11 @@
 """Reports: what the crew says between "Record report" and "Send", like one radio call.
 
-A report groups the ~8-second clips it was recorded as. Its clips are stored, transcribed and
-shown live as they arrive, but they become new patient information only together, once the
-report is complete:
+A microphone report contains live draft clips and an uninterrupted full recording. The drafts
+are stored and shown for early visibility; only the full recording becomes patient information.
+Older clients and the prepared replay can supply several non-draft clips. A report completes when:
 
 - it has ended: the EMT sent it with its clip count, or the case was closed or marked arrived;
-- that many clips have arrived, and none is still being transcribed.
+- that many non-draft clips have arrived, and none is still being transcribed.
 
 Then, if any clip has text, the case's info_version goes up once and every clip with text gets
 that version. So the hospital acknowledges, the AI assesses and extraction reads whole reports,
@@ -20,11 +20,12 @@ from typing import Optional
 
 # For the AI readers (case_assessment, case_extraction): a clip whose report hasn't completed is not
 # information yet. Clips stored before reports existed have no report and keep their versions.
-FINISHED_CLIP = ("(transcript_segments.report_id IS NULL OR transcript_segments.report_id IN "
+FINISHED_CLIP = ("(transcript_segments.is_preview = 0) AND (transcript_segments.report_id IS NULL OR transcript_segments.report_id IN "
                  "(SELECT id FROM case_reports WHERE completed_at IS NOT NULL))")
 
 # A client id of the reports made for clips sent without one; never a valid device report id.
 SINGLE_CLIP_PREFIX = "clip:"
+MISSING_AUDIO_ERROR = "Complete report audio was not received; resend it or send a typed update."
 
 
 def report_for_clip(conn, case_id: int, report_client_id: Optional[str], clip_client_id: str, now: str) -> int:
@@ -77,7 +78,7 @@ def end_all(conn, case_id: int, now: str) -> bool:
     for report in reports:
         conn.execute(
             """UPDATE case_reports SET ended_at = COALESCE(ended_at, ?),
-                   clip_count = (SELECT COUNT(*) FROM transcript_segments WHERE report_id = ?)
+                   clip_count = (SELECT COUNT(*) FROM transcript_segments WHERE report_id = ? AND is_preview = 0)
                WHERE id = ?""",
             (now, report["id"], report["id"]),
         )
@@ -100,7 +101,7 @@ def settle(conn, report_id: Optional[int], now: str) -> bool:
             return False
         arrived, pending = conn.execute(
             """SELECT COUNT(*), COALESCE(SUM(status = 'pending'), 0)
-               FROM transcript_segments WHERE report_id = ?""",
+               FROM transcript_segments WHERE report_id = ? AND is_preview = 0""",
             (report_id,),
         ).fetchone()
         if arrived < report["clip_count"] or pending:
@@ -108,9 +109,22 @@ def settle(conn, report_id: Optional[int], now: str) -> bool:
         conn.execute("UPDATE case_reports SET completed_at = ? WHERE id = ?", (now, report_id))
         # Every clip of the report changes (report_complete), so screens must take each row again.
         conn.execute("UPDATE transcript_segments SET updated_at = ? WHERE report_id = ?", (now, report_id))
+    # An abandoned live draft must not masquerade as a delivered report. Keep its audio/text,
+    # flag the missing full recording through the existing visible failure/handled workflow.
+    has_audio = conn.execute("SELECT 1 FROM transcript_segments WHERE report_id = ? AND is_preview = 0",
+                             (report_id,)).fetchone()
+    if has_audio:
+        conn.execute("""UPDATE transcript_segments SET status = 'completed', error = NULL, updated_at = ?
+                       WHERE report_id = ? AND is_preview = 1 AND error = ?""",
+                     (now, report_id, MISSING_AUDIO_ERROR))
+    else:
+        conn.execute("""UPDATE transcript_segments SET status = 'failed', error = ?,
+                       failed_at = COALESCE(failed_at, ?), updated_at = ?
+                       WHERE id = (SELECT id FROM transcript_segments WHERE report_id = ? AND is_preview = 1
+                                   ORDER BY seq LIMIT 1)""", (MISSING_AUDIO_ERROR, now, now, report_id))
     new_text = conn.execute(
         """SELECT id FROM transcript_segments
-           WHERE report_id = ? AND status = 'completed' AND text != '' AND info_version IS NULL""",
+           WHERE report_id = ? AND is_preview = 0 AND status = 'completed' AND text != '' AND info_version IS NULL""",
         (report_id,),
     ).fetchall()
     if not new_text:
