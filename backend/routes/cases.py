@@ -577,16 +577,22 @@ async def hospital_queue(current_user: dict = Depends(require_role(["doctor"])))
     changes = case_extraction.vital_changes([case["id"] for case in ordered])
     for case in ordered:
         case["vital_changes"] = changes[case["id"]]
-    # Auto-order off: the doctors' own order (routes/doctor_config.py); queue history keeps the rule's.
+    # The hospital's chosen mode (routes/doctor_config.py): Standard is the rule as computed, Smart (AI)
+    # adds the AI's category, Manual is the doctors' own order. Queue history keeps the Standard order.
     settings = doctor_config.queue_settings(hospital_id)
-    if not settings["auto_order"]:
+    if settings["queue_mode"] == "smart":
+        ordered = case_queue.smart_ordered(ordered)
+    elif settings["queue_mode"] == "manual":
         ordered = case_queue.doctor_ordered(ordered, settings["doctor_order"])
     return {
         # Responses can arrive out of order; screens keep the snapshot with the latest as_of.
         "as_of": as_of,
+        "queue_mode": settings["queue_mode"],
         "auto_order": settings["auto_order"],
         "rule_version": case_queue.QUEUE_RULE_VERSION,
         "rule": case_queue.QUEUE_RULE,
+        "rules": {"standard": case_queue.QUEUE_RULE, "smart": case_queue.SMART_RULE},
+        "rule_versions": {"standard": case_queue.QUEUE_RULE_VERSION, "smart": case_queue.SMART_RULE_VERSION},
         "counts": case_queue.counts(ordered),
         "cases": ordered,
     }

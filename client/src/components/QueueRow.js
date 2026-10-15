@@ -124,7 +124,7 @@ const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, ar
           <p className="mt-1 text-sm text-gray-900">{c.vital_changes.map(vitalChange).join(' · ')}</p>
         )}
         {open && c.suggested_position && c.suggested_position !== c.queue_position && (
-          <p className="mt-0.5 text-xs text-gray-600">Auto-order would put it #{c.suggested_position}</p>
+          <p className="mt-0.5 text-xs text-gray-600">Standard order would put it #{c.suggested_position}</p>
         )}
       </button>
     </li>

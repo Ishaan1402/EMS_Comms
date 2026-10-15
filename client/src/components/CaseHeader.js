@@ -26,7 +26,7 @@ const downloadFhir = async (caseId) => {
  * A fragment on purpose: a sticky bar only sticks inside its parent, so the bar has to be a
  * direct child of the tall column the case lives in, not of a wrapper as short as the header.
  */
-const CaseHeader = ({ liveCase: c, inQueue, onAcknowledge, onMarkArrived }) => {
+const CaseHeader = ({ liveCase: c, inQueue, queueMode = 'standard', onAcknowledge, onMarkArrived }) => {
   const open = c.status === 'active';
   const reasons = inQueue?.queue_reasons;
   return (
@@ -69,8 +69,12 @@ const CaseHeader = ({ liveCase: c, inQueue, onAcknowledge, onMarkArrived }) => {
         </p>
         {reasons && (
           <p className="mt-1 text-sm text-gray-700">
-            {inQueue.suggested_position ? `Auto-order would put it #${inQueue.suggested_position}: ` : 'Why here: '}
+            {queueMode === 'manual'
+              ? `Placed by your team. Standard order would put it #${inQueue.suggested_position}: `
+              : 'Why here: '}
             {reasons.join(' · ')}
+            {queueMode === 'smart' && inQueue.suggested_position !== inQueue.queue_position
+              && ` · Standard order: #${inQueue.suggested_position}`}
           </p>
         )}
       </div>

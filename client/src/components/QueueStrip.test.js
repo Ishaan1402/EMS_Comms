@@ -14,13 +14,14 @@ beforeEach(() => {
 afterEach(() => act(() => root.unmount()));
 
 const queue = (overrides = {}) => ({
-  rule_version: 'draft-4', rule: 'Arrival order rule.',
+  queue_mode: 'standard', rules: { standard: 'Arrival order rule.', smart: 'Smart rule.' },
+  rule_versions: { standard: 'draft-4', smart: 'smart-1' },
   counts: { inbound: 3, needs_review: 0, unacknowledged: 1, crew_alerts: 1, prepare_now: 2 }, ...overrides,
 });
 const hospital = { id: 1, name: 'General', arrival_highlight_minutes: 5, settings_version: 1 };
 const render = (props = {}) => act(() => root.render(
-  <QueueStrip queue={queue()} autoOrder hospital={hospital} riskFields={[]} onHospitalChange={() => {}}
-              onAutoOrderChange={() => {}} {...props} />,
+  <QueueStrip queue={queue()} hospital={hospital} riskFields={[]} onHospitalChange={() => {}}
+              onModeChange={() => {}} {...props} />,
 ));
 const button = (text) => [...container.querySelectorAll('button')].find((b) => b.textContent.includes(text));
 const click = (node) => act(() => node.click());
@@ -37,28 +38,26 @@ test('counts that are zero fade to gray; the others keep their colour', () => {
   expect(colourOf('AI suggests prepare now')).toContain('text-red-700');
 });
 
-test('the strip always says whose order this is', () => {
+test('the strip always shows which order is in use, with no draft label and no standing paragraph', () => {
   render();
-  expect(container.textContent).toContain('Order: Auto · draft-4');
-  render({ autoOrder: false });
-  expect(container.textContent).toContain('Order: set by your team');
+  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('Standard');
+  render({ queue: queue({ queue_mode: 'smart' }) });
+  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('Smart (AI)');
+  render({ queue: queue({ queue_mode: 'manual' }) });
+  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('Manual');
+  expect(container.querySelector('#queue-order-note')).toBeNull();
+  expect(container.textContent).not.toContain('How this order is set');
+  expect([...container.querySelectorAll('p')].filter((p) => !p.closest('#queue-order-help, #queue-settings'))).toHaveLength(0);
 });
 
-test('the order note and the settings stay in the page while closed, and open one at a time', () => {
+test('the settings stay in the page while closed, and open from the Settings button', () => {
   render();
-  const note = container.querySelector('#queue-order-note');
   const settings = container.querySelector('#queue-settings');
-  expect(note.hidden).toBe(true);
   expect(settings.hidden).toBe(true);
-  expect(container.textContent).toContain('not validated on real EMS audio');
   expect(container.textContent).toContain('Arrival highlight · 5 min');
-
-  click(button('How this order is set'));
-  expect(note.hidden).toBe(false);
-  expect(button('How this order is set').getAttribute('aria-expanded')).toBe('true');
   click(button('Queue settings'));
-  expect(note.hidden).toBe(true);
   expect(settings.hidden).toBe(false);
+  expect(button('Queue settings').getAttribute('aria-expanded')).toBe('true');
   click(button('Queue settings'));
   expect(settings.hidden).toBe(true);
 });
@@ -77,11 +76,10 @@ test('an unsaved arrival-highlight draft survives opening and closing the settin
   expect(input().value).toBe('15');
 });
 
-test('without a linked hospital or counts there is nothing to show; without counts only the settings are', () => {
+test('without a linked hospital or counts there is nothing to show; without counts only the order and settings are', () => {
   render({ hospital: null, queue: queue({ counts: null }) });
   expect(container.textContent).toBe('');
   render({ queue: queue({ counts: null }) });
   expect(container.textContent).toContain('Queue settings');
-  expect(container.textContent).not.toContain('How this order is set');
   expect(container.textContent).not.toContain('inbound');
 });

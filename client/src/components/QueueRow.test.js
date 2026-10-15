@@ -58,9 +58,9 @@ test('the row keeps the AI label as a suggestion and the ETA, and drops the foot
   expect(row.querySelector('button').title).toBe('Why here: ETA 10 min');
 });
 
-test('Auto-order\'s suggestion shows only where it differs from the team\'s order', () => {
-  expect(render(base({ suggested_position: 3 })).textContent).toContain('Auto-order would put it #3');
-  expect(render(base({ suggested_position: 1 })).textContent).not.toContain('Auto-order would put it');
+test('the Standard order\'s suggestion shows only where it differs from where the case is', () => {
+  expect(render(base({ suggested_position: 3 })).textContent).toContain('Standard order would put it #3');
+  expect(render(base({ suggested_position: 1 })).textContent).not.toContain('Standard order would put it');
 });
 
 test('the idle time is quiet text, and a report in progress shows Reporting… instead of Live', () => {
