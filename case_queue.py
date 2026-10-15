@@ -105,3 +105,20 @@ def counts(ordered: list) -> dict:
         # Information only: how many the AI suggests preparing for now (it doesn't set the order).
         "prepare_now": sum(case["preparation_category"] == "Prepare now" for case in ordered),
     }
+
+
+def doctor_ordered(ordered: list, doctor_order: list) -> list:
+    """
+    The same queue in the order the hospital's doctors set by hand (Auto-order off). Cases they
+    haven't placed yet, such as a new arrival, go on top in rule order so nothing new is buried.
+    Each case keeps its rule position as suggested_position; queue history still records the rule.
+    """
+    placed = {case_id: index for index, case_id in enumerate(doctor_order)}
+    for case in ordered:
+        case["suggested_position"] = case["queue_position"]
+    unplaced = [case for case in ordered if case["id"] not in placed]
+    by_doctor = sorted((case for case in ordered if case["id"] in placed), key=lambda case: placed[case["id"]])
+    result = unplaced + by_doctor
+    for position, case in enumerate(result, start=1):
+        case["queue_position"] = position
+    return result
