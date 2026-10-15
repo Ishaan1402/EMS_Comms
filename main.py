@@ -52,6 +52,7 @@ def build_info() -> dict:
         "extractor_version": case_extraction.extractor_version(),
         "transcription_model": openai_config.TRANSCRIPTION_MODEL,
         "queue_rule_version": case_queue.QUEUE_RULE_VERSION,
+        "smart_rule_version": case_queue.SMART_RULE_VERSION,
         "server_started_at": utc_now_iso(),
     }
 

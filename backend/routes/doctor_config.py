@@ -1,7 +1,7 @@
 """
-A hospital's doctors' own queue settings: Auto-order on or off, the order they set by hand when
-it is off, and the risk fields they add and fill in on each case. None of this changes the
-queue rule (case_queue.py), queue history, the AI assessment or the exports.
+A hospital's doctors' own queue settings: the order mode (Standard, Smart (AI) or Manual), the
+order they set by hand in Manual, and the risk fields they add and fill in on each case. None of
+this changes the queue rule (case_queue.py), queue history, the AI assessment or the exports.
 """
 import json
 import math
@@ -17,6 +17,7 @@ from backend.routes.cases import get_case_for_user, parse_id, read_json_body, us
 hospital_router = APIRouter()
 case_router = APIRouter()
 
+QUEUE_MODES = ("standard", "smart", "manual")
 RISK_FIELD_KINDS = ("yes_no", "number", "text")
 MAX_RISK_FIELDS = 10
 MAX_LABEL = 40
@@ -32,12 +33,17 @@ def own_hospital(user: dict) -> int:
 
 
 def queue_settings(hospital_id: Optional[int]) -> dict:
-    """{auto_order, doctor_order}; Auto-order is on until a doctor turns it off."""
-    rows = query("SELECT auto_order, doctor_order FROM hospital_queue_settings WHERE hospital_id = ?",
+    """
+    {queue_mode, auto_order, doctor_order}. The mode is Standard until a doctor chooses Smart or
+    Manual; auto_order is false only in Manual (the old on/off setting).
+    """
+    rows = query("SELECT auto_order, ai_ranking, doctor_order FROM hospital_queue_settings WHERE hospital_id = ?",
                  (hospital_id,)) if hospital_id is not None else []
     if not rows:
-        return {"auto_order": True, "doctor_order": []}
-    return {"auto_order": bool(rows[0]["auto_order"]), "doctor_order": json.loads(rows[0]["doctor_order"])}
+        return {"queue_mode": "standard", "auto_order": True, "doctor_order": []}
+    row = rows[0]
+    mode = "manual" if not row["auto_order"] else "smart" if row["ai_ranking"] else "standard"
+    return {"queue_mode": mode, "auto_order": mode != "manual", "doctor_order": json.loads(row["doctor_order"])}
 
 
 def risk_fields(hospital_id: int) -> list:
@@ -53,19 +59,42 @@ def save_queue_settings(hospital_id: int, column: str, value) -> None:
     broker.publish("queue.reordered", {}, hospital_id=hospital_id)
 
 
+def save_queue_mode(hospital_id: int, mode: str) -> None:
+    auto_order, ai_ranking = {"standard": (1, 0), "smart": (1, 1), "manual": (0, 0)}[mode]
+    with get_db() as conn:
+        conn.execute("INSERT OR IGNORE INTO hospital_queue_settings (hospital_id) VALUES (?)", (hospital_id,))
+        conn.execute("""UPDATE hospital_queue_settings SET auto_order = ?, ai_ranking = ?, updated_at = ?
+                        WHERE hospital_id = ?""", (auto_order, ai_ranking, utc_now_iso(), hospital_id))
+    broker.publish("queue.reordered", {}, hospital_id=hospital_id)
+
+
 @hospital_router.get("/mine/config")
 async def get_config(current_user: dict = Depends(require_role(["doctor"]))):
     hospital_id = own_hospital(current_user)
-    return {"auto_order": queue_settings(hospital_id)["auto_order"], "risk_fields": risk_fields(hospital_id)}
+    settings = queue_settings(hospital_id)
+    return {"queue_mode": settings["queue_mode"], "auto_order": settings["auto_order"],
+            "risk_fields": risk_fields(hospital_id)}
+
+
+@hospital_router.put("/mine/queue-mode")
+async def set_queue_mode(request: Request, current_user: dict = Depends(require_role(["doctor"]))):
+    """Standard (the written rule), Smart (AI) (the rule plus the AI's category) or Manual (the doctors' own order)."""
+    hospital_id = own_hospital(current_user)
+    mode = (await read_json_body(request)).get("mode")
+    if mode not in QUEUE_MODES:
+        raise APIError(400, "mode must be standard, smart or manual")
+    save_queue_mode(hospital_id, mode)
+    return {"queue_mode": mode, "auto_order": mode != "manual"}
 
 
 @hospital_router.put("/mine/auto-order")
 async def set_auto_order(request: Request, current_user: dict = Depends(require_role(["doctor"]))):
+    """The earlier on/off form of queue-mode: on is Standard, off is Manual."""
     hospital_id = own_hospital(current_user)
     body = await read_json_body(request)
     if type(body.get("auto_order")) is not bool:
         raise APIError(400, "auto_order must be true or false")
-    save_queue_settings(hospital_id, "auto_order", int(body["auto_order"]))
+    save_queue_mode(hospital_id, "standard" if body["auto_order"] else "manual")
     return {"auto_order": body["auto_order"]}
 
 

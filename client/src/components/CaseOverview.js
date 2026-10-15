@@ -235,7 +235,10 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
           <SectionLabel as="p">
             AI handoff {liveCase.assessment_is_outdated && <span className="text-amber-800 font-normal">(based on earlier information or ETA)</span>}
           </SectionLabel>
-          {assessment.completed_at && <p className="text-xs text-gray-500">Assessed at {formatTime(assessment.completed_at)} · current arrival time shown above</p>}
+          <p className="text-xs text-gray-500">
+            {assessment.completed_at && `Assessed at ${formatTime(assessment.completed_at)} · current arrival time shown above · `}
+            AI-written from the crew's reports, not validated on real EMS audio
+          </p>
           {isReporting(liveCase) && (
             <p className="text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded px-3 py-2">
               The crew is reporting now. This handoff covers the reports they've already sent.

@@ -80,31 +80,39 @@ test('a delayed hospital fetch cannot undo a newer setting received by the strea
   expect(container.textContent).toContain('Arrival highlight · 15 min');
 });
 
-test('queue rows label the AI category as a suggestion and the board states the order rule', async () => {
+test('queue rows label the AI category as a suggestion, and the order control carries the rule and the disclosure', async () => {
   await act(async () => root.render(<LiveCasesPanel />));
   await resolve(pendingFor('/api/hospitals/mine')[0], { id: 1, name: 'General' });
   await resolve(pendingFor('/api/cases')[0], [inbound(1, 'Medic 1')]);
   const body = queue(1, [[1, 'Medic 1']]);
-  await resolve(pendingFor('/api/cases/queue')[0], { ...body, rule_version: 'draft-4', rule: 'Arrival order rule.',
-    counts: { ...body.counts, crew_alerts: 0 } });
+  await resolve(pendingFor('/api/cases/queue')[0], { ...body, queue_mode: 'standard', counts: { ...body.counts, crew_alerts: 0 },
+    rules: { standard: 'Arrival order rule.', smart: 'Smart rule.' }, rule_versions: { standard: 'draft-4', smart: 'smart-1' } });
   const row = container.querySelector('ul').textContent;
   expect(row).toContain('AI suggests:Can wait');
-  expect(container.textContent).toContain('Order (draft-4): Arrival order rule.');
-  expect(container.textContent).toContain('not validated on real EMS audio');
+  const help = container.querySelector('#queue-order-help');
+  expect(help.hidden).toBe(true);                       // closed, but in the page
+  expect(help.textContent).toContain('Arrival order rule.');
+  expect(help.textContent).toContain('Smart rule.');
+  expect(help.textContent).toContain('not validated on real EMS audio');
   expect(container.textContent).toContain('0 crew alerts');
+  expect(container.textContent).not.toContain('draft-3');
+  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('Standard');
 });
 
-test('with Auto-order off the order note says the team set it, and still gives the rule it is compared with', async () => {
+test('in Manual the control says so, and only then do the rows get arrows', async () => {
   await act(async () => root.render(<LiveCasesPanel />));
   await resolve(pendingFor('/api/hospitals/mine')[0], { id: 1, name: 'General' });
   await resolve(pendingFor('/api/cases')[0], [inbound(1, 'Medic 1')]);
   const body = queue(1, [[1, 'Medic 1']]);
-  await resolve(pendingFor('/api/cases/queue')[0], { ...body, auto_order: false, rule_version: 'draft-4',
-    rule: 'Arrival order rule.', counts: { ...body.counts, crew_alerts: 0 } });
-  expect(container.textContent).toContain('Your team set this order');
-  expect(container.textContent).toContain('Auto-order would use draft-4: Arrival order rule.');
-  expect(container.textContent).not.toContain('Order (draft-4):');
-  expect(container.textContent).toContain('not validated on real EMS audio');
+  const manual = { ...body, queue_mode: 'manual', auto_order: false, counts: { ...body.counts, crew_alerts: 0 } };
+  await resolve(pendingFor('/api/cases/queue')[0], manual);
+  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('Manual');
+  expect(container.querySelector('ul').querySelector('[aria-label="Move up"]')).not.toBeNull();
+  await act(() => { mockHandler('queue.reordered', {}); });
+  await new Promise((done) => setTimeout(done, 350));    // the panel re-fetches the queue shortly after
+  await resolve(pendingFor('/api/cases/queue')[0], { ...manual, as_of: at(9), queue_mode: 'smart', auto_order: true });
+  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('Smart (AI)');
+  expect(container.querySelector('ul').querySelector('[aria-label="Move up"]')).toBeNull();
 });
 
 test('a pushed clip row from a finished report clears its "reporting…" label', async () => {

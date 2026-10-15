@@ -414,10 +414,12 @@ def init_database():
     );
 
     -- How a hospital's doctors want the queue ordered (doctor_config.py). auto_order = 1 shows the
-    -- server's rule (case_queue.py); 0 shows doctor_order, a JSON list of case ids the doctors set.
+    -- server's rule (case_queue.py), as Standard or, with ai_ranking = 1, Smart (AI); 0 shows
+    -- doctor_order, a JSON list of case ids the doctors set (Manual).
     CREATE TABLE IF NOT EXISTS hospital_queue_settings (
       hospital_id INTEGER PRIMARY KEY,
       auto_order INTEGER NOT NULL DEFAULT 1,
+      ai_ranking INTEGER NOT NULL DEFAULT 0,
       doctor_order TEXT NOT NULL DEFAULT '[]',
       updated_at TEXT,
       FOREIGN KEY (hospital_id) REFERENCES hospitals (id)
@@ -497,6 +499,7 @@ DEMO_HOSPITALS = [
 # Columns added to tables after they first shipped; ALTER TABLE adds them to older databases.
 ADDED_COLUMNS = {
     "users": [("hospital_id", "INTEGER REFERENCES hospitals (id)")],
+    "hospital_queue_settings": [("ai_ranking", "INTEGER NOT NULL DEFAULT 0")],
     "hospitals": [
         ("arrival_highlight_minutes", "INTEGER NOT NULL DEFAULT 5"),
         ("settings_version", "INTEGER NOT NULL DEFAULT 1"),

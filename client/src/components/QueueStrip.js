@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import HospitalWorkflowSettings from './HospitalWorkflowSettings';
-import { AutoOrderSwitch, RiskFieldSettings } from './DoctorQueueSettings';
+import { RiskFieldSettings } from './DoctorQueueSettings';
+import QueueModeControl from './QueueModeControl';
 
 // A count of zero fades out, so the counts that are not zero are what the eye finds.
 const Count = ({ n, label, tone }) => (
@@ -17,12 +18,12 @@ const PanelButton = ({ open, controls, onClick, children }) => (
 );
 
 /**
- * Everything above the queue in one strip: the counts, whose order this is (the rule's or the
- * team's), and two panels that open below it: how the order is set, and the hospital's settings.
- * The panels stay mounted while closed, so an unsaved arrival-highlight draft survives opening
- * and closing them, and the AI disclosure is always in the page.
+ * Everything above the queue in one strip: the counts, how the queue is ordered (Standard, Smart (AI)
+ * or Manual, with what each means one click away), and the hospital's settings in a panel below it.
+ * The settings panel stays mounted while closed, so an unsaved arrival-highlight draft survives
+ * opening and closing it.
  */
-const QueueStrip = ({ queue, autoOrder, hospital, riskFields, onHospitalChange, onAutoOrderChange }) => {
+const QueueStrip = ({ queue, hospital, riskFields, onHospitalChange, onModeChange }) => {
   const [panel, setPanel] = useState(null);
   const toggle = (name) => setPanel((current) => (current === name ? null : name));
   const counts = queue.counts;
@@ -44,11 +45,9 @@ const QueueStrip = ({ queue, autoOrder, hospital, riskFields, onHospitalChange, 
           </div>
         )}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-gray-700">
-          {linked && <AutoOrderSwitch autoOrder={autoOrder} ruleVersion={queue.rule_version} onChange={onAutoOrderChange} />}
-          {counts && (
-            <PanelButton open={panel === 'order'} controls="queue-order-note" onClick={() => toggle('order')}>
-              How this order is set
-            </PanelButton>
+          {linked && (
+            <QueueModeControl mode={queue.queue_mode} rules={queue.rules} ruleVersions={queue.rule_versions}
+                              onChange={onModeChange} />
           )}
           {linked && (
             <PanelButton open={panel === 'settings'} controls="queue-settings" onClick={() => toggle('settings')}>
@@ -57,16 +56,6 @@ const QueueStrip = ({ queue, autoOrder, hospital, riskFields, onHospitalChange, 
           )}
         </div>
       </div>
-
-      {counts && (
-        <p id="queue-order-note" hidden={panel !== 'order'} className="px-6 py-2 border-b border-gray-200 text-xs text-gray-600">
-          {autoOrder
-            ? `Order (${queue.rule_version}): ${queue.rule}`
-            : `Your team set this order with the arrows; new cases appear on top. Auto-order would use ${queue.rule_version}: ${queue.rule}`}
-          {' '}AI suggestions come from a language model reading the crew&apos;s reports; they are not
-          validated on real EMS audio. Check each one against the quotes and missing items in the handoff.
-        </p>
-      )}
 
       {linked && (
         <div id="queue-settings" hidden={panel !== 'settings'}

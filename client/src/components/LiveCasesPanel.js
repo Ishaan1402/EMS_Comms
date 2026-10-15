@@ -265,8 +265,8 @@ const LiveCasesPanel = () => {
         </div>
       </div>
 
-      <QueueStrip queue={queue} autoOrder={autoOrder} hospital={hospital} riskFields={riskFields}
-                  onHospitalChange={applyHospital} onAutoOrderChange={fetchQueue} />
+      <QueueStrip queue={queue} hospital={hospital} riskFields={riskFields}
+                  onHospitalChange={applyHospital} onModeChange={fetchQueue} />
 
       {cases.length === 0 ? (
         <p className="p-6 text-sm text-gray-500">
@@ -300,7 +300,8 @@ const LiveCasesPanel = () => {
           <div className="lg:col-span-3 p-6">
             {selected ? (
               <>
-                <CaseHeader liveCase={selected} inQueue={selectedInQueue} onAcknowledge={acknowledge}
+                <CaseHeader liveCase={selected} inQueue={selectedInQueue} queueMode={queue.queue_mode}
+                            onAcknowledge={acknowledge}
                             onMarkArrived={markArrived} />
                 <CrewAlertPanel liveCase={selected} serverNow={serverNow}
                                 onChanged={(c) => { setCases((list) => upsertNewer(list, c)); refreshQueueSoon(); }} />

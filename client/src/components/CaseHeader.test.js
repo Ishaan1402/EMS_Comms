@@ -63,11 +63,17 @@ test('one meta line says who, which case and when, and does not repeat the ETA',
   expect(meta).not.toContain('ETA');
 });
 
-test('why the case sits where it does follows the order in use', () => {
-  render({ inQueue: { queue_reasons: ['ETA 10 min'], suggested_position: null } });
-  expect(container.textContent).toContain('Why here: ETA 10 min');
-  render({ inQueue: { queue_reasons: ['ETA 10 min'], suggested_position: 2 } });
-  expect(container.textContent).toContain('Auto-order would put it #2: ETA 10 min');
+test('why the case sits where it does is said in the words of the order in use', () => {
+  const inQueue = { queue_reasons: ['AI suggests Prepare now', 'ETA 10 min'], queue_position: 1, suggested_position: 3 };
+  render({ inQueue: { ...inQueue, suggested_position: 1 } });
+  expect(container.textContent).toContain('Why here: AI suggests Prepare now · ETA 10 min');
+  expect(container.textContent).not.toContain('Standard order');
+  render({ inQueue, queueMode: 'smart' });          // the AI moved it: say where Standard would have put it
+  expect(container.textContent).toContain('Why here: AI suggests Prepare now · ETA 10 min · Standard order: #3');
+  render({ inQueue: { ...inQueue, suggested_position: 1 }, queueMode: 'smart' });
+  expect(container.textContent).not.toContain('Standard order');
+  render({ inQueue, queueMode: 'manual' });
+  expect(container.textContent).toContain('Placed by your team. Standard order would put it #3: AI suggests Prepare now');
   render({ inQueue: undefined });
   expect(container.textContent).not.toContain('Why here');
 });
