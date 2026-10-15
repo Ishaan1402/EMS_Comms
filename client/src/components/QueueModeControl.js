@@ -5,14 +5,14 @@ import { Info } from 'lucide-react';
 
 export const MODES = [
   { value: 'standard', label: 'Standard' },
-  { value: 'smart', label: 'Smart (AI)' },
+  { value: 'ai_assisted', label: 'AI-assisted' },
   { value: 'manual', label: 'Manual' },
 ];
 
 const MANUAL_RULE = 'Your team orders the queue with the arrows; new cases appear on top.';
 
 /**
- * How this hospital's queue is ordered: Standard (the written rule), Smart (AI) (the rule plus the
+ * How this hospital's queue is ordered: Standard (the written rule), AI-assisted (the rule plus the
  * AI's category) or Manual (the doctors' own order). One choice for the whole hospital, saved on the
  * server (PUT /api/hospitals/mine/queue-mode). The (i) opens what each mode does, in the server's own
  * words, and the AI disclosure; it stays in the page while closed.
@@ -43,7 +43,7 @@ const QueueModeControl = ({ mode = 'standard', rules = {}, ruleVersions = {}, on
     }
   };
 
-  const explanation = { standard: rules.standard, smart: rules.smart, manual: MANUAL_RULE };
+  const explanation = { standard: rules.standard, ai_assisted: rules.ai_assisted, manual: MANUAL_RULE };
   return (
     <div ref={root} className="relative flex items-center gap-2 text-sm text-gray-700">
       <span>Order</span>
@@ -75,7 +75,7 @@ const QueueModeControl = ({ mode = 'standard', rules = {}, ruleVersions = {}, on
         </p>
         {ruleVersions.standard && (
           <p className="text-xs text-gray-500">
-            Rules {ruleVersions.standard} and {ruleVersions.smart} are drafts a clinician has not yet approved.
+            Rules {ruleVersions.standard} and {ruleVersions.ai_assisted} are drafts a clinician has not yet approved.
           </p>
         )}
       </div>

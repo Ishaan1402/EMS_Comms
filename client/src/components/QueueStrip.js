@@ -26,7 +26,7 @@ const PanelButton = ({ open, controls, onClick, children }) => (
 );
 
 /**
- * Everything above the queue in one strip: the counts, how the queue is ordered (Standard, Smart (AI)
+ * Everything above the queue in one strip: the counts, how the queue is ordered (Standard, AI-assisted
  * or Manual, with what each means one click away), and a Settings panel below it: the custom risk
  * fields (always showing their list and add form), then the arrival highlight. The panel stays
  * mounted while closed, so an unsaved arrival-highlight draft survives opening and closing it.

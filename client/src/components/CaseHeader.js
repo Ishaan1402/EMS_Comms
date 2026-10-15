@@ -73,7 +73,7 @@ const CaseHeader = ({ liveCase: c, inQueue, queueMode = 'standard', onAcknowledg
               ? `Placed by your team. Standard order would put it #${inQueue.suggested_position}: `
               : 'Why here: '}
             {reasons.join(' · ')}
-            {queueMode === 'smart' && inQueue.suggested_position !== inQueue.queue_position
+            {queueMode === 'ai_assisted' && inQueue.suggested_position !== inQueue.queue_position
               && ` · Standard order: #${inQueue.suggested_position}`}
           </p>
         )}

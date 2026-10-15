@@ -13,8 +13,8 @@ DRAFT rule until the clinician agrees to it (QUEUE_RULE_VERSION):
 
 The AI's preparation category is NOT part of the order (draft-4). It is still produced, stored,
 shown ("AI suggests") and exported for evaluation, but only people's declarations, the state of
-the communication and the arrival time move a patient. The one exception is Smart (AI), an
-opt-in display mode a hospital's doctors can choose (smart_ordered, SMART_RULE_VERSION): the same
+the communication and the arrival time move a patient. The one exception is AI-assisted, an
+opt-in display mode a hospital's doctors can choose (ai_assisted_ordered, AI_ASSISTED_RULE_VERSION): the same
 tiers 1 and 2, then the AI's category, then arrival. It is never the default, a person's call
 still outranks it, and queue history keeps recording this Standard order in every mode. Software that ranks patients by its own
 urgency estimate in a time-critical setting is what FDA's January 2026 clinical decision support
@@ -35,10 +35,10 @@ QUEUE_RULE = ("Unacknowledged information, an unacknowledged crew alert or a pro
               "then active crew alerts, then earlier expected arrival. The AI's suggestion is shown but never "
               "changes the order.")
 
-# The AI category's tier in Smart (AI): draft-3's ranking. No assessment yet and Cannot assess share
+# The AI category's tier in AI-assisted: draft-3's ranking. No assessment yet and Cannot assess share
 # the "unknown" tier, as the evaluation harness maps Cannot assess to Unsure.
-SMART_RULE_VERSION = "smart-1"
-SMART_RULE = ("Same as Standard, but among cases that don't need a person first and have no active crew alert, "
+AI_ASSISTED_RULE_VERSION = "ai-assisted-1"
+AI_ASSISTED_RULE = ("Same as Standard, but among cases that don't need a person first and have no active crew alert, "
               "the AI's suggested category comes before arrival time: Prepare now, then not yet known "
               "(including Cannot assess), Can wait, Routine.")
 CATEGORY_RANK = {"Prepare now": 0, None: 1, "Cannot assess": 1, "Can wait": 2, "Routine": 3}
@@ -98,9 +98,9 @@ def standard_key(case: dict) -> tuple:
     )
 
 
-def smart_key(case: dict) -> tuple:
+def ai_assisted_key(case: dict) -> tuple:
     """
-    Sort key of Smart (AI), smart-1: the Standard tiers with the AI's category between the crew
+    Sort key of AI-assisted, ai-assisted-1: the Standard tiers with the AI's category between the crew
     alert tier and arrival time. Pure like standard_key (it reads only the case's stored fields), so
     the evaluation harness or SAS can apply it to exported cases.
     """
@@ -129,9 +129,9 @@ def counts(ordered: list) -> dict:
     }
 
 
-def smart_ordered(ordered: list) -> list:
+def ai_assisted_ordered(ordered: list) -> list:
     """
-    The same queue in Smart (AI) order (smart_key). Each case keeps its Standard position as
+    The same queue in AI-assisted order (ai_assisted_key). Each case keeps its Standard position as
     suggested_position, so a screen can say where the Standard order would put it, and gets the
     AI's category as one more reason. Queue history still records the Standard order.
     """
@@ -140,7 +140,7 @@ def smart_ordered(ordered: list) -> list:
         if case["preparation_category"]:
             *why, eta = case["queue_reasons"]
             case["queue_reasons"] = [*why, f"AI suggests {case['preparation_category']}", eta]
-    result = sorted(ordered, key=smart_key)
+    result = sorted(ordered, key=ai_assisted_key)
     for position, case in enumerate(result, start=1):
         case["queue_position"] = position
     return result

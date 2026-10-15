@@ -68,9 +68,9 @@ test('why the case sits where it does is said in the words of the order in use',
   render({ inQueue: { ...inQueue, suggested_position: 1 } });
   expect(container.textContent).toContain('Why here: AI suggests Prepare now · ETA 10 min');
   expect(container.textContent).not.toContain('Standard order');
-  render({ inQueue, queueMode: 'smart' });          // the AI moved it: say where Standard would have put it
+  render({ inQueue, queueMode: 'ai_assisted' });          // the AI moved it: say where Standard would have put it
   expect(container.textContent).toContain('Why here: AI suggests Prepare now · ETA 10 min · Standard order: #3');
-  render({ inQueue: { ...inQueue, suggested_position: 1 }, queueMode: 'smart' });
+  render({ inQueue: { ...inQueue, suggested_position: 1 }, queueMode: 'ai_assisted' });
   expect(container.textContent).not.toContain('Standard order');
   render({ inQueue, queueMode: 'manual' });
   expect(container.textContent).toContain('Placed by your team. Standard order would put it #3: AI suggests Prepare now');
