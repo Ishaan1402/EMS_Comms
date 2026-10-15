@@ -11,9 +11,9 @@ import CaseOverview from './CaseOverview';
 import QueueRow, { clockTime } from './QueueRow';
 import { SectionLabel } from './ui';
 import CaseChat from './CaseChat';
-import HospitalWorkflowSettings from './HospitalWorkflowSettings';
+import QueueStrip from './QueueStrip';
 import { CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
-import DoctorQueueSettings, { CaseRiskFields, MoveButtons } from './DoctorQueueSettings';
+import { CaseRiskFields, MoveButtons } from './DoctorQueueSettings';
 
 const OFFLINE_LABELS = {
   connecting: 'Connecting…',
@@ -85,7 +85,7 @@ const LiveCasesPanel = () => {
   const positions = useRef(null);
   // Overlapping fetches can be answered out of order: keep the snapshot with the latest server as_of.
   const queueAsOf = useRef('');
-  // Doctors' own settings (DoctorQueueSettings): the risk fields, and the latest live risk values.
+  // Doctors' own settings (DoctorQueueSettings, shown in QueueStrip): the risk fields, and the latest live risk values.
   const [riskFields, setRiskFields] = useState([]);
   const [liveRiskValues, setLiveRiskValues] = useState(null);
 
@@ -263,7 +263,7 @@ const LiveCasesPanel = () => {
 
   return (
     <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden mb-8">
-      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-3 border-b border-gray-200 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="p-2 bg-gradient-to-r from-red-600 to-pink-600 rounded-lg">
             <Radio className="h-5 w-5 text-white" />
@@ -278,32 +278,8 @@ const LiveCasesPanel = () => {
         </div>
       </div>
 
-      {hospital?.settings_version && <HospitalWorkflowSettings hospital={hospital} onChange={applyHospital} />}
-      {hospital?.id && queue.counts && (
-        <DoctorQueueSettings autoOrder={autoOrder} riskFields={riskFields} onAutoOrderChange={fetchQueue} />
-      )}
-
-      {queue.counts && (
-        <div className="px-6 py-3 border-b border-gray-200 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-          <span><span className="font-bold text-gray-900">{queue.counts.inbound}</span> inbound</span>
-          <span className="text-amber-800"><span className="font-bold">{queue.counts.needs_review}</span> need review</span>
-          <span className="text-amber-800"><span className="font-bold">{queue.counts.unacknowledged}</span> not acknowledged</span>
-          {queue.counts.crew_alerts !== undefined && (
-            <span className="text-slate-900"><span className="font-bold">{queue.counts.crew_alerts}</span> crew alert{queue.counts.crew_alerts === 1 ? '' : 's'}</span>
-          )}
-          <span className="text-red-700"><span className="font-bold">{queue.counts.prepare_now}</span> AI suggests prepare now</span>
-          <details className="w-full text-xs text-gray-600">
-            <summary className="cursor-pointer text-gray-500">How this order is set</summary>
-            <p className="mt-1">
-              {autoOrder
-                ? `Order (${queue.rule_version}): ${queue.rule}`
-                : `Your team set this order with the arrows; new cases appear on top. Auto-order would use ${queue.rule_version}: ${queue.rule}`}
-              {' '}AI suggestions come from a language model reading the crew&apos;s reports; they are not
-              validated on real EMS audio. Check each one against the quotes and missing items in the handoff.
-            </p>
-          </details>
-        </div>
-      )}
+      <QueueStrip queue={queue} autoOrder={autoOrder} hospital={hospital} riskFields={riskFields}
+                  onHospitalChange={applyHospital} onAutoOrderChange={fetchQueue} />
 
       {cases.length === 0 ? (
         <p className="p-6 text-sm text-gray-500">
