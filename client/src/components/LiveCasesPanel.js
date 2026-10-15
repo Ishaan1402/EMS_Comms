@@ -1,24 +1,33 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Radio, Clock, WifiOff, CheckCircle } from 'lucide-react';
+import { Radio, WifiOff } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import useCaseEvents from '../hooks/useCaseEvents';
 import { mergeNewer, upsertNewer } from '../utils/liveRows';
+import { DEFAULT_VIEW, applyQueueView, isDefaultView, viewCounts } from '../utils/queueView';
 import useCaseDetails from '../hooks/useCaseDetails';
 import useCaseFindings from '../hooks/useCaseFindings';
 import LiveTranscript from './LiveTranscript';
-import CaseOverview, { CategoryBadge, OperationalBadge, ProcessingBadge, ReportingBadge } from './CaseOverview';
+import CaseOverview from './CaseOverview';
+import QueueRow from './QueueRow';
+import CaseHeader from './CaseHeader';
+import { SectionLabel } from './ui';
 import CaseChat from './CaseChat';
-import HospitalWorkflowSettings, { ArrivalHighlight } from './HospitalWorkflowSettings';
-import { CrewAlertBadges, CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
-
-// An open case with no new audio for this long is shown as idle instead of LIVE.
-const IDLE_AFTER_MS = 2 * 60 * 1000;
+import QueueStrip from './QueueStrip';
+import QueueViewBar from './QueueViewBar';
+import { CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
+import { CaseRiskFields, MoveButtons } from './DoctorQueueSettings';
 
 const OFFLINE_LABELS = {
   connecting: 'Connecting…',
   reconnecting: 'Reconnecting… transcript may be behind',
   unauthorized: 'Session expired — log in again for live updates',
+};
+
+// Names for the filters in the "Showing 2 of 5 (...)" line.
+const FILTER_LABELS = {
+  needsReview: 'need review', unacknowledged: 'not acknowledged', crewAlerts: 'crew alerts',
+  prepareNow: 'AI suggests prepare now', arrivingSoon: 'arriving soon',
 };
 
 const newestFirst = (cases) => [...cases].sort((a, b) => b.started_at.localeCompare(a.started_at));
@@ -28,120 +37,16 @@ const QUEUE_REFRESH_MS = 300;
 // How long a case that changed position shows where it came from.
 const MOVE_CUE_MS = 30 * 1000;
 
-const clockTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-// "arrives in 11 min (14:32)", counted down against the server clock.
-const etaText = (etaAt, serverNow) => {
-  if (!etaAt) return 'ETA not given';
-  const minutes = Math.round((Date.parse(etaAt) - serverNow) / 60000);
-  if (minutes > 0) return `arrives in ${minutes} min (${clockTime(etaAt)})`;
-  if (minutes === 0) return `arriving now (${clockTime(etaAt)})`;
-  return `ETA passed ${-minutes} min ago (${clockTime(etaAt)})`;
-};
-
-// "SpO2 94→89", with the conditions when they differ: "SpO2 89 (on room air)→92 (on 4 liters oxygen)".
-const vitalChange = (v) => {
-  const conditions = v.from_qualifier !== v.to_qualifier;
-  const value = (number, qualifier) => (conditions && qualifier ? `${number} (${qualifier})` : number);
-  return `${v.label} ${value(v.from, v.from_qualifier)}→${value(v.to, v.to_qualifier)}`;
-};
-
-const MoveCue = ({ move }) => (move.to < move.from ? (
-  <span className="px-2 py-0.5 text-xs font-bold text-white bg-amber-500 rounded-full">↑ from #{move.from}</span>
-) : (
-  <span className="px-2 py-0.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-full">↓ from #{move.from}</span>
-));
-
 const ConnectionBadge = ({ status }) =>
   status === 'live' ? (
     <span className="flex items-center gap-1 text-xs font-medium text-green-700">
       <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" /> Live updates
     </span>
   ) : (
-    <span className="flex items-center gap-1 text-xs font-medium text-orange-600">
+    <span className="flex items-center gap-1 text-xs font-medium text-amber-800">
       <WifiOff className="h-3 w-3" /> {OFFLINE_LABELS[status]}
     </span>
   );
-
-const CaseStatusBadge = ({ liveCase, serverNow }) => {
-  if (liveCase.status !== 'active') {
-    return <span className="px-2 py-0.5 text-xs text-gray-600 bg-gray-200 rounded-full">Closed</span>;
-  }
-  if (liveCase.arrived_at) return null;  // the Arrived badge says it; it's no longer live
-  const idleMs = serverNow - Date.parse(liveCase.last_segment_at || liveCase.started_at);
-  if (idleMs > IDLE_AFTER_MS) {
-    return (
-      <span className="px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-100 rounded-full">
-        Open · no audio for {Math.floor(idleMs / 60000)}m
-      </span>
-    );
-  }
-  return <span className="px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full animate-pulse">LIVE</span>;
-};
-
-const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, arrivalMinutes }) => (
-  <li>
-    <button
-      onClick={() => onSelect(c.id)}
-      className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-blue-50 transition-colors ${selected ? 'bg-blue-50' : ''} ${move && move.to < move.from ? 'ring-2 ring-inset ring-amber-300' : ''}`}
-    >
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <span className="flex flex-wrap items-baseline gap-x-2 text-gray-900">
-          <span className="font-semibold whitespace-nowrap">
-            {c.queue_position && <span className="mr-2 text-gray-400">#{c.queue_position}</span>}
-            {c.ems_unit || `Case #${c.id}`}
-          </span>
-          {c.status === 'active' && !c.arrived_at && (
-            <span className="text-sm text-gray-600 whitespace-nowrap">{etaText(c.eta_at, serverNow)}</span>
-          )}
-        </span>
-        <div className="flex items-center gap-2 shrink-0">
-          {move && <MoveCue move={move} />}
-          {unseen > 0 && <span className="px-2 text-xs font-bold text-white bg-blue-600 rounded-full">{unseen} new</span>}
-          <CaseStatusBadge liveCase={c} serverNow={serverNow} />
-        </div>
-      </div>
-      <CrewAlertBadges liveCase={c} serverNow={serverNow} />
-      <div className="flex flex-wrap items-center gap-1 mb-1">
-        {c.queue_position && <span className="text-xs text-gray-500">AI suggests:</span>}
-        <CategoryBadge liveCase={c} />
-        <ReportingBadge liveCase={c} />
-        <ArrivalHighlight liveCase={c} serverNow={serverNow} minutes={arrivalMinutes} />
-        {c.status === 'active' && <OperationalBadge status={c.operational_status} />}
-        {c.processing?.needs_review && <ProcessingBadge processing={c.processing} />}
-      </div>
-      <p className="text-sm text-gray-700 truncate">{c.patient_info || 'No patient info'}</p>
-      {c.vital_changes?.length > 0 && (
-        <p className="text-xs font-medium text-gray-800 mt-0.5">
-          {c.vital_changes.map(vitalChange).join(' · ')}
-        </p>
-      )}
-      {c.queue_reasons && (
-        <p className="text-xs text-gray-600 mt-0.5 truncate" title={c.queue_reasons.join(' · ')}>
-          Why here: {c.queue_reasons.join(' · ')}
-        </p>
-      )}
-      <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
-        <Clock className="h-3 w-3" />
-        Case #{c.id} · started {clockTime(c.started_at)} · EMT {c.emt_first_name} {c.emt_last_name}
-      </p>
-    </button>
-  </li>
-);
-
-// The verified handoff as a FHIR R4 Bundle (GET /api/cases/:id/fhir), saved as a file.
-const downloadFhir = async (caseId) => {
-  try {
-    const { data } = await axios.get(`/api/cases/${caseId}/fhir`);
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/fhir+json' }));
-    link.download = `case-${caseId}-handoff.fhir.json`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-  } catch (error) {
-    toast.error('Could not export the handoff');
-  }
-};
 
 const LiveCasesPanel = () => {
   const [cases, setCases] = useState([]);
@@ -175,6 +80,9 @@ const LiveCasesPanel = () => {
   const positions = useRef(null);
   // Overlapping fetches can be answered out of order: keep the snapshot with the latest server as_of.
   const queueAsOf = useRef('');
+  // Doctors' own settings (DoctorQueueSettings, shown in QueueStrip): the risk fields, and the latest live risk values.
+  const [riskFields, setRiskFields] = useState([]);
+  const [liveRiskValues, setLiveRiskValues] = useState(null);
 
   const fetchQueue = useCallback(async () => {
     try {
@@ -211,6 +119,14 @@ const LiveCasesPanel = () => {
   useEffect(() => {
     fetchHospital();
   }, [fetchHospital]);
+
+  const hospitalId = hospital?.id;
+  const fetchConfig = useCallback(() => {
+    if (!hospitalId) return;
+    axios.get('/api/hospitals/mine/config').then((response) => setRiskFields(response.data.risk_fields))
+      .catch(() => toast.error('Could not load risk fields'));
+  }, [hospitalId]);
+  useEffect(() => { fetchConfig(); }, [fetchConfig]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 15000);
@@ -254,6 +170,7 @@ const LiveCasesPanel = () => {
     if (type === 'ready') {
       setClockOffsetMs(Date.parse(data.server_time) - Date.now());
       fetchHospital();
+      fetchConfig();
       fetchCases();
       fetchQueue();
       if (selectedRef.current) {
@@ -263,6 +180,12 @@ const LiveCasesPanel = () => {
       }
     } else if (type === 'hospital.updated') {
       applyHospital(data.hospital);
+    } else if (type === 'queue.reordered') {
+      refreshQueueSoon();
+    } else if (type === 'risk_fields.updated') {
+      setRiskFields(data.risk_fields);
+    } else if (type === 'risk_values.updated') {
+      setLiveRiskValues(data);
     } else if (type === 'update.created') {
       addCaseUpdate(data.update);
     } else if (type === 'findings.updated') {
@@ -283,7 +206,7 @@ const LiveCasesPanel = () => {
       }
     }
   }, [fetchCases, fetchQueue, refreshQueueSoon, fetchSegments, addCaseUpdate, reloadUpdates, applyFindings,
-    reloadFindings, fetchHospital, applyHospital]);
+    reloadFindings, fetchHospital, applyHospital, fetchConfig]);
 
   const connection = useCaseEvents(handleEvent);
   const byId = useMemo(() => new Map(cases.map((c) => [c.id, c])), [cases]);
@@ -292,8 +215,27 @@ const LiveCasesPanel = () => {
     queue_position: entry.queue_position, queue_reasons: entry.queue_reasons }));
   const queuedIds = new Set(queued.map((c) => c.id));
   const others = newestFirst(cases.filter((c) => !queuedIds.has(c.id)));
-  const selected = byId.get(selectedId) || queued.find((c) => c.id === selectedId);
+  const selectedInQueue = queued.find((c) => c.id === selectedId);
+  const selected = byId.get(selectedId) || selectedInQueue;
   const serverNow = now + clockOffsetMs;
+  // This screen's own view of the queue (a filter and a sort); it resets on reload and never changes the order.
+  const [view, setView] = useState(DEFAULT_VIEW);
+  const viewContext = { serverNow, arrivalMinutes: hospital?.arrival_highlight_minutes };
+  const visible = applyQueueView(queued, view, viewContext);
+  const counts = queue.counts ? viewCounts(queued, viewContext) : null;
+  const autoOrder = queue.auto_order !== false;
+
+  // Auto-order off: swap a row with its neighbour and save the whole order for the hospital.
+  const moveCase = async (index, step) => {
+    const ids = queued.map((c) => c.id);
+    [ids[index], ids[index + step]] = [ids[index + step], ids[index]];
+    try {
+      await axios.put('/api/hospitals/mine/doctor-order', { case_ids: ids });
+      fetchQueue();
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Could not move the case');
+    }
+  };
 
   const dismissSegment = async (segment) => {
     try {
@@ -320,8 +262,8 @@ const LiveCasesPanel = () => {
   const retryAssessment = () => caseAction('assessments/retry', undefined, 'Could not retry the assessment');
 
   return (
-    <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden mb-8">
-      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+    <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-clip mb-8">
+      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-3 border-b border-gray-200 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="p-2 bg-gradient-to-r from-red-600 to-pink-600 rounded-lg">
             <Radio className="h-5 w-5 text-white" />
@@ -336,24 +278,8 @@ const LiveCasesPanel = () => {
         </div>
       </div>
 
-      {hospital?.settings_version && <HospitalWorkflowSettings hospital={hospital} onChange={applyHospital} />}
-
-      {queue.counts && (
-        <div className="px-6 py-3 border-b border-gray-200 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-          <span><span className="font-bold text-gray-900">{queue.counts.inbound}</span> inbound</span>
-          <span className="text-purple-700"><span className="font-bold">{queue.counts.needs_review}</span> need review</span>
-          <span className="text-orange-700"><span className="font-bold">{queue.counts.unacknowledged}</span> not acknowledged</span>
-          {queue.counts.crew_alerts !== undefined && (
-            <span className="text-slate-900"><span className="font-bold">{queue.counts.crew_alerts}</span> crew alert{queue.counts.crew_alerts === 1 ? '' : 's'}</span>
-          )}
-          <span className="text-red-700"><span className="font-bold">{queue.counts.prepare_now}</span> AI suggests prepare now</span>
-          <p className="w-full text-xs text-gray-600">
-            Order ({queue.rule_version}): {queue.rule} AI suggestions come from a language model reading the
-            crew&apos;s reports; they are not validated on real EMS audio. Check each one against the quotes and
-            missing items in the handoff.
-          </p>
-        </div>
-      )}
+      <QueueStrip queue={queue} counts={counts} filter={view.filter} onFilter={(filter) => setView((v) => ({ ...v, filter }))}
+                  hospital={hospital} riskFields={riskFields} onHospitalChange={applyHospital} onModeChange={fetchQueue} />
 
       {cases.length === 0 ? (
         <p className="p-6 text-sm text-gray-500">
@@ -363,60 +289,42 @@ const LiveCasesPanel = () => {
         </p>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-5">
-          <ul className="lg:col-span-2 border-r border-gray-200 max-h-[48rem] overflow-y-auto">
-            {queued.map((c) => (
-              <CaseListItem key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
-                            unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
-                            arrivalMinutes={hospital?.arrival_highlight_minutes} />
-            ))}
-            {others.length > 0 && (
-              <li className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-100">
-                Arrived &amp; closed
-              </li>
-            )}
-            {others.map((c) => (
-              <CaseListItem key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
-                            unseen={unseen[c.id]} serverNow={serverNow} />
-            ))}
-          </ul>
+          <div className="lg:col-span-2 border-r border-gray-200">
+            <QueueViewBar sort={view.sort} onSort={(sort) => setView((v) => ({ ...v, sort }))}
+                          filterLabel={view.filter === 'all' ? null : FILTER_LABELS[view.filter]} shown={visible.length}
+                          total={queued.length} onClear={() => setView(DEFAULT_VIEW)}
+                          reorderBlocked={!autoOrder && !isDefaultView(view)} />
+            <ul className="max-h-[48rem] overflow-y-auto">
+              {visible.map((c, index) => (
+                <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
+                              unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
+                              arrivalMinutes={hospital?.arrival_highlight_minutes}
+                              moveButtons={!autoOrder && isDefaultView(view) && (
+                                <MoveButtons first={index === 0} last={index === queued.length - 1}
+                                             onMove={(step) => moveCase(index, step)} />
+                              )} />
+              ))}
+              {visible.length === 0 && queued.length > 0 && (
+                <li className="px-4 py-6 text-sm text-gray-600">No cases match this filter.</li>
+              )}
+              {view.filter === 'all' && others.length > 0 && (
+                <li className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-100">
+                  Arrived &amp; closed
+                </li>
+              )}
+              {view.filter === 'all' && others.map((c) => (
+                <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
+                              unseen={unseen[c.id]} serverNow={serverNow} />
+              ))}
+            </ul>
+          </div>
 
           <div className="lg:col-span-3 p-6">
             {selected ? (
               <>
-                <div className="mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    {selected.ems_unit && `${selected.ems_unit} · `}Case #{selected.id} — EMT {selected.emt_first_name} {selected.emt_last_name}
-                  </h3>
-                  <p className="text-sm text-gray-600">{selected.patient_info || 'No patient info provided'}</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Started {new Date(selected.started_at).toLocaleString()}
-                    {selected.closed_at && ` · Closed ${new Date(selected.closed_at).toLocaleTimeString()}`}
-                  </p>
-                  <button onClick={() => downloadFhir(selected.id)} className="mt-1 text-xs text-blue-700 underline"
-                          title="The handoff as a FHIR R4 Bundle for the hospital's record system: each extracted fact with the report it quotes">
-                    Download for the EHR (FHIR R4)
-                  </button>
-                </div>
-                {selected.status === 'active' && (
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {!selected.latest_update_acknowledged && (
-                      <button
-                        onClick={acknowledge}
-                        className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
-                      >
-                        <CheckCircle className="h-4 w-4" /> Acknowledge latest update
-                      </button>
-                    )}
-                    {!selected.arrived_at && (
-                      <button
-                        onClick={markArrived}
-                        className="px-3 py-1.5 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                      >
-                        Mark arrived
-                      </button>
-                    )}
-                  </div>
-                )}
+                <CaseHeader liveCase={selected} inQueue={selectedInQueue} queueMode={queue.queue_mode}
+                            onAcknowledge={acknowledge}
+                            onMarkArrived={markArrived} />
                 <CrewAlertPanel liveCase={selected} serverNow={serverNow}
                                 onChanged={(c) => { setCases((list) => upsertNewer(list, c)); refreshQueueSoon(); }} />
                 <div className="mb-6">
@@ -428,9 +336,11 @@ const LiveCasesPanel = () => {
                     onRetryAssessment={retryAssessment}
                     onRetryFindings={extracted.retry}
                     markNew
-                  />
+                  >
+                    <CaseRiskFields caseId={selected.id} fields={riskFields} liveValues={liveRiskValues} />
+                  </CaseOverview>
                 </div>
-                <h4 className="text-sm font-semibold text-gray-700 mb-2">Transcript</h4>
+                <SectionLabel className="mb-2">Transcript</SectionLabel>
                 <LiveTranscript
                   segments={segments}
                   caseStartedAt={selected.started_at}

@@ -78,66 +78,69 @@ const CaseUpdateForm = ({ caseId, onAdded }) => {
   const inputClass = 'px-2 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500';
 
   return (
-    <form onSubmit={submit} className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
-      <div className="flex flex-wrap gap-2">
-        {KINDS.map((option) => (
-          <button
-            type="button"
-            key={option.value}
-            onClick={() => setKind(option.value)}
-            className={`px-3 py-1 text-sm rounded-full border ${kind === option.value ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-700 border-gray-300'}`}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-
-      {kind === 'vitals' && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {VITAL_FIELDS.map((field) => (
-            <label key={field.name} className="text-xs text-gray-600">
-              {field.label} {field.unit && <span className="text-gray-400">({field.unit})</span>}
-              <input
-                type="number"
-                step="any"
-                inputMode="decimal"
-                value={vitals[field.name] ?? ''}
-                onChange={(e) => setVitals((v) => ({ ...v, [field.name]: e.target.value }))}
-                className={`${inputClass} w-full`}
-              />
-            </label>
+    <details className="bg-gray-50 rounded-lg border border-gray-200">
+      <summary className="cursor-pointer px-4 py-2 text-sm font-medium text-gray-700">Type an update (vitals, note, correction, ETA)</summary>
+      <form onSubmit={submit} className="space-y-3 px-4 pb-4 pt-1">
+        <div className="flex flex-wrap gap-2">
+          {KINDS.map((option) => (
+            <button
+              type="button"
+              key={option.value}
+              onClick={() => setKind(option.value)}
+              className={`px-3 py-1 text-sm rounded-full border ${kind === option.value ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-gray-700 border-gray-300'}`}
+            >
+              {option.label}
+            </button>
           ))}
         </div>
-      )}
 
-      {kind === 'eta' ? (
-        <label className="text-sm text-gray-700 flex items-center gap-2">
-          Arriving in
-          <input type="number" min="0" value={etaMinutes} onChange={(e) => setEtaMinutes(e.target.value)} className={`${inputClass} w-24`} />
-          minutes
-        </label>
-      ) : (
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={2}
-          maxLength={2000}
-          placeholder={
-            kind === 'correction' ? 'What was wrong earlier, and what is correct now'
-              : kind === 'vitals' ? 'Optional comment (e.g. on 4L O2)' : 'New findings, treatments given, changes…'
-          }
-          className={`${inputClass} w-full`}
-        />
-      )}
+        {kind === 'vitals' && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {VITAL_FIELDS.map((field) => (
+              <label key={field.name} className="text-xs text-gray-600">
+                {field.label} {field.unit && <span className="text-gray-500">({field.unit})</span>}
+                <input
+                  type="number"
+                  step="any"
+                  inputMode="decimal"
+                  value={vitals[field.name] ?? ''}
+                  onChange={(e) => setVitals((v) => ({ ...v, [field.name]: e.target.value }))}
+                  className={`${inputClass} w-full`}
+                />
+              </label>
+            ))}
+          </div>
+        )}
 
-      <button
-        type="submit"
-        disabled={sending}
-        className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50"
-      >
-        {sending ? 'Sending…' : 'Send update'}
-      </button>
-    </form>
+        {kind === 'eta' ? (
+          <label className="text-sm text-gray-700 flex items-center gap-2">
+            Arriving in
+            <input type="number" min="0" value={etaMinutes} onChange={(e) => setEtaMinutes(e.target.value)} className={`${inputClass} w-24`} />
+            minutes
+          </label>
+        ) : (
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            rows={2}
+            maxLength={2000}
+            placeholder={
+              kind === 'correction' ? 'What was wrong earlier, and what is correct now'
+                : kind === 'vitals' ? 'Optional comment (e.g. on 4L O2)' : 'New findings, treatments given, changes…'
+            }
+            className={`${inputClass} w-full`}
+          />
+        )}
+
+        <button
+          type="submit"
+          disabled={sending}
+          className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50"
+        >
+          {sending ? 'Sending…' : 'Send update'}
+        </button>
+      </form>
+    </details>
   );
 };
 

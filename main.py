@@ -15,16 +15,17 @@ import json
 
 load_dotenv()
 
-from middleware.auth import APIError, require_role
-from routes import auth, messages, cases, sas
-from database import init_database, insert_sample_data, utc_now_iso
-import case_assessment
-import case_extraction
-from routes import alerts
-import case_queue
-import openai_config
-import sas_sync
-from routes import fhir
+from backend.middleware.auth import APIError, require_role
+from backend.routes import auth, messages, cases, sas
+from backend.database import init_database, insert_sample_data, utc_now_iso
+from backend import case_assessment
+from backend import case_extraction
+from backend.routes import alerts
+from backend import case_queue
+from backend import openai_config
+from backend import sas_sync
+from backend.routes import fhir
+from backend.routes import doctor_config
 
 
 def build_info() -> dict:
@@ -51,6 +52,7 @@ def build_info() -> dict:
         "extractor_version": case_extraction.extractor_version(),
         "transcription_model": openai_config.TRANSCRIPTION_MODEL,
         "queue_rule_version": case_queue.QUEUE_RULE_VERSION,
+        "ai_assisted_rule_version": case_queue.AI_ASSISTED_RULE_VERSION,
         "server_started_at": utc_now_iso(),
     }
 
@@ -165,6 +167,8 @@ async def version(current_user: dict = Depends(require_role(["emt", "doctor"])))
 app.include_router(alerts.router, prefix="/api/cases", tags=["alerts"])
 app.include_router(sas.router, prefix="/api/sas", tags=["sas"])
 app.include_router(fhir.router, prefix="/api/cases", tags=["fhir"])
+app.include_router(doctor_config.hospital_router, prefix="/api/hospitals", tags=["hospitals"])
+app.include_router(doctor_config.case_router, prefix="/api/cases", tags=["risk fields"])
 
 # Serve React app in production
 if os.getenv("NODE_ENV") == "production":

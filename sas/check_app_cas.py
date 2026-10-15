@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
-from sas_sync import CasClient, SasError, Settings  # noqa: E402  (needs the path and .env above)
+from backend.sas_sync import CasClient, SasError, Settings  # noqa: E402  (needs the path and .env above)
 
 STUCK_SESSION = "4117e684-eb22-c746-8f2a-0d88694291de"
 READS = [("builtins.serverStatus", {}), ("table.tableInfo", {"caslib": "Public"})]
@@ -56,7 +56,7 @@ async def main() -> int:
                 print(f"could not close session {opened}: {error}. Add it to the admin list.")
 
         if passed == len(READS):
-            print("\nRESULT: the app can run CAS actions now. Next: python3 -m sas_sync push (replaces the ASC_ tables).")
+            print("\nRESULT: the app can run CAS actions now. Next: python3 -m backend.sas_sync push (replaces the ASC_ tables).")
         else:
             print("\nRESULT: still blocked. The app needs CAS action rights and table.upload, alterTable,"
                   " dropTable, promote and save on the Public caslib.")
