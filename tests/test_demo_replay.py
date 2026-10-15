@@ -23,7 +23,7 @@ import openai_config
 from routes import cases
 
 SCENARIO_PATH = Path(replay.DEFAULT_SCENARIO)
-PILOT_CASES = Path(__file__).parent / "docs" / "clinician-annotation" / "pilot_cases.json"
+PILOT_CASES = Path(__file__).parent.parent / "docs" / "clinician-annotation" / "pilot_cases.json"
 
 client = TestClient(app, raise_server_exceptions=False)
 

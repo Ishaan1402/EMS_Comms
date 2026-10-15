@@ -494,7 +494,7 @@ class TestModelInput:
         assert calls[-1]["input"]["current_transcript"] == "Heart rate 126, BP 100 over 64, saturation 89 percent."
 
     def test_contract_matches_the_evaluation_harness(self):
-        evals_contracts = Path(__file__).parent / "evals" / "contracts.py"
+        evals_contracts = Path(__file__).parent.parent / "evals" / "contracts.py"
         if not evals_contracts.exists():
             pytest.skip("evals/contracts.py is on vrishank-branch until it is merged")
         from evals import contracts

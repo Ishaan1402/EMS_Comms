@@ -67,12 +67,12 @@ The server starts even with settings missing, and warns about the main ones.
 
 ```bash
 .venv/bin/pip install -r requirements.txt                          # includes pytest
-.venv/bin/python -m pytest test_*.py                               # backend
+.venv/bin/python -m pytest tests                                  # backend
 cd client && CI=true npm test -- --watchAll=false --runInBand      # frontend
 ```
 
 - Backend tests use temporary databases and need no API keys. Two skip until Vrishank's branch, with the evaluation contract and the pilot cases, is merged.
-- The backend began as a port of a Node/Express server, which has since been removed. `test_parity.py` still checks the API contract the port kept, such as error codes and messages.
+- The backend began as a port of a Node/Express server, which has since been removed. `tests/test_parity.py` still checks the API contract the port kept, such as error codes and messages.
 
 ## How it works
 
@@ -128,7 +128,7 @@ The case is the main object. One transport is one case, and everything about the
   - `processing`: `pending` | `processing` | `completed` | `failed` | `needs_review`. Whenever a person should look, it sets `needs_review: true` with plain-language `reasons`: a failed transcription, a failed assessment, or an assessment that couldn't decide.
 - **Failed audio:** a clip that can't be transcribed flags the case until it's retried (`POST /api/cases/:id/segments/:segmentId/retry`) or marked handled (`.../dismiss`, EMT or hospital user), for example after the crew re-sent it as text. A dismissed failure stays on record, with who dismissed it and when.
 - **AI assessments** (`case_assessment.py`):
-  - **Contract.** The model gets the evaluation harness's prompt (`evals/prompts/awareness_v3.txt`; v2 is kept for comparison) and input fields. It must answer in the evaluation contract's five fields: `summary`, `meaningful_change`, `change_explanation`, `missing_information` and `preparation_category` (Prepare now / Can wait / Routine / Cannot assess). So what the evaluation measures is what the app runs. `test_case_model.py` checks the contract against `evals/contracts.py` once Vrishank's branch is merged.
+  - **Contract.** The model gets the evaluation harness's prompt (`evals/prompts/awareness_v3.txt`; v2 is kept for comparison) and input fields. It must answer in the evaluation contract's five fields: `summary`, `meaningful_change`, `change_explanation`, `missing_information` and `preparation_category` (Prepare now / Can wait / Routine / Cannot assess). So what the evaluation measures is what the app runs. `tests/test_case_model.py` checks the contract against `evals/contracts.py` once Vrishank's branch is merged.
   - **What "earlier" means.** Earlier information is what the hospital had acknowledged, so `meaningful_change` answers "what changed since the earlier acknowledged report". Before any acknowledgment, everything counts as current, as in a first report. Acknowledging an earlier version while newer information exists re-assesses the case against it. Information is put in the order it was spoken or typed; text with no recorded version (from before upgrading) counts as not yet seen.
   - **Cannot assess.** `Cannot assess` (the prompt's "Unsure") marks the case Needs Review. An answer that doesn't follow the format is a retryable failure, and the last usable assessment stays current. Nothing is filled with a default.
   - **Every attempt is kept.** Each is a row in `risk_assessments` with the `info_version` it read, its `baseline_version`, the ETA it saw (`input_eta_at`), `input_tokens`, `output_tokens`, `latency_ms` and a list-price `cost_usd`. The case's `current_assessment` is the usable one with the highest version, so a slow result for older information never replaces a newer one. A failure keeps the previous assessment (`assessment_is_outdated: true`) and can be retried (`POST /api/cases/:id/assessments/retry`). `GET /api/cases/:id/assessments` lists every attempt.
