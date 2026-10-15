@@ -3,6 +3,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import { CheckCircle } from 'lucide-react';
 import { clockTime } from './QueueRow';
+import { Button } from './ui';
 
 // The verified handoff as a FHIR R4 Bundle (GET /api/cases/:id/fhir), saved as a file.
 const downloadFhir = async (caseId) => {
@@ -39,36 +40,28 @@ const CaseHeader = ({ liveCase: c, inQueue, queueMode = 'standard', onAcknowledg
         {open && (
           <div className="flex gap-2 shrink-0">
             {!c.latest_update_acknowledged && (
-              <button
-                onClick={onAcknowledge}
-                className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
-              >
+              <Button variant="primary" onClick={onAcknowledge}>
                 <CheckCircle className="h-4 w-4" /> Acknowledge
-              </button>
+              </Button>
             )}
             {!c.arrived_at && (
-              <button
-                onClick={onMarkArrived}
-                className="px-3 py-1.5 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-              >
-                Mark arrived
-              </button>
+              <Button onClick={onMarkArrived}>Mark arrived</Button>
             )}
           </div>
         )}
       </div>
       <div className="mb-4">
-        <p className="text-sm text-gray-600">
+        <p className="text-sm text-gray-500">
           Case #{c.id} · EMT {c.emt_first_name} {c.emt_last_name} · started {clockTime(c.started_at)}
           {c.closed_at && ` · closed ${clockTime(c.closed_at)}`}
           {' · '}
-          <button onClick={() => downloadFhir(c.id)} className="text-blue-700 underline"
+          <button onClick={() => downloadFhir(c.id)} className="text-blue-600 hover:underline"
                   title="The handoff as a FHIR R4 Bundle for the hospital's record system: each extracted fact with the report it quotes">
-            Download for the EHR (FHIR R4)
+            Export FHIR
           </button>
         </p>
         {reasons && (
-          <p className="mt-1 text-sm text-gray-700">
+          <p className="mt-1 text-sm text-gray-500">
             {queueMode === 'manual'
               ? `Placed by your team. Standard order would put it #${inQueue.suggested_position}: `
               : 'Why here: '}

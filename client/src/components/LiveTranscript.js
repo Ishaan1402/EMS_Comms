@@ -69,9 +69,9 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText
         return (
           <div key={key} className="flex gap-3 text-sm">
             <div className="w-28 shrink-0 text-right whitespace-nowrap">
-              <div className="font-mono text-gray-700">{formatClock(segment.recorded_at)}</div>
+              <div className="tabular-nums text-gray-700">{formatClock(segment.recorded_at)}</div>
               {caseStartedAt && (
-                <div className="font-mono text-xs text-gray-400">{formatOffset(segment.recorded_at, caseStartedAt)}</div>
+                <div className="text-xs tabular-nums text-gray-500">{formatOffset(segment.recorded_at, caseStartedAt)}</div>
               )}
             </div>
             <div className={`flex-1 border-l-2 pl-3 pb-1 ${isNew ? 'border-blue-500' : 'border-gray-200'}`}>

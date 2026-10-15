@@ -17,14 +17,9 @@ const RULES = {
   'amber, yellow or orange background or border': /\b(bg|border|ring)-(amber|yellow|orange)-(?!500\b)/,
 };
 
-// Still to do: the Settings page (step C) and the case pane (step D). LiveCaseRecorder.js is the EMT
-// screen, which waits for Astra's recorder branch.
+// Still to do: LiveCaseRecorder.js is the EMT screen, which waits for Astra's recorder branch.
 const KNOWN = {
-  'components/CaseOverview.js': ['native <details> accordion', 'monospace type', 'all-caps label',
-    'amber, yellow or orange background or border'],
-  'components/CaseUpdateForm.js': ['native <details> accordion'],
   'components/LiveCaseRecorder.js': ['emoji or glyph used as an icon'],
-  'components/LiveTranscript.js': ['monospace type'],
 };
 
 const read = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

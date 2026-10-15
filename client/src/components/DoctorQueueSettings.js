@@ -49,17 +49,17 @@ export function CaseRiskFields({ caseId, fields, liveValues }) {
   };
 
   return (
-    <div className="p-3 border border-gray-200 rounded-lg">
-      <SectionLabel className="mb-2">Custom risk fields</SectionLabel>
-      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
+    <section className="py-4">
+      <SectionLabel as="h3" className="mb-2">Custom fields</SectionLabel>
+      <dl className="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
         {fields.map((field) => (
-          <div key={field.id} className="flex items-center gap-2">
+          <div key={field.id} className="flex items-center justify-between gap-3">
             <dt className="text-gray-600">{field.label}</dt>
             <dd><RiskInput field={field} value={values[field.id] ?? null} onSave={(value) => save(field, value)} /></dd>
           </div>
         ))}
       </dl>
-    </div>
+    </section>
   );
 }
 
@@ -69,11 +69,11 @@ function RiskInput({ field, value, onSave }) {
 
   if (field.kind === 'yes_no') {
     return (
-      <span className="inline-flex rounded border border-gray-300 overflow-hidden" aria-label={field.label}>
+      <span role="group" aria-label={field.label} className="inline-flex gap-4">
         {[[true, 'Yes'], [false, 'No']].map(([option, text]) => (
           <button key={text} type="button" aria-pressed={value === option}
             onClick={() => onSave(value === option ? null : option)}
-            className={`px-2 py-0.5 text-xs ${value === option ? 'bg-blue-700 text-white' : 'bg-white text-gray-700'}`}>
+            className={`text-sm ${value === option ? 'font-semibold text-gray-900 underline decoration-2 underline-offset-4' : 'text-gray-500 hover:text-gray-900'}`}>
             {text}
           </button>
         ))}
@@ -88,6 +88,6 @@ function RiskInput({ field, value, onSave }) {
     <input aria-label={field.label} type={field.kind === 'number' ? 'number' : 'text'} value={draft}
       onChange={(event) => setDraft(event.target.value)} onBlur={commit}
       onKeyDown={(event) => { if (event.key === 'Enter') event.target.blur(); }}
-      className={`${field.kind === 'number' ? 'w-20' : 'w-40'} px-2 py-0.5 border border-gray-300 rounded`} />
+      className={`${field.kind === 'number' ? 'w-20' : 'w-44'} rounded-lg border border-gray-300 px-2 py-1 text-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600`} />
   );
 }

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Bell, BellOff, BellRing, CheckCircle } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
-import { CrewChip, StatusText } from './ui';
+import { Button, CrewChip, StatusText } from './ui';
 
 // Crew alerts (case_alerts.py): the crew's call, never the AI's. Shown in ink, apart from the
 // status colours the AI's labels use, so the two never read as the same thing.
@@ -75,28 +75,27 @@ export const CrewAlertPanel = ({ liveCase, serverNow, onChanged }) => {
     }
   };
   return (
-    <div className="mb-4 p-3 rounded-md border border-slate-300 bg-slate-50 text-sm">
-      <p className="font-semibold text-slate-900 flex items-center gap-1">
+    <div className="mb-4 rounded-lg border border-gray-200 p-4 text-sm">
+      <p className="flex items-center gap-1.5 font-semibold text-gray-900">
         <BellRing className="h-4 w-4" /> Crew alerts
       </p>
-      {alerts.active.length === 0 && <p className="text-slate-700">No active alert (the crew cancelled it).</p>}
+      {alerts.active.length === 0 && <p className="text-gray-600">No active alert (the crew cancelled it).</p>}
       <ul>
         {alerts.active.map((alert) => (
-          <li key={alert.alert} className="text-slate-900">
+          <li key={alert.alert} className="mt-1 text-gray-900">
             <span className="font-semibold">{alert.label}</span> · {alert.key_time_label}:{' '}
             {alert.key_time ? `${clockTime(alert.key_time)} (${Math.max(0, Math.round((serverNow - Date.parse(alert.key_time)) / 60000))} min ago)`
-              : <span className="text-amber-800">not stated</span>}
-            <span className="text-xs text-slate-600"> · called by {alert.author_name} at {clockTime(alert.created_at)}</span>
+              : <span className="text-amber-700">not stated</span>}
+            <span className="text-xs text-gray-500"> · called by {alert.author_name} at {clockTime(alert.created_at)}</span>
           </li>
         ))}
       </ul>
       {alerts.unacknowledged ? (
-        <button onClick={acknowledge} disabled={sending}
-          className="mt-2 flex items-center gap-1 px-3 py-1.5 text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50">
+        <Button variant="ink" onClick={acknowledge} disabled={sending} className="mt-3">
           <CheckCircle className="h-4 w-4" /> Acknowledge crew alert
-        </button>
+        </Button>
       ) : (
-        <p className="mt-1 text-green-800">
+        <p className="mt-2 text-gray-600">
           Alert acknowledged by {alerts.acknowledgment.user_name} · {clockTime(alerts.acknowledgment.acknowledged_at)}
         </p>
       )}
@@ -201,13 +200,13 @@ const CrewAlerts = ({ liveCase }) => {
   };
 
   return (
-    <div className="mb-4 p-3 rounded-lg border border-slate-300 bg-slate-50">
+    <div className="mb-4 rounded-lg border border-gray-200 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-semibold text-slate-900 flex items-center gap-1"><BellRing className="h-4 w-4" /> Crew alert</span>
+        <span className="flex items-center gap-1 text-sm font-semibold text-gray-900"><BellRing className="h-4 w-4" /> Crew alert</span>
         {ALERTS.map((option) => (
           <button key={option.value} type="button" disabled={sending}
             onClick={() => { setChoice(option); setClock(''); }}
-            className={`px-3 py-1 text-sm rounded-full border ${active[option.value] ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-800 border-slate-400'}`}>
+            className={`rounded-lg border px-3 py-1 text-sm font-medium ${active[option.value] ? 'border-slate-900 bg-slate-900 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}>
             {option.label}{active[option.value] && ' · called'}
           </button>
         ))}
@@ -238,7 +237,7 @@ const CrewAlerts = ({ liveCase }) => {
         </ul>
       )}
       {alerts.latest_change_id && (
-        <p className={`mt-1 text-xs ${alerts.unacknowledged ? 'text-amber-800' : 'text-green-800'}`}>
+        <p className={`mt-2 text-xs ${alerts.unacknowledged ? 'text-amber-700' : 'text-gray-600'}`}>
           {alerts.unacknowledged ? 'The hospital has not acknowledged the latest alert yet'
             : `Acknowledged by ${alerts.acknowledgment.user_name} · ${clockTime(alerts.acknowledgment.acknowledged_at)}`}
         </p>

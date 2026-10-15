@@ -76,7 +76,7 @@ ASCLEPIUS_DB_PATH=demo-rehearsal-01.db SEED_DEMO_USERS=1 SAS_SYNC_ENABLED=0 NODE
 | 1:30, 1:50 | Medic 2 and Medic 10 get worse on the radio. Rows show "↑ from #3" and what changed. Open one: the AI handoff compares with what the doctor acknowledged, and **NEW** tags mark exactly what arrived since. Medic 10, 11 min out, ends up first. |
 | 2:00 | The doctor acknowledges everything. The EMT sees the toast. |
 | after the summary | **Crew alert.** On the EMT window, tap **Sepsis**, set the symptom onset or leave it blank ("not stated"), and tap **Call Sepsis alert**. Medic 8 jumps to #1 with "Crew alert not yet acknowledged". Open Medic 8 and tap **Acknowledge crew alert**: it stays at the top while the alert is active, and the EMT sees "Acknowledged by John Smith". Do this after the replay so its recorded queue stays clean for scoring. |
-| then | **Export.** In Medic 8's case, **Download for the EHR (FHIR R4)**: a standard file a hospital record system can take in. Every AI-extracted fact carries the crew's exact words and the model version; the AI's category is left out. |
+| then | **Export.** In Medic 8's case, **Export FHIR**: a standard file a hospital record system can take in. Every AI-extracted fact carries the crew's exact words and the model version; the AI's category is left out. |
 | end | The terminal prints the model cost (about $0.002), the transcription estimate, and the time on the server: about 1 s from a clip arriving to its transcript being pushed, about 4 s to the assessment. Say "on the server" if you quote it. It also writes `demo/runs/<run_id>.json` and `<run_id>-predictions.json`. |
 
 **If asked:**

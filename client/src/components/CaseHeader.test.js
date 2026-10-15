@@ -38,11 +38,11 @@ test('the sticky bar is a direct child of whatever holds the case: sticky only s
 
 test('Acknowledge only while there is something to acknowledge; no actions for a closed case', () => {
   render({ liveCase: liveCase({ latest_update_acknowledged: true }) });
-  expect(buttons()).toEqual(['Mark arrived', 'Download for the EHR (FHIR R4)']);
+  expect(buttons()).toEqual(['Mark arrived', 'Export FHIR']);
   render({ liveCase: liveCase({ arrived_at: '2026-10-15T15:10:00Z' }) });
-  expect(buttons()).toEqual(['Acknowledge', 'Download for the EHR (FHIR R4)']);
+  expect(buttons()).toEqual(['Acknowledge', 'Export FHIR']);
   render({ liveCase: liveCase({ status: 'closed', closed_at: '2026-10-15T15:30:00Z' }) });
-  expect(buttons()).toEqual(['Download for the EHR (FHIR R4)']);
+  expect(buttons()).toEqual(['Export FHIR']);
   expect(container.textContent).toContain('closed ');
 });
 
