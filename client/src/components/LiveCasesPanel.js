@@ -4,6 +4,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import useCaseEvents from '../hooks/useCaseEvents';
 import { mergeNewer, upsertNewer } from '../utils/liveRows';
+import { DEFAULT_VIEW, applyQueueView, isDefaultView, viewCounts } from '../utils/queueView';
 import useCaseDetails from '../hooks/useCaseDetails';
 import useCaseFindings from '../hooks/useCaseFindings';
 import LiveTranscript from './LiveTranscript';
@@ -13,6 +14,7 @@ import CaseHeader from './CaseHeader';
 import { SectionLabel } from './ui';
 import CaseChat from './CaseChat';
 import QueueStrip from './QueueStrip';
+import QueueViewBar from './QueueViewBar';
 import { CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
 import { CaseRiskFields, MoveButtons } from './DoctorQueueSettings';
 
@@ -20,6 +22,12 @@ const OFFLINE_LABELS = {
   connecting: 'Connecting…',
   reconnecting: 'Reconnecting… transcript may be behind',
   unauthorized: 'Session expired — log in again for live updates',
+};
+
+// Names for the filters in the "Showing 2 of 5 (...)" line.
+const FILTER_LABELS = {
+  needsReview: 'need review', unacknowledged: 'not acknowledged', crewAlerts: 'crew alerts',
+  prepareNow: 'AI suggests prepare now', arrivingSoon: 'arriving soon',
 };
 
 const newestFirst = (cases) => [...cases].sort((a, b) => b.started_at.localeCompare(a.started_at));
@@ -210,6 +218,11 @@ const LiveCasesPanel = () => {
   const selectedInQueue = queued.find((c) => c.id === selectedId);
   const selected = byId.get(selectedId) || selectedInQueue;
   const serverNow = now + clockOffsetMs;
+  // This screen's own view of the queue (a filter and a sort); it resets on reload and never changes the order.
+  const [view, setView] = useState(DEFAULT_VIEW);
+  const viewContext = { serverNow, arrivalMinutes: hospital?.arrival_highlight_minutes };
+  const visible = applyQueueView(queued, view, viewContext);
+  const counts = queue.counts ? viewCounts(queued, viewContext) : null;
   const autoOrder = queue.auto_order !== false;
 
   // Auto-order off: swap a row with its neighbour and save the whole order for the hospital.
@@ -265,8 +278,8 @@ const LiveCasesPanel = () => {
         </div>
       </div>
 
-      <QueueStrip queue={queue} hospital={hospital} riskFields={riskFields}
-                  onHospitalChange={applyHospital} onModeChange={fetchQueue} />
+      <QueueStrip queue={queue} counts={counts} filter={view.filter} onFilter={(filter) => setView((v) => ({ ...v, filter }))}
+                  hospital={hospital} riskFields={riskFields} onHospitalChange={applyHospital} onModeChange={fetchQueue} />
 
       {cases.length === 0 ? (
         <p className="p-6 text-sm text-gray-500">
@@ -276,26 +289,35 @@ const LiveCasesPanel = () => {
         </p>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-5">
-          <ul className="lg:col-span-2 border-r border-gray-200 max-h-[48rem] overflow-y-auto">
-            {queued.map((c, index) => (
-              <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
-                            unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
-                            arrivalMinutes={hospital?.arrival_highlight_minutes}
-                            moveButtons={!autoOrder && (
-                              <MoveButtons first={index === 0} last={index === queued.length - 1}
-                                           onMove={(step) => moveCase(index, step)} />
-                            )} />
-            ))}
-            {others.length > 0 && (
-              <li className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-100">
-                Arrived &amp; closed
-              </li>
-            )}
-            {others.map((c) => (
-              <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
-                            unseen={unseen[c.id]} serverNow={serverNow} />
-            ))}
-          </ul>
+          <div className="lg:col-span-2 border-r border-gray-200">
+            <QueueViewBar sort={view.sort} onSort={(sort) => setView((v) => ({ ...v, sort }))}
+                          filterLabel={view.filter === 'all' ? null : FILTER_LABELS[view.filter]} shown={visible.length}
+                          total={queued.length} onClear={() => setView(DEFAULT_VIEW)}
+                          reorderBlocked={!autoOrder && !isDefaultView(view)} />
+            <ul className="max-h-[48rem] overflow-y-auto">
+              {visible.map((c, index) => (
+                <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
+                              unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
+                              arrivalMinutes={hospital?.arrival_highlight_minutes}
+                              moveButtons={!autoOrder && isDefaultView(view) && (
+                                <MoveButtons first={index === 0} last={index === queued.length - 1}
+                                             onMove={(step) => moveCase(index, step)} />
+                              )} />
+              ))}
+              {visible.length === 0 && queued.length > 0 && (
+                <li className="px-4 py-6 text-sm text-gray-600">No cases match this filter.</li>
+              )}
+              {view.filter === 'all' && others.length > 0 && (
+                <li className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-100">
+                  Arrived &amp; closed
+                </li>
+              )}
+              {view.filter === 'all' && others.map((c) => (
+                <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
+                              unseen={unseen[c.id]} serverNow={serverNow} />
+              ))}
+            </ul>
+          </div>
 
           <div className="lg:col-span-3 p-6">
             {selected ? (

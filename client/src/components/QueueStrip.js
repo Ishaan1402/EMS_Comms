@@ -3,12 +3,20 @@ import HospitalWorkflowSettings from './HospitalWorkflowSettings';
 import { RiskFieldSettings } from './DoctorQueueSettings';
 import QueueModeControl from './QueueModeControl';
 
-// A count of zero fades out, so the counts that are not zero are what the eye finds.
-const Count = ({ n, label, tone }) => (
-  <span className={n === 0 ? 'text-gray-500' : tone}>
-    <span className="font-bold">{n}</span> {label}
-  </span>
-);
+// A count that is also a filter: click it to show only those cases, click it again for all. A count of
+// zero fades out, so the counts that are not zero are what the eye finds. The counts are always the
+// hospital's whole queue, so a filter can't hide that something needs attention.
+const FilterChip = ({ id, n, label, tone, filter, onFilter }) => {
+  const active = filter === id;
+  const narrowing = active && id !== 'all';   // "inbound" is pressed when nothing is filtered: no highlight then
+  return (
+    <button type="button" aria-pressed={active} onClick={() => onFilter(active ? 'all' : id)}
+      title={narrowing ? 'Showing only these. Click to show all.' : id === 'all' ? 'Show all' : 'Show only these'}
+      className={`rounded-full px-2 py-0.5 ${narrowing ? 'bg-blue-50 text-blue-900 ring-1 ring-blue-300' : `hover:bg-gray-100 ${n === 0 ? 'text-gray-500' : tone}`}`}>
+      <span className="font-bold">{n}</span> {label}
+    </button>
+  );
+};
 
 const PanelButton = ({ open, controls, onClick, children }) => (
   <button type="button" onClick={onClick} aria-expanded={open} aria-controls={controls}
@@ -23,10 +31,10 @@ const PanelButton = ({ open, controls, onClick, children }) => (
  * fields (always showing their list and add form), then the arrival highlight. The panel stays
  * mounted while closed, so an unsaved arrival-highlight draft survives opening and closing it.
  */
-const QueueStrip = ({ queue, hospital, riskFields, onHospitalChange, onModeChange }) => {
+const QueueStrip = ({ queue, counts, filter = 'all', onFilter = () => {}, hospital, riskFields, onHospitalChange,
+  onModeChange }) => {
   const [panel, setPanel] = useState(null);
   const toggle = (name) => setPanel((current) => (current === name ? null : name));
-  const counts = queue.counts;
   const linked = Boolean(hospital?.id);
   if (!counts && !linked) return null;
 
@@ -34,14 +42,15 @@ const QueueStrip = ({ queue, hospital, riskFields, onHospitalChange, onModeChang
     <>
       <div className="px-6 py-3 border-b border-gray-200 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-sm">
         {counts && (
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
-            <Count n={counts.inbound} label="inbound" tone="text-gray-900" />
-            <Count n={counts.needs_review} label="need review" tone="text-amber-800" />
-            <Count n={counts.unacknowledged} label="not acknowledged" tone="text-amber-800" />
-            {counts.crew_alerts !== undefined && (
-              <Count n={counts.crew_alerts} label={`crew alert${counts.crew_alerts === 1 ? '' : 's'}`} tone="text-slate-900" />
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <FilterChip id="all" n={counts.inbound} label="inbound" tone="text-gray-900" filter={filter} onFilter={onFilter} />
+            <FilterChip id="needsReview" n={counts.needsReview} label="need review" tone="text-amber-800" filter={filter} onFilter={onFilter} />
+            <FilterChip id="unacknowledged" n={counts.unacknowledged} label="not acknowledged" tone="text-amber-800" filter={filter} onFilter={onFilter} />
+            <FilterChip id="crewAlerts" n={counts.crewAlerts} label={`crew alert${counts.crewAlerts === 1 ? '' : 's'}`} tone="text-slate-900" filter={filter} onFilter={onFilter} />
+            <FilterChip id="prepareNow" n={counts.prepareNow} label="AI suggests prepare now" tone="text-red-700" filter={filter} onFilter={onFilter} />
+            {counts.arrivingSoon !== undefined && (
+              <FilterChip id="arrivingSoon" n={counts.arrivingSoon} label="arriving soon" tone="text-blue-800" filter={filter} onFilter={onFilter} />
             )}
-            <Count n={counts.prepare_now} label="AI suggests prepare now" tone="text-red-700" />
           </div>
         )}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-gray-700">
