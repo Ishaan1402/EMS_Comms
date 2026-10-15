@@ -55,6 +55,7 @@ const LiveCaseRecorder = () => {
 
   const addSegment = useCallback((segment) => {
     if (segment.case_id !== caseRef.current?.id) return;
+    nextSeqRef.current = Math.max(nextSeqRef.current, segment.seq + 1);
     setSegments((list) => upsertNewer(list, segment));
   }, []);
   const uploads = useSegmentUploads(addSegment);
@@ -154,7 +155,11 @@ const LiveCaseRecorder = () => {
       const caseId = current.id;
       const stillShown = () => caseRef.current?.id === caseId;
       axios.get(`/api/cases/${caseId}/segments`)
-        .then((response) => stillShown() && setSegments((list) => mergeNewer(list, response.data)))
+        .then((response) => {
+          if (!stillShown()) return;
+          nextSeqRef.current = Math.max(nextSeqRef.current, nextSeqAfter(response.data));
+          setSegments((list) => mergeNewer(list, response.data));
+        })
         .catch((error) => console.error('Error re-syncing transcript:', error));
       axios.get(`/api/cases/${caseId}`)
         .then((response) => stillShown() && setActiveCase((c) => (c && c.id === caseId && c.updated_at < response.data.updated_at ? response.data : c)))
@@ -348,7 +353,7 @@ const LiveCaseRecorder = () => {
   const isOpen = activeCase?.status === 'active';
   const transcriptItems = [
     ...segments,
-    ...uploads.pending.filter((item) => item.caseId === activeCase?.id && !segments.some((s) => s.seq === item.seq)),
+    ...uploads.pending.filter((item) => item.caseId === activeCase?.id && !segments.some((s) => item.client_id && s.client_id === item.client_id && s.seq === item.seq)),
   ];
 
   return (

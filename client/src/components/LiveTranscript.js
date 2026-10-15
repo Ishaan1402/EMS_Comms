@@ -115,7 +115,7 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText
                   <span>
                     {segment.status === 'failed'
                       ? `Transcription failed: ${segment.error || 'unknown error'}`
-                      : 'Upload failed — audio kept on this device'}
+                      : 'Upload failed — audio kept on this page'}
                   </span>
                   {onRetry && (
                     <button

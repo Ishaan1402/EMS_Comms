@@ -331,3 +331,37 @@ test('arrival waits for the final report and cannot hide a failed Send', async (
   expect(mockPosts.some((r) => r.url.endsWith('/arrive'))).toBe(false);
   expect(container.textContent).toContain('Retry Send Report');
 });
+
+
+test('audio recorded after live clips from another device uses the next free sequence', async () => {
+  await startMicrophoneReport();
+  await send('segment.created', { case_id: 1, segment: { ...segment(1, 18, 8, 'Other device'), client_id: 'other' } });
+  await click('Send Report');
+  expect(mockEnqueue).toHaveBeenCalledWith(expect.objectContaining({ caseId: 1, seq: 9 }));
+});
+
+test('a reconnect transcript refresh advances the next recording sequence', async () => {
+  await act(async () => root.render(<LiveCaseRecorder />));
+  await openPatient(1);
+  await send('ready');
+  await answer('/api/cases/1/segments', [{ ...segment(1, 18, 8, 'Missed while offline'), client_id: 'other' }]);
+  getMicrophone.mockResolvedValue({ getTracks: () => [{ stop: jest.fn() }] });
+  mockStart.mockImplementation(() => { mockRecording = true; return true; });
+  mockStop.mockImplementation(async () => {
+    mockRecording = false;
+    mockOnSegment({ blob: new Blob(['next report']), recordedAt: at(10), durationMs: 1000 });
+  });
+  await click('Record Report');
+  await click('Send Report');
+  expect(mockEnqueue).toHaveBeenCalledWith(expect.objectContaining({ caseId: 1, seq: 9 }));
+});
+
+test('a rejected upload stays visible beside a different server clip with the same sequence', async () => {
+  await act(async () => root.render(<LiveCaseRecorder />));
+  await openPatient(1);
+  mockPending = [{ caseId: 1, seq: 0, client_id: 'different-recording', status: 'upload_failed',
+    recorded_at: at(1), duration_ms: 1000 }];
+  await send('case.updated', { case: patient(1, 'Patient 1', 9) });
+  expect(container.textContent).toContain('Report for patient 1');
+  expect(container.textContent).toContain('Upload failed');
+});
