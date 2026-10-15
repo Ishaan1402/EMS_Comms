@@ -1,84 +1,15 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle, Clock, Keyboard, Loader2, MapPin, Radio, RotateCw, Truck } from 'lucide-react';
 import { buildVitalRows, formatValue } from '../utils/vitalsTrend';
+import { CategoryBadge, NewTag, OperationalBadge, ProcessingBadge, ReportingBadge, isReporting } from './CaseBadges';
+import { SectionLabel } from './ui';
 
-const OPERATIONAL = {
-  inbound: { label: 'Inbound', className: 'bg-blue-100 text-blue-800' },
-  acknowledged: { label: 'Acknowledged', className: 'bg-green-100 text-green-800' },
-  arrived: { label: 'Arrived', className: 'bg-gray-800 text-white' },
-  closed: { label: 'Closed', className: 'bg-gray-200 text-gray-700' },
-};
-
-const PROCESSING = {
-  pending: { label: 'Waiting for assessment', className: 'bg-gray-100 text-gray-700' },
-  processing: { label: 'Processing…', className: 'bg-blue-50 text-blue-700' },
-  completed: { label: 'Assessed', className: 'bg-green-50 text-green-700' },
-  failed: { label: 'Needs review · processing failed', className: 'bg-red-100 text-red-800' },
-  needs_review: { label: 'Needs review', className: 'bg-purple-100 text-purple-800' },
-};
+// The badges used to live here; other files still import them from this module.
+export { CategoryBadge, NewTag, OperationalBadge, ProcessingBadge, ReportingBadge };
 
 const UPDATE_LABELS = { note: 'Update', vitals: 'Vitals', correction: 'Correction', eta: 'ETA change' };
 
 const formatTime = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
-
-export const OperationalBadge = ({ status }) => {
-  const { label, className } = OPERATIONAL[status] || OPERATIONAL.inbound;
-  return <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${className}`}>{label}</span>;
-};
-
-export const ProcessingBadge = ({ processing }) => {
-  if (!processing) return null;
-  const { label, className } = PROCESSING[processing.status] || PROCESSING.pending;
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full ${className}`}>
-      {processing.status === 'processing' && <Loader2 className="h-3 w-3 animate-spin" />}
-      {processing.needs_review && <AlertTriangle className="h-3 w-3" />}
-      {label}
-    </span>
-  );
-};
-
-// The AI's preparation category (the evaluation contract's draft labels). No assessment yet
-// shows as unavailable, never as a guess.
-const CATEGORY_STYLES = {
-  'Prepare now': 'bg-red-50 text-red-700 border-red-200',
-  'Can wait': 'bg-orange-50 text-orange-700 border-orange-200',
-  Routine: 'bg-gray-50 text-gray-700 border-gray-200',
-  'Cannot assess': 'bg-purple-50 text-purple-700 border-purple-200',
-};
-
-// The crew is recording a report: its words show as they speak, but the handoff and the queue
-// only change once they send it.
-const isReporting = (liveCase) => liveCase.status === 'active' && !liveCase.arrived_at && !!liveCase.open_report;
-
-export const ReportingBadge = ({ liveCase }) => (isReporting(liveCase) ? (
-  <span className="px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-full animate-pulse">
-    Reporting…
-  </span>
-) : null);
-
-export const CategoryBadge = ({ liveCase }) => {
-  const category = liveCase.preparation_category;
-  const assessing = ['pending', 'processing'].includes(liveCase.processing?.assessment?.status);
-  if (!category && assessing) {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border bg-blue-50 text-blue-700 border-blue-200">
-        <Loader2 className="h-3 w-3 animate-spin" /> Assessing…
-      </span>
-    );
-  }
-  return (
-    <span className={`px-2 py-0.5 text-xs font-bold rounded-full border ${CATEGORY_STYLES[category] || CATEGORY_STYLES['Cannot assess']}`}>
-      {category || 'Assessment unavailable'}
-      {category && liveCase.assessment_is_outdated && ' · earlier info'}
-    </span>
-  );
-};
-
-// Marks information that arrived after the hospital's last acknowledgment.
-export const NewTag = () => (
-  <span className="ml-1 px-1 text-[10px] font-bold uppercase tracking-wide text-white bg-blue-600 rounded align-middle">new</span>
-);
 
 // isNew(version): did this arrive after the last acknowledgment? Before any acknowledgment
 // everything is new, so nothing is marked. isNew.since(time) is the same test by time, for an
@@ -97,8 +28,8 @@ const sourceTitle = (source, at, quote) =>
   `${SOURCE_LABELS[source] || 'Typed by the crew'} at ${formatTime(at)}${quote ? `: “${quote}”` : ''}`;
 
 const SourceIcon = ({ source }) => (source === 'radio'
-  ? <Radio className="inline h-3 w-3 ml-0.5 text-gray-400" aria-label="from the radio" />
-  : <Keyboard className="inline h-3 w-3 ml-0.5 text-gray-400" aria-label="typed" />);
+  ? <Radio className="inline h-3 w-3 ml-0.5 text-gray-500" aria-label="from the radio" />
+  : <Keyboard className="inline h-3 w-3 ml-0.5 text-gray-500" aria-label="typed" />);
 
 const latestOf = (row) => row.readings[row.readings.length - 1];
 
@@ -118,7 +49,7 @@ const VitalsTrend = ({ vitals, spoken, isNew, startOpen }) => {
   if (rows.length === 0) {
     return (
       <>
-        <h4 className="text-sm font-semibold text-gray-700 mb-1">Vitals</h4>
+        <SectionLabel className="mb-1">Vitals</SectionLabel>
         <p className="text-sm text-gray-500 italic">No vitals reported yet.</p>
       </>
     );
@@ -127,7 +58,7 @@ const VitalsTrend = ({ vitals, spoken, isNew, startOpen }) => {
   return (
     <details className="group" open={startOpen}>
       <summary className="cursor-pointer text-sm">
-        <span className="font-semibold text-gray-700">Vitals</span>
+        <SectionLabel as="span">Vitals</SectionLabel>
         <span className="text-gray-900 group-open:hidden">
           {' '}{rows.map(latestReading).join(' · ')}
         </span>
@@ -166,19 +97,19 @@ const FACT_STATUS = { absent: 'absent', 'not assessed': 'not assessed', planned:
 
 const FactList = ({ title, facts, isNew }) => facts.length > 0 && (
   <div>
-    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{title}</p>
+    <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">{title}</p>
     <ul className="text-sm space-y-0.5">
       {facts.map((fact) => (
         <li key={fact.id} title={sourceTitle(fact.source.kind, fact.recorded_at, fact.quote)}
             className={fact.status === 'absent' ? 'text-gray-600' : 'text-gray-900'}>
           {fact.text}
           {fact.status && fact.status !== 'present' && (
-            <span className={fact.status === 'not assessed' || fact.status === 'planned' ? ' text-orange-700' : ' text-gray-500'}>
+            <span className={fact.status === 'not assessed' || fact.status === 'planned' ? ' text-amber-800' : ' text-gray-500'}>
               {' '}— {FACT_STATUS[fact.status]}
             </span>
           )}
           <SourceIcon source={fact.source.kind} />
-          <span className="text-xs text-gray-400"> {formatTime(fact.recorded_at)}</span>
+          <span className="text-xs text-gray-500"> {formatTime(fact.recorded_at)}</span>
           {isNew(fact.source_version) && <NewTag />}
         </li>
       ))}
@@ -224,7 +155,7 @@ const UpdatesTimeline = ({ updates, isNew }) => {
       {updates.map((update) => (
         <li key={update.id} className="flex gap-2">
           <span className="font-mono text-xs text-gray-500 whitespace-nowrap shrink-0">{formatTime(update.created_at)}</span>
-          <span className={`font-medium shrink-0 ${update.kind === 'correction' ? 'text-orange-700' : 'text-gray-700'}`}>
+          <span className={`font-medium shrink-0 ${update.kind === 'correction' ? 'text-amber-800' : 'text-gray-700'}`}>
             {UPDATE_LABELS[update.kind]}:
           </span>
           <span className="text-gray-900">
@@ -270,7 +201,7 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
           </span>
         ) : (
           liveCase.status === 'active' && (
-            <span className="text-orange-700">
+            <span className="text-amber-800">
               {markNew && liveCase.acknowledgment
                 ? <>New since {liveCase.acknowledgment.user_name} acknowledged at {formatTime(liveCase.acknowledgment.acknowledged_at)}: marked <NewTag /> below</>
                 : 'Latest information not yet acknowledged'}
@@ -297,16 +228,16 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
 
       {assessment?.summary && (
         <div className="text-sm space-y-1">
-          <p className="font-medium text-gray-700">
-            AI handoff {liveCase.assessment_is_outdated && <span className="text-orange-700 font-normal">(based on earlier information or ETA)</span>}
-          </p>
+          <SectionLabel as="p">
+            AI handoff {liveCase.assessment_is_outdated && <span className="text-amber-800 font-normal">(based on earlier information or ETA)</span>}
+          </SectionLabel>
           {assessment.completed_at && <p className="text-xs text-gray-500">Assessed at {formatTime(assessment.completed_at)} · current arrival time shown above</p>}
           {isReporting(liveCase) && (
-            <p className="text-sm text-orange-800 bg-orange-50 border border-orange-200 rounded px-3 py-2">
+            <p className="text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded px-3 py-2">
               The crew is reporting now. This handoff covers the reports they've already sent.
             </p>
           )}
-          <p className="text-gray-900">{assessment.summary}</p>
+          <p className="text-base leading-relaxed text-gray-900">{assessment.summary}</p>
           {assessment.meaningful_change && assessment.meaningful_change !== 'No earlier report' && (
             <p className="text-gray-700">
               <span className="font-medium">
@@ -328,17 +259,17 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
           <VitalsTrend vitals={vitals} spoken={findings?.vitals || []} isNew={isNew} startOpen={markNew} />
         </div>
         <div>
-          <h4 className="text-sm font-semibold text-gray-700 mb-1">
-            Patient information <span className="font-normal text-xs text-gray-500">· AI-extracted, hover for quotes</span>
-          </h4>
+          <SectionLabel className="mb-1">
+            Patient information <span className="font-normal text-xs text-gray-600">· AI-extracted, hover for quotes</span>
+          </SectionLabel>
           <PatientInformation findings={findings} onRetry={onRetryFindings} isNew={isNew} />
         </div>
       </div>
 
       {updates.length > 0 && (
         <details>
-          <summary className="cursor-pointer text-sm font-semibold text-gray-700">
-            Typed updates ({updates.length})
+          <summary className="cursor-pointer">
+            <SectionLabel as="span">Typed updates ({updates.length})</SectionLabel>
             {updates.some((u) => (u.kind === 'eta' ? isNew.since(u.created_at) : isNew(u.info_version))) && <NewTag />}
           </summary>
           <div className="mt-1"><UpdatesTimeline updates={updates} isNew={isNew} /></div>

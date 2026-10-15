@@ -47,3 +47,11 @@ code {
 .animate-pulse-slow {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 } 
+
+/* People who ask their system for less motion get none from the pulsing badges. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse,
+  .animate-pulse-slow {
+    animation: none;
+  }
+}

@@ -87,7 +87,7 @@ const CaseUpdateForm = ({ caseId, onAdded }) => {
               type="button"
               key={option.value}
               onClick={() => setKind(option.value)}
-              className={`px-3 py-1 text-sm rounded-full border ${kind === option.value ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-700 border-gray-300'}`}
+              className={`px-3 py-1 text-sm rounded-full border ${kind === option.value ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-gray-700 border-gray-300'}`}
             >
               {option.label}
             </button>
@@ -98,7 +98,7 @@ const CaseUpdateForm = ({ caseId, onAdded }) => {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {VITAL_FIELDS.map((field) => (
               <label key={field.name} className="text-xs text-gray-600">
-                {field.label} {field.unit && <span className="text-gray-400">({field.unit})</span>}
+                {field.label} {field.unit && <span className="text-gray-500">({field.unit})</span>}
                 <input
                   type="number"
                   step="any"

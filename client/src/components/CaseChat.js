@@ -271,7 +271,7 @@ const CaseChat = ({ caseId, className = '' }) => {
                         Not sent. Tap to retry
                       </button>
                     ) : (
-                      <span className="text-gray-400">Sending…</span>
+                      <span className="text-gray-500">Sending…</span>
                     )}
                   </div>
                 )}
