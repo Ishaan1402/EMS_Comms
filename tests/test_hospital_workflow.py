@@ -5,13 +5,13 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
-import case_assessment
-import database
-from database import init_database, insert_sample_data, query, run
+from backend import case_assessment
+from backend import database
+from backend.database import init_database, insert_sample_data, query, run
 from main import app
-from middleware.auth import create_access_token
-from routes import cases
-from realtime import broker
+from backend.middleware.auth import create_access_token
+from backend.routes import cases
+from backend.realtime import broker
 
 client = TestClient(app, raise_server_exceptions=False)
 

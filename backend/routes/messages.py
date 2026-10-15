@@ -7,8 +7,8 @@ import asyncio
 import json
 import re
 import sqlite3
-from database import query, get_db
-from middleware.auth import get_current_user, APIError
+from backend.database import query, get_db
+from backend.middleware.auth import get_current_user, APIError
 
 # Mounted at /api/cases: each case has one message thread.
 case_router = APIRouter()

@@ -10,8 +10,8 @@ the last recorded order to compare with.
 import json
 from typing import Optional
 
-import case_queue
-from database import get_db, query, utc_now_iso
+from backend import case_queue
+from backend.database import get_db, query, utc_now_iso
 
 # What committed the change; a controlled vocabulary, so exports carry no free text.
 CAUSES = {

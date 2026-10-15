@@ -4,7 +4,7 @@ Asclepius keeps the receiving hospital up to date while an ambulance is on the w
 
 This is a hackathon prototype that runs on fictional patients. It isn't ready for real patient data (see [Limits](#limits)). The AI's categories (Prepare now, Can wait, Routine, Cannot assess) are draft labels for clinician review, not validated triage.
 
-[Run it](#run-it) · [Demo](#demo) · [Tests](#tests) · [How it works](#how-it-works) · [API](#api) · [Limits](#limits)
+[Run it](#run-it) · [Demo](#demo) · [Tests](#tests) · [Repo layout](#repo-layout) · [How it works](#how-it-works) · [API](#api) · [Limits](#limits)
 
 ## Run it
 
@@ -60,19 +60,27 @@ The server starts even with settings missing, and warns about the main ones.
 
 ## Demo
 
-- **Accounts** (password `password123`): `dr.smith` (General Hospital), `dr.jones` (Northside), `emt.wilson`, `emt.garcia` and `emt.lee`. They're created only with `SEED_DEMO_USERS=1`, or by running `python3 database.py --seed`.
+- **Accounts** (password `password123`): `dr.smith` (General Hospital), `dr.jones` (Northside), `emt.wilson`, `emt.garcia` and `emt.lee`. They're created only with `SEED_DEMO_USERS=1`, or by running `python3 -m backend.database --seed`.
 - **[demo/README.md](demo/README.md)** has the three-patient replay, the presenter's run sheet, and how to score a run against the clinician's answers.
 
 ## Tests
 
 ```bash
 .venv/bin/pip install -r requirements.txt                          # includes pytest
-.venv/bin/python -m pytest test_*.py                               # backend
+.venv/bin/python -m pytest tests                                  # backend
 cd client && CI=true npm test -- --watchAll=false --runInBand      # frontend
 ```
 
 - Backend tests use temporary databases and need no API keys. Two skip until Vrishank's branch, with the evaluation contract and the pilot cases, is merged.
-- The backend began as a port of a Node/Express server, which has since been removed. `test_parity.py` still checks the API contract the port kept, such as error codes and messages.
+- The backend began as a port of a Node/Express server, which has since been removed. `tests/test_parity.py` still checks the API contract the port kept, such as error codes and messages.
+
+## Repo layout
+
+- `main.py`: starts the server (`.venv/bin/python main.py`).
+- `backend/`: the case model, AI steps, database, FHIR and SAS exports, and the API in `backend/routes/`.
+- `client/`: the React app.
+- `tests/`: the backend tests.
+- `demo/`: the replay and run sheet. `evals/`: the evaluation prompts. `sas/`: SAS Viya scripts and the CAS notebook. `docs/`: design notes.
 
 ## How it works
 
@@ -94,7 +102,7 @@ The EMT records one report at a time (Record Report, then Send Report), in ~8-se
   - `recorded_at` is when the EMT started recording, corrected to the server clock using the upload's `sent_at`.
   - Every row has an `updated_at`, and clients keep the newest version of each row, so a slow fetch never overwrites a newer pushed update.
   - Audio is saved under `private_uploads/` with random file names and is never served over HTTP.
-- **Reports** (`case_reports.py`): the clips between Record Report and Send Report form one report, and `POST /api/cases/:id/reports/:report_id/end` with the clip count closes it. The hospital sees "Reporting…" and the unsent words dimmed until then; the case gets new information (and a new AI handoff) once per sent report, not every 8 seconds. The send may arrive before its clips, sending twice is harmless, and closing the case or marking arrival ends an unsent report. A clip uploaded without a report id is a report of its own.
+- **Reports** (`backend/case_reports.py`): the clips between Record Report and Send Report form one report, and `POST /api/cases/:id/reports/:report_id/end` with the clip count closes it. The hospital sees "Reporting…" and the unsent words dimmed until then; the case gets new information (and a new AI handoff) once per sent report, not every 8 seconds. The send may arrive before its clips, sending twice is harmless, and closing the case or marking arrival ends an unsent report. A clip uploaded without a report id is a report of its own.
 - **Push:** Server-Sent Events at `GET /api/cases/events`, authenticated with the normal `Authorization: Bearer` header.
   - Hospital users receive the cases routed to their hospital; EMTs receive only their own.
   - Each (re)connect starts with a `ready` event, and clients re-fetch state at that point, because events sent while a client is disconnected aren't replayed.
@@ -127,14 +135,14 @@ The case is the main object. One transport is one case, and everything about the
     - New information makes an acknowledged case `inbound` again.
   - `processing`: `pending` | `processing` | `completed` | `failed` | `needs_review`. Whenever a person should look, it sets `needs_review: true` with plain-language `reasons`: a failed transcription, a failed assessment, or an assessment that couldn't decide.
 - **Failed audio:** a clip that can't be transcribed flags the case until it's retried (`POST /api/cases/:id/segments/:segmentId/retry`) or marked handled (`.../dismiss`, EMT or hospital user), for example after the crew re-sent it as text. A dismissed failure stays on record, with who dismissed it and when.
-- **AI assessments** (`case_assessment.py`):
-  - **Contract.** The model gets the evaluation harness's prompt (`evals/prompts/awareness_v3.txt`; v2 is kept for comparison) and input fields. It must answer in the evaluation contract's five fields: `summary`, `meaningful_change`, `change_explanation`, `missing_information` and `preparation_category` (Prepare now / Can wait / Routine / Cannot assess). So what the evaluation measures is what the app runs. `test_case_model.py` checks the contract against `evals/contracts.py` once Vrishank's branch is merged.
+- **AI assessments** (`backend/case_assessment.py`):
+  - **Contract.** The model gets the evaluation harness's prompt (`evals/prompts/awareness_v3.txt`; v2 is kept for comparison) and input fields. It must answer in the evaluation contract's five fields: `summary`, `meaningful_change`, `change_explanation`, `missing_information` and `preparation_category` (Prepare now / Can wait / Routine / Cannot assess). So what the evaluation measures is what the app runs. `tests/test_case_model.py` checks the contract against `evals/contracts.py` once Vrishank's branch is merged.
   - **What "earlier" means.** Earlier information is what the hospital had acknowledged, so `meaningful_change` answers "what changed since the earlier acknowledged report". Before any acknowledgment, everything counts as current, as in a first report. Acknowledging an earlier version while newer information exists re-assesses the case against it. Information is put in the order it was spoken or typed; text with no recorded version (from before upgrading) counts as not yet seen.
   - **Cannot assess.** `Cannot assess` (the prompt's "Unsure") marks the case Needs Review. An answer that doesn't follow the format is a retryable failure, and the last usable assessment stays current. Nothing is filled with a default.
   - **Every attempt is kept.** Each is a row in `risk_assessments` with the `info_version` it read, its `baseline_version`, the ETA it saw (`input_eta_at`), `input_tokens`, `output_tokens`, `latency_ms` and a list-price `cost_usd`. The case's `current_assessment` is the usable one with the highest version, so a slow result for older information never replaces a newer one. A failure keeps the previous assessment (`assessment_is_outdated: true`) and can be retried (`POST /api/cases/:id/assessments/retry`). `GET /api/cases/:id/assessments` lists every attempt.
   - **Timing.** The assessment first waits 2 s, plus up to 60 s for clips still being transcribed. Reports that haven't been sent are skipped, so a handoff is never built from half a report. Information arriving during a run is assessed once more afterwards. On startup, open cases whose current information has no usable assessment are re-assessed.
   - **Models:** `OPENAI_SCORING_MODEL` and `OPENAI_TRANSCRIPTION_MODEL`.
-- **Patient information** (`case_extraction.py`, KAN-8) is its own pipeline step, next to the assessment: audio → transcript → patient information. It runs, fails and is retried on its own.
+- **Patient information** (`backend/case_extraction.py`, KAN-8) is its own pipeline step, next to the assessment: audio → transcript → patient information. It runs, fails and is retried on its own.
   - **What it pulls out:** the chief complaint; vitals (added to the case's vital-sign trend next to typed ones, with BP as 110/70 and "on room air" kept); findings (present / absent / not assessed); treatments (given / planned).
   - **Where each fact came from:** the clip or typed note (`segment_id` / `update_id`), with the exact words, which the app checks against that source. Hover a value on the dashboard to see them.
   - **What each run reads:** the information since the last completed run, with earlier text only as context.
@@ -142,15 +150,15 @@ The case is the main object. One transport is one case, and everything about the
   - **API:** `GET /api/cases/:id/findings`, `GET /api/cases/:id/extractions` (every attempt) and `POST /api/cases/:id/findings/retry`. Changes are pushed as `findings.updated` events.
   - **The assessment still reads the reports themselves.** That's the contract the evaluation measures; feeding it extracted facts would need its own evaluation first.
   - **Model:** `OPENAI_EXTRACTION_MODEL`, defaulting to the scoring model.
-- **Crew alerts** (`case_alerts.py`, `routes/alerts.py`): the crew can call Stroke (last known well), STEMI (symptom onset), Trauma (time of injury) or Sepsis (symptom onset), with that key time or "not stated", change it, or cancel it. The hospital acknowledges alerts separately from the reports, and an optional sound plays only when a crew calls one. Alerts never go into the AI's input.
-- **Hospital queue** (`case_queue.py`, rule draft-4, not yet clinician-approved):
+- **Crew alerts** (`backend/case_alerts.py`, `backend/routes/alerts.py`): the crew can call Stroke (last known well), STEMI (symptom onset), Trauma (time of injury) or Sepsis (symptom onset), with that key time or "not stated", change it, or cancel it. The hospital acknowledges alerts separately from the reports, and an optional sound plays only when a crew calls one. Alerts never go into the AI's input.
+- **Hospital queue** (`backend/case_queue.py`, rule draft-4, not yet clinician-approved):
   - `GET /api/cases/queue` orders the hospital user's inbound cases on the server, with the reasons for each position: unacknowledged information, an unacknowledged crew alert or a processing failure first, then active crew alerts, then the earliest expected arrival. **The AI's preparation category is shown as "AI suggests" but never changes the order**, which keeps ranking patients with the people who know them (see the FDA's clinical decision support guidance).
   - **The order depends only on stored state, never on the clock,** so it changes only when something is committed.
-  - **Every change is recorded** (`queue_history.py`, KAN-29) as a revision. Each revision lists who entered, moved or left, the cause, and whose case caused it.
+  - **Every change is recorded** (`backend/queue_history.py`, KAN-29) as a revision. Each revision lists who entered, moved or left, the cause, and whose case caused it.
   - **Reading the queue never records anything.**
   - `GET /api/cases/queue/history` returns the history, and the SAS export has it as `ASC_QUEUE`.
   - **Arrival highlight** (KAN-34): `PATCH /api/hospitals/mine` sets how early a patient is flagged "Arriving soon", from 1 to 60 minutes (default 5) per hospital. It only changes that badge, never the AI or the order.
-- **Export for the hospital's record** (`fhir_export.py`): `GET /api/cases/:id/fhir` returns the handoff as a FHIR R4 Bundle: patient, encounter, the reports, vital signs, treatments, and a Provenance for each AI-extracted fact that holds the crew's exact words and the model version. The AI's category is left out. It validates against the `fhir.resources` R4B models but hasn't been tried with an EHR.
+- **Export for the hospital's record** (`backend/fhir_export.py`): `GET /api/cases/:id/fhir` returns the handoff as a FHIR R4 Bundle: patient, encounter, the reports, vital signs, treatments, and a Provenance for each AI-extracted fact that holds the crew's exact words and the model version. The AI's category is left out. It validates against the `fhir.resources` R4B models but hasn't been tried with an EHR.
 
 ### Case messaging (EMT ↔ hospital team)
 
@@ -162,7 +170,7 @@ Each case has a message thread. It's open to the EMT who owns the case and to th
 
 ### SAS Viya sync
 
-`sas_sync.py` pushes the app's case data to CAS tables in SAS Viya, for evaluation and Visual Analytics.
+`backend/sas_sync.py` pushes the app's case data to CAS tables in SAS Viya, for evaluation and Visual Analytics.
 - With `SAS_SYNC_ENABLED=1`, the server rebuilds five tables every 10 s and replaces any that changed: it uploads to a staging table, swaps it in, and saves to disk.
 - SAS is never in a request's path. Failures are retried with backoff and shown at `GET /api/sas/status` (hospital users). `?check=true` also signs in to SAS and reads the CAS server.
 
@@ -179,9 +187,9 @@ Each case has a message thread. It's open to the EMT who owns the case and to th
 - **No free text leaves the app:** transcripts, notes, messages and AI summaries stay in SQLite.
 
 Commands:
-- `python -m sas_sync check`: sign in and read the CAS server and caslibs (no writes).
-- `python -m sas_sync push`: push every table now.
-- `python -m sas_sync csv sas_export/`: write the tables as CSV files plus `schema.json`; no SAS needed.
+- `python -m backend.sas_sync check`: sign in and read the CAS server and caslibs (no writes).
+- `python -m backend.sas_sync push`: push every table now.
+- `python -m backend.sas_sync csv sas_export/`: write the tables as CSV files plus `schema.json`; no SAS needed.
 
 Other settings: `SAS_VIYA_URL`, `SAS_CLIENT_ID`, `SAS_CLIENT_SECRET`, `SAS_CAS_SERVER` (default `cas-shared-default`), `SAS_TABLE_PREFIX` (`ASC_`), `SAS_SYNC_INTERVAL_SECONDS` (`10`) and `SAS_SAVE_TABLES` (`1`).
 

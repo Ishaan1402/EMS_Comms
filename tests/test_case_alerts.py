@@ -8,11 +8,11 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
 from main import app
-import case_assessment
-import case_extraction
-import database
-from database import init_database, insert_sample_data, query, run
-from middleware.auth import create_access_token
+from backend import case_assessment
+from backend import case_extraction
+from backend import database
+from backend.database import init_database, insert_sample_data, query, run
+from backend.middleware.auth import create_access_token
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -211,7 +211,7 @@ def test_a_closed_case_takes_no_new_alerts():
 def test_alerts_and_the_queue_moves_they_cause_are_in_the_sas_export():
     """Astra's Oct 13 audit (R6): under draft-4 an alert reorders the queue, so the export must show the
     alert, its key time and its acknowledgment, and record it as the cause of the move."""
-    import sas_sync
+    from backend import sas_sync
     first = open_case()
     case_id = open_case(emt="emt.lee")  # second in the queue until its crew calls an alert
     key_time = ago(20)

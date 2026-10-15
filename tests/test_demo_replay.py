@@ -14,16 +14,16 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
 from main import app
-import case_assessment
-import case_extraction
-import database
-from database import init_database, insert_sample_data, query
+from backend import case_assessment
+from backend import case_extraction
+from backend import database
+from backend.database import init_database, insert_sample_data, query
 from demo import pilot_scenario, replay
-import openai_config
-from routes import cases
+from backend import openai_config
+from backend.routes import cases
 
 SCENARIO_PATH = Path(replay.DEFAULT_SCENARIO)
-PILOT_CASES = Path(__file__).parent / "docs" / "clinician-annotation" / "pilot_cases.json"
+PILOT_CASES = Path(__file__).parent.parent / "docs" / "clinician-annotation" / "pilot_cases.json"
 
 client = TestClient(app, raise_server_exceptions=False)
 

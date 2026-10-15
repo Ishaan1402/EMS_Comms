@@ -9,10 +9,10 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
 
-from database import get_db, query, utc_now_iso
-from middleware.auth import APIError, require_role
-from realtime import broker
-from routes.cases import get_case_for_user, parse_id, read_json_body, user_hospital_id
+from backend.database import get_db, query, utc_now_iso
+from backend.middleware.auth import APIError, require_role
+from backend.realtime import broker
+from backend.routes.cases import get_case_for_user, parse_id, read_json_body, user_hospital_id
 
 hospital_router = APIRouter()
 case_router = APIRouter()

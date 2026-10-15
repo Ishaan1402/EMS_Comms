@@ -2,7 +2,7 @@
 
 A repeatable run of the KAN-6 demo story through the real app. It does the same things an EMT and a doctor would: it creates cases, radios audio, sends updates and messages, and acknowledges new information. It talks only to the HTTP API, so it tests the real live-transcription, messaging, acknowledgment and failure-handling code.
 
-**No real patient data.** The reports are fictional, AI-authored EMS reports from `docs/clinician-annotation/pilot_cases.json` (on `vrishank-branch` until it is merged). The update reports are copied verbatim; each initial report is the case's "earlier" information with its time phrase removed. `test_demo_replay.py` checks this against the pilot file once it is in the repo.
+**No real patient data.** The reports are fictional, AI-authored EMS reports from `docs/clinician-annotation/pilot_cases.json` (on `vrishank-branch` until it is merged). The update reports are copied verbatim; each initial report is the case's "earlier" information with its time phrase removed. `tests/test_demo_replay.py` checks this against the pilot file once it is in the repo.
 
 ## Run it
 
@@ -20,7 +20,7 @@ For a clean screen (no closed cases from earlier runs in the doctor's list), giv
 ASCLEPIUS_DB_PATH=demo-rehearsal-01.db SEED_DEMO_USERS=1 python3 main.py
 ```
 
-Export that run for SAS with the same database setting: `ASCLEPIUS_DB_PATH=demo-rehearsal-01.db python -m sas_sync csv sas_export/`.
+Export that run for SAS with the same database setting: `ASCLEPIUS_DB_PATH=demo-rehearsal-01.db python -m backend.sas_sync csv sas_export/`.
 
 - `--typed` sends every report as a typed note: no audio files and no Whisper needed.
 - `--finish` marks every patient arrived and closes the cases afterwards.

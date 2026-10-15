@@ -12,7 +12,7 @@ cancellation are each a row. An alert type is active when its latest row is a ca
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from database import query, to_iso
+from backend.database import query, to_iso
 
 # alert -> (label on screen, what its key time is). Every key time is optional: an unknown one is
 # shown as "not stated", never guessed.

@@ -17,10 +17,10 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
 from main import app
-import database
-from database import query, run, init_database, insert_sample_data, utc_now_iso
+from backend import database
+from backend.database import query, run, init_database, insert_sample_data, utc_now_iso
 
-REAL_DB_PATH = Path(database.__file__).parent / "asclepius.db"
+REAL_DB_PATH = Path(database.__file__).parent.parent / "asclepius.db"
 
 client = TestClient(app, raise_server_exceptions=False)
 

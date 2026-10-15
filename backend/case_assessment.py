@@ -27,12 +27,12 @@ from typing import Callable, Optional
 
 import openai
 
-import case_reports
-from database import get_db, query, run, utc_now_iso
-import openai_config
+from backend import case_reports
+from backend.database import get_db, query, run, utc_now_iso
+from backend import openai_config
 
 PROMPT_VERSION = "awareness_v3"
-PROMPT = (Path(__file__).parent / "evals" / "prompts" / f"{PROMPT_VERSION}.txt").read_text(encoding="utf-8")
+PROMPT = (Path(__file__).parent.parent / "evals" / "prompts" / f"{PROMPT_VERSION}.txt").read_text(encoding="utf-8")
 
 # The evaluation contract, kept identical to evals/contracts.py (test_case_model checks this).
 CHANGE = ("Yes", "No", "Unclear", "No earlier report")

@@ -15,14 +15,14 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-only")
 
 from main import app
-import case_assessment
-import case_extraction
-import database
-import sas_sync
-from database import init_database, insert_sample_data, query, run
-from middleware.auth import create_access_token
-import openai_config
-from routes import cases
+from backend import case_assessment
+from backend import case_extraction
+from backend import database
+from backend import sas_sync
+from backend.database import init_database, insert_sample_data, query, run
+from backend.middleware.auth import create_access_token
+from backend import openai_config
+from backend.routes import cases
 
 client = TestClient(app, raise_server_exceptions=False)
 

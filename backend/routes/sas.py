@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
-import sas_sync
-from middleware.auth import require_role
+from backend import sas_sync
+from backend.middleware.auth import require_role
 
 router = APIRouter()
 

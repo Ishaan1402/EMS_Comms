@@ -9,7 +9,7 @@ from contextlib import contextmanager
 
 def configured_db_path() -> Path:
     """ASCLEPIUS_DB_PATH (e.g. a separate database for demo runs), else asclepius.db next to this file."""
-    return Path(os.getenv("ASCLEPIUS_DB_PATH") or Path(__file__).parent / "asclepius.db")
+    return Path(os.getenv("ASCLEPIUS_DB_PATH") or Path(__file__).parent.parent / "asclepius.db")
 
 
 DB_PATH = configured_db_path()
@@ -625,7 +625,7 @@ def insert_sample_data():
         print(f"❌ Error creating sample data: {error}")
 
 if __name__ == "__main__":
-    # `python3 database.py --seed` creates the schema and the demo users.
+    # `python3 -m backend.database --seed` creates the schema and the demo users.
     import sys
     init_database()
     if "--seed" in sys.argv:

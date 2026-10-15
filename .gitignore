@@ -111,7 +111,7 @@ private_uploads/
 demo/audio/
 demo/runs/
 
-# Tables exported by `python -m sas_sync csv sas_export/`
+# Tables exported by `python -m backend.sas_sync csv sas_export/`
 sas_export/
 
 # React production build (built locally; see demo/README.md)

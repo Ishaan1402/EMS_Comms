@@ -279,11 +279,11 @@ routes/messages.py      case threads use case_state's access rule
    - The case view has `/api/cases/events`.
    - The client parses the two streams with two readers (`useCaseEvents.js` and `CaseChat.js`).
 
-   Fix: publish `message.created` on the case stream, drop the per-thread stream for cases, and use one reader. Do it with the old-routes PR, because most of `test_messages.py` tests the old recording threads. Not before the hackathon.
+   Fix: publish `message.created` on the case stream, drop the per-thread stream for cases, and use one reader. Do it with the old-routes PR, because most of `tests/test_messages.py` tests the old recording threads. Not before the hackathon.
 
 4. **The first single-recording flow.** It has its own prompt, transcription path and notifications, and it holds the known security holes listed in #34. Removal is the held KAN-15 PR. It can drop `twilio` and `sendgrid` from `requirements.txt` too.
 
-5. **The Express-compatibility layer.** `main.py` returns validation errors and malformed JSON as 500, and a wrong method as an HTML 404, to match the removed Node server; `test_parity.py` checks this. After #32 and the old-routes PR, decide whether to keep that contract. Switching to FastAPI's defaults (422, 405) is a behaviour change, so it gets its own PR. Low priority.
+5. **The Express-compatibility layer.** `main.py` returns validation errors and malformed JSON as 500, and a wrong method as an HTML 404, to match the removed Node server; `tests/test_parity.py` checks this. After #32 and the old-routes PR, decide whether to keep that contract. Switching to FastAPI's defaults (422, 405) is a behaviour change, so it gets its own PR. Low priority.
 
 ### Structural limits
 
@@ -301,7 +301,7 @@ These are fine for the hackathon; know where they are.
 
 ### Evaluation coupling
 
-- The assessment uses the evaluation's prompt and contract. `test_case_model.py:496` checks the contract against `evals/contracts.py`, but skips until Vrishank's branch is merged. Until then, nothing in `main` enforces that what the evaluation measures is what the app runs. Merging the harness, or vendoring `contracts.py`, turns the check on.
+- The assessment uses the evaluation's prompt and contract. `tests/test_case_model.py:496` checks the contract against `evals/contracts.py`, but skips until Vrishank's branch is merged. Until then, nothing in `main` enforces that what the evaluation measures is what the app runs. Merging the harness, or vendoring `contracts.py`, turns the check on.
 - Any change to `read_inputs` changes what the model sees. Reports and alerts are designed to leave the format alone. Reports do change *when* the model runs, to whole reports only, which brings the app closer to what the evaluation measures.
 
 ### Before real patient data

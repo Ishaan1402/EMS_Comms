@@ -2,9 +2,9 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-import fhir_export
-from middleware.auth import require_role
-from routes.cases import get_case_for_user
+from backend import fhir_export
+from backend.middleware.auth import require_role
+from backend.routes.cases import get_case_for_user
 
 router = APIRouter()
 
