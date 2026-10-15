@@ -30,7 +30,12 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText
   // would make every segment look delayed on a device whose clock runs fast.
   const pendingSince = useRef(new Map());
 
-  const ordered = [...segments].sort((a, b) => a.seq - b.seq);
+  const [showDrafts, setShowDrafts] = useState(false);
+  const completeReports = new Set(segments.filter((s) => !s.is_preview && s.status === 'completed' && s.text?.trim() &&
+    s.report_complete !== 0 && s.report_id).map((s) => s.report_id));
+  const replacedDrafts = segments.filter((s) => s.is_preview && completeReports.has(s.report_id));
+  const visible = showDrafts ? segments : segments.filter((s) => !replacedDrafts.includes(s));
+  const ordered = [...visible].sort((a, b) => a.seq - b.seq);
   const hasInFlight = ordered.some((s) => s.status === 'pending' || s.status === 'uploading');
 
   useEffect(() => {
@@ -55,6 +60,11 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText
 
   return (
     <div ref={scrollRef} onScroll={handleScroll} className="max-h-96 overflow-y-auto space-y-2 pr-1">
+      {replacedDrafts.length > 0 && (
+        <button onClick={() => setShowDrafts(!showDrafts)} className="text-xs text-gray-500 underline">
+          {showDrafts ? 'Hide earlier live drafts' : 'Show earlier live drafts'}
+        </button>
+      )}
       {ordered.map((segment) => {
         const key = segment.id ? `s-${segment.id}` : `local-${segment.seq}`;
         let waitedMs = 0;
@@ -64,7 +74,7 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText
           waitedMs = now - pendingSince.current.get(pendingKey);
         }
         // Part of a report the crew hasn't sent yet: shown as spoken, not yet new information.
-        const reporting = segment.report_complete === 0;
+        const reporting = !!segment.is_preview || segment.report_complete === 0;
         const isNew = newSinceVersion != null && segment.info_version != null && segment.info_version > newSinceVersion;
         return (
           <div key={key} className="flex gap-3 text-sm">
@@ -80,7 +90,7 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText
                   ? (
                     <p className={`leading-relaxed ${reporting ? 'text-gray-500' : 'text-gray-900'}`}>
                       {segment.text}{isNew && <NewTag />}
-                      {reporting && <span className="ml-2 text-xs text-gray-400">reporting…</span>}
+                      {reporting && <span className="ml-2 text-xs text-gray-400">{segment.is_preview ? 'Live draft · may change on Send · not used by AI' : 'reporting…'}</span>}
                     </p>
                   )
                   : <p className="text-gray-400 italic">(no speech detected)</p>
@@ -115,9 +125,9 @@ const LiveTranscript = ({ segments, caseStartedAt, onRetry, onDismiss, emptyText
                   <span>
                     {segment.status === 'failed'
                       ? `Transcription failed: ${segment.error || 'unknown error'}`
-                      : 'Upload failed — audio kept on this device'}
+                      : 'Upload failed — audio kept on this page'}
                   </span>
-                  {onRetry && (
+                  {onRetry && !(segment.is_preview && segment.error?.startsWith('Complete report audio was not received')) && (
                     <button
                       onClick={() => onRetry(segment)}
                       className="flex items-center gap-1 px-2 py-0.5 text-xs border border-red-300 rounded hover:bg-red-50"

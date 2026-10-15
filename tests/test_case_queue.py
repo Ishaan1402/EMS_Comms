@@ -385,6 +385,12 @@ def ai_assisted_case(case_id, category=None, eta="2026-10-15T15:20:00.000Z", ack
     ("the AI category orders cases that are otherwise equal",
      [ai_assisted_case(1, "Routine", "2026-10-15T15:05:00.000Z"), ai_assisted_case(2, "Can wait", "2026-10-15T15:10:00.000Z"),
       ai_assisted_case(3, "Prepare now", "2026-10-15T15:30:00.000Z")], [3, 2, 1]),
+    ("the AI breaks a tie between two cases with unacknowledged information",
+     [ai_assisted_case(1, "Routine", "2026-10-15T15:05:00.000Z", acknowledged=False),
+      ai_assisted_case(2, "Prepare now", "2026-10-15T15:20:00.000Z", acknowledged=False)], [2, 1]),
+    ("the AI breaks a tie between two cases with active crew alerts",
+     [ai_assisted_case(1, "Routine", "2026-10-15T15:05:00.000Z", alert=True),
+      ai_assisted_case(2, "Prepare now", "2026-10-15T15:20:00.000Z", alert=True)], [2, 1]),
     ("arrival breaks ties inside one category",
      [ai_assisted_case(1, "Prepare now", "2026-10-15T15:30:00.000Z"), ai_assisted_case(2, "Prepare now", "2026-10-15T15:10:00.000Z")], [2, 1]),
     ("unacknowledged information outranks the AI",
@@ -403,6 +409,11 @@ def ai_assisted_case(case_id, category=None, eta="2026-10-15T15:20:00.000Z", ack
 ])
 def test_ai_assisted_ordering_table(name, cases, expected):
     assert [c["id"] for c in sorted(cases, key=case_queue.ai_assisted_key)] == expected, name
+
+
+def test_ai_assisted_rule_description_covers_ties_within_attention_and_alert_groups():
+    assert "Among cases tied on both priorities" in case_queue.AI_ASSISTED_RULE
+    assert "don't need a person first and have no active crew alert" not in case_queue.AI_ASSISTED_RULE
 
 
 def test_ai_assisted_mode_reorders_by_the_ai_category_and_says_where_standard_would_put_each(monkeypatch):

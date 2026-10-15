@@ -55,14 +55,15 @@ MAX_SOURCE_ID_LENGTH = 64
 MAX_CLIENT_ID_LENGTH = 64
 MAX_ETA_MINUTES = 24 * 60
 
-CASE_SELECT = """
+CASE_SELECT = f"""
     SELECT c.*, u.first_name AS emt_first_name, u.last_name AS emt_last_name,
            h.name AS destination_hospital_name,
            (SELECT COUNT(*) FROM transcript_segments s WHERE s.case_id = c.id) AS segment_count,
            (SELECT MAX(s.recorded_at) FROM transcript_segments s WHERE s.case_id = c.id) AS last_segment_at,
-           (SELECT COUNT(*) FROM transcript_segments s WHERE s.case_id = c.id AND s.status = 'pending') AS pending_segment_count,
+           (SELECT COUNT(*) FROM transcript_segments s WHERE s.case_id = c.id AND s.is_preview = 0 AND s.status = 'pending') AS pending_segment_count,
            (SELECT COUNT(*) FROM transcript_segments s
-            WHERE s.case_id = c.id AND s.status = 'failed' AND s.dismissed_at IS NULL) AS failed_segment_count,
+            WHERE s.case_id = c.id AND (s.is_preview = 0 OR s.error = '{case_reports.MISSING_AUDIO_ERROR}')
+            AND s.status = 'failed' AND s.dismissed_at IS NULL) AS failed_segment_count,
            -- The report the crew is recording now, if any (case_reports.py).
            (SELECT r.id FROM case_reports r WHERE r.case_id = c.id AND r.clip_count IS NULL
             ORDER BY r.id DESC LIMIT 1) AS open_report_row,
@@ -76,7 +77,7 @@ CASE_SELECT = """
 
 SEGMENT_COLUMNS = (
     "id, case_id, seq, client_id, recorded_at, duration_ms, status, text, error, attempts, "
-    "created_at, transcribed_at, updated_at, info_version, dismissed_at, dismissed_by, "
+    "created_at, transcribed_at, updated_at, info_version, dismissed_at, dismissed_by, is_preview, "
     "(SELECT first_name || ' ' || last_name FROM users WHERE users.id = dismissed_by) AS dismissed_by_name, "
     # The device's id for the clip's report, and whether the report is complete (1 for clips from
     # before reports existed). Until it is, the clip's text is shown but isn't new information yet.
@@ -259,7 +260,7 @@ def describe_cases(rows: list) -> list:
         placeholders = ",".join("?" * len(open_rows))
         open_reports = {r["id"]: r for r in query(
             f"""SELECT r.id, r.client_id, r.started_at,
-                       (SELECT COUNT(*) FROM transcript_segments s WHERE s.report_id = r.id) AS clips
+                       (SELECT COUNT(*) FROM transcript_segments s WHERE s.report_id = r.id AND s.is_preview = 0) AS clips
                 FROM case_reports r WHERE r.id IN ({placeholders})""", tuple(open_rows))}
 
     described = []
@@ -1023,6 +1024,7 @@ async def upload_segment(
     sent_at: Optional[str] = Form(None),
     duration_ms: Optional[str] = Form(None),
     report_id: Optional[str] = Form(None),
+    preview: bool = Form(False),
     current_user: dict = Depends(require_role(["emt"])),
 ):
     """
@@ -1045,6 +1047,8 @@ async def upload_segment(
     if report_id is not None and (not 0 < len(report_id) <= MAX_CLIENT_ID_LENGTH
                                   or report_id.startswith(case_reports.SINGLE_CLIP_PREFIX)):
         raise APIError(400, "Invalid report id")
+    if preview and report_id is None:
+        raise APIError(400, "Live draft clips require a report id")
     duration_value = parse_bounded_int(duration_ms, "duration_ms", MAX_DURATION_MS) if duration_ms else None
 
     duplicate = existing_upload(case["id"], seq_value, client_id)
@@ -1082,10 +1086,10 @@ async def upload_segment(
             segment_id = conn.execute(
                 """INSERT INTO transcript_segments
                        (case_id, seq, client_id, recorded_at, duration_ms, audio_file_path, status, created_at,
-                        updated_at, report_id)
-                   VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)""",
+                        updated_at, report_id, is_preview)
+                   VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)""",
                 (case["id"], seq_value, client_id, server_recorded_at(recorded_at, sent_at), duration_value,
-                 str(audio_path), now, now, report_row),
+                 str(audio_path), now, now, report_row, int(preview)),
             ).lastrowid
             # Bumping the case lets clients see its new segment_count / last_segment_at as a newer version.
             conn.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case["id"]))
@@ -1119,6 +1123,8 @@ async def retry_segment(
     segment = get_segment(parse_id(segment_id, "Segment not found"))
     if not segment or segment["case_id"] != case["id"]:
         raise APIError(404, "Segment not found")
+    if segment["is_preview"] and segment["error"] == case_reports.MISSING_AUDIO_ERROR:
+        raise APIError(409, "Record the complete report again or send a typed update, then mark this failure handled")
     # Conditional update so a double-click can't start two transcriptions.
     claimed = run(
         """UPDATE transcript_segments SET status = 'pending', error = NULL, dismissed_at = NULL, dismissed_by = NULL,
@@ -1200,9 +1206,9 @@ def previous_segment_text(segment: dict) -> Optional[str]:
     """Tail of the preceding segment's transcript, passed to the transcription model for continuity across cuts."""
     rows = query(
         """SELECT text FROM transcript_segments
-           WHERE case_id = ? AND seq < ? AND status = 'completed' AND text != ''
+           WHERE case_id = ? AND seq < ? AND status = 'completed' AND text != '' AND (? OR is_preview = 0)
            ORDER BY seq DESC LIMIT 1""",
-        (segment["case_id"], segment["seq"]),
+        (segment["case_id"], segment["seq"], segment.get("is_preview", 0)),
     )
     return rows[0]["text"][-200:] if rows else None
 
@@ -1210,7 +1216,7 @@ def previous_segment_text(segment: dict) -> Optional[str]:
 async def transcribe_segment(segment_id: int):
     """Transcribe one segment, store the result, and publish it. Never leaves the segment pending."""
     rows = query(
-        """SELECT s.id, s.case_id, s.seq, s.audio_file_path, s.report_id, c.emt_id, c.destination_hospital_id
+        """SELECT s.id, s.case_id, s.seq, s.audio_file_path, s.report_id, s.is_preview, c.emt_id, c.destination_hospital_id
            FROM transcript_segments s JOIN cases c ON s.case_id = c.id
            WHERE s.id = ?""",
         (segment_id,),
