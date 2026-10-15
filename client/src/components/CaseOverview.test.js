@@ -76,24 +76,33 @@ const reported = {
 };
 const vitalsDetails = () => [...container.querySelectorAll('details')].find((d) => d.textContent.startsWith('Vitals'));
 
-test('folded vitals keep each unit and the conditions of the reading', () => {
-  act(() => root.render(<CaseOverview liveCase={inbound()} {...reported} />));
-  const line = vitalsDetails().querySelector('summary').textContent;
-  expect(line).toContain('BP 100/64 mmHg');
-  expect(line).toContain('SpO2 95 % (on 4L oxygen)');
-  expect(line).toContain('Temp 39.1 °C');
+const vitalsButton = () => [...container.querySelectorAll('button[aria-expanded]')].find((b) => b.textContent.startsWith('Vitals'));
+const vitalsBody = () => container.querySelector(`[id="${vitalsButton().getAttribute('aria-controls')}"]`);
+
+test('vitals are folded to one line on both screens, with each unit and the conditions of the reading', () => {
+  [false, true].forEach((markNew) => {
+    act(() => root.render(<CaseOverview liveCase={inbound()} {...reported} markNew={markNew} />));
+    expect(vitalsButton().getAttribute('aria-expanded')).toBe('false');
+    expect(vitalsBody().hidden).toBe(true);
+    const line = vitalsButton().textContent;
+    expect(line).toContain('BP 100/64 mmHg');
+    expect(line).toContain('SpO2 95 % (on 4L oxygen)');
+    expect(line).toContain('Temp 39.1 °C');
+  });
 });
 
-test('the hospital reads the vitals trend open; the crew\'s screen starts folded', () => {
+test('pressing Vitals opens the trend, which was in the page all along', () => {
+  document.body.appendChild(container);
   act(() => root.render(<CaseOverview liveCase={inbound()} {...reported} markNew />));
-  expect(vitalsDetails().open).toBe(true);
-  act(() => root.render(<CaseOverview liveCase={inbound()} {...reported} />));
-  expect(vitalsDetails().open).toBe(false);
+  expect(vitalsBody().textContent).toContain('SpO2');
+  act(() => vitalsButton().click());
+  expect(vitalsButton().getAttribute('aria-expanded')).toBe('true');
+  expect(vitalsBody().hidden).toBe(false);
+  container.remove();
 });
-
-const trend = () => [...container.querySelectorAll('details')].find((d) => d.textContent.startsWith('Vitals'));
 
 test('in the vitals trend the latest reading stands out, earlier ones are muted, and one source icon marks the latest', () => {
+  document.body.appendChild(container);
   const readings = {
     vitals: [typed(1, 'sbp', 'SBP', 'mmHg', 118), typed(2, 'dbp', 'DBP', 'mmHg', 76),
       { ...typed(3, 'sbp', 'SBP', 'mmHg', 100), measured_at: '2026-10-13T15:05:00Z' },
@@ -101,7 +110,7 @@ test('in the vitals trend the latest reading stands out, earlier ones are muted,
     findings: { status: 'completed', chief_complaint: null, findings: [], treatments: [], vitals: [] },
   };
   act(() => root.render(<CaseOverview liveCase={inbound()} {...readings} markNew />));
-  const cell = [...trend().querySelectorAll('td')].find((td) => td.textContent.includes('118/76'));
+  const cell = [...vitalsBody().querySelectorAll('td')].find((td) => td.textContent.includes('118/76'));
   const [earlier, latest] = [...cell.querySelectorAll(':scope > span[title]')];
   expect(earlier.textContent).toBe('118/76');
   expect(earlier.className).toContain('text-gray-500');
@@ -109,6 +118,18 @@ test('in the vitals trend the latest reading stands out, earlier ones are muted,
   expect(latest.className).toContain('font-semibold');
   expect(cell.querySelectorAll('svg')).toHaveLength(1);
   expect(latest.querySelector('svg')).not.toBeNull();
+  container.remove();
+});
+
+test('the folded line shows which way each vital moved, and nothing for one that has one reading', () => {
+  const readings = {
+    vitals: [typed(1, 'hr', 'HR', 'bpm', 104), { ...typed(2, 'hr', 'HR', 'bpm', 126), measured_at: '2026-10-13T15:05:00Z' },
+      typed(3, 'rr', 'RR', '/min', 24)],
+    findings: { status: 'completed', chief_complaint: null, findings: [], treatments: [], vitals: [] },
+  };
+  act(() => root.render(<CaseOverview liveCase={inbound()} {...readings} />));
+  const arrows = [...vitalsButton().querySelectorAll('svg[aria-label]')].map((a) => a.getAttribute('aria-label'));
+  expect(arrows).toEqual(['up from 104']);                  // HR rose; RR has a single reading
 });
 
 test('earlier readings keep the conditions they were taken in', () => {
@@ -120,19 +141,38 @@ test('earlier readings keep the conditions they were taken in', () => {
     ] },
   };
   act(() => root.render(<CaseOverview liveCase={inbound()} {...readings} markNew />));
-  expect(trend().querySelector('table').textContent).toContain('94 (on room air)');
-  expect(trend().querySelector('table').textContent).toContain('98 (on 4L oxygen)');
+  expect(vitalsBody().querySelector('table').textContent).toContain('94 (on room air)');
+  expect(vitalsBody().querySelector('table').textContent).toContain('98 (on 4L oxygen)');
 });
 
-test('the handoff marks a change since the acknowledged report with an amber edge, and a missing item plainly', () => {
+test('the handoff says what changed and what is missing as two plain rows, not a coloured bar', () => {
   const handoff = (meaningful_change) => inbound({ current_assessment: {
     summary: 'Worse.', meaningful_change, change_explanation: 'HR rose.', missing_information: 'No SpO2.' } });
   act(() => root.render(<CaseOverview liveCase={handoff('Yes')} />));
-  const line = (label) => [...container.querySelectorAll('p')].find((p) => p.textContent.startsWith(label));
-  expect(line('Changed since').className).toContain('border-amber-400');
-  expect(line('Missing').className).toContain('border-gray-200');
+  const row = (label) => [...container.querySelectorAll('dt')].find((d) => d.textContent === label);
+  expect(row('Changed').nextSibling.textContent).toBe('HR rose.');
+  expect(row('Changed').className).toContain('font-semibold');
+  expect(row('Missing').nextSibling.textContent).toBe('No SpO2.');
+  expect(container.innerHTML).not.toMatch(/amber-4|border-l-4/);
   act(() => root.render(<CaseOverview liveCase={handoff('No')} />));
-  expect(line('No meaningful change').className).not.toContain('border-amber-400');
+  expect(row('No change').className).not.toContain('font-semibold');
+  act(() => root.render(<CaseOverview liveCase={handoff('Unclear')} />));
+  expect(row('Change unclear')).toBeDefined();
+});
+
+test('the handoff carries the AI disclosure beside the AI\'s words', () => {
+  act(() => root.render(<CaseOverview liveCase={inbound({ current_assessment: { summary: 'Calm.', completed_at: '2026-10-13T15:00:00Z' } })} />));
+  expect(container.textContent).toContain("AI-written from the crew's reports, not validated on real EMS audio");
+  expect(container.textContent).toContain('Assessed at');
+});
+
+test('a case where nothing is wrong has no pills and no all-caps labels: only states a person must see are marked', () => {
+  act(() => root.render(<CaseOverview liveCase={inbound({ latest_update_acknowledged: true, operational_status: 'acknowledged',
+    acknowledgment: { user_name: 'John Smith', acknowledged_at: '2026-10-13T15:00:00Z' } })} {...reported} markNew />));
+  expect(container.textContent).toContain('Seen by John Smith');
+  expect(container.textContent).not.toContain('Acknowledged');
+  expect(container.textContent).not.toContain('Inbound');
+  expect(container.querySelector('details, summary')).toBeNull();
 });
 
 test('whatever the screen passes in sits after the vitals and patient information, before the typed updates', () => {

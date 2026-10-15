@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import Disclosure from './Disclosure';
+import Tabs from './Tabs';
+import { Button } from './ui';
 
 const VITAL_FIELDS = [
   { name: 'hr', label: 'HR', unit: 'bpm' },
@@ -75,23 +78,14 @@ const CaseUpdateForm = ({ caseId, onAdded }) => {
     }
   };
 
-  const inputClass = 'px-2 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500';
+  const inputClass = 'rounded-lg border border-gray-300 px-2 py-1 text-sm focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600';
 
   return (
-    <details className="bg-gray-50 rounded-lg border border-gray-200">
-      <summary className="cursor-pointer px-4 py-2 text-sm font-medium text-gray-700">Type an update (vitals, note, correction, ETA)</summary>
-      <form onSubmit={submit} className="space-y-3 px-4 pb-4 pt-1">
-        <div className="flex flex-wrap gap-2">
-          {KINDS.map((option) => (
-            <button
-              type="button"
-              key={option.value}
-              onClick={() => setKind(option.value)}
-              className={`px-3 py-1 text-sm rounded-full border ${kind === option.value ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-gray-700 border-gray-300'}`}
-            >
-              {option.label}
-            </button>
-          ))}
+    <Disclosure title="Type an update" summary="vitals, a note, a correction or a new ETA" className="rounded-lg border border-gray-200 px-4 py-2">
+      <form onSubmit={submit} className="space-y-3 pb-2">
+        <div className="border-b border-gray-200">
+          <Tabs label="Kind of update" required value={kind} onChange={setKind}
+            items={KINDS.map((option) => ({ id: option.value, label: option.label }))} />
         </div>
 
         {kind === 'vitals' && (
@@ -132,15 +126,9 @@ const CaseUpdateForm = ({ caseId, onAdded }) => {
           />
         )}
 
-        <button
-          type="submit"
-          disabled={sending}
-          className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50"
-        >
-          {sending ? 'Sending…' : 'Send update'}
-        </button>
+        <Button type="submit" variant="primary" disabled={sending}>{sending ? 'Sending…' : 'Send update'}</Button>
       </form>
-    </details>
+    </Disclosure>
   );
 };
 

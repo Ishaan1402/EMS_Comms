@@ -321,7 +321,7 @@ const LiveCasesPanel = () => {
                             onMarkArrived={markArrived} />
                 <CrewAlertPanel liveCase={selected} serverNow={serverNow}
                                 onChanged={(c) => { setCases((list) => upsertNewer(list, c)); refreshQueueSoon(); }} />
-                <div className="mb-6">
+                <div>
                   <CaseOverview
                     liveCase={selected}
                     updates={details.updates}
@@ -334,7 +334,7 @@ const LiveCasesPanel = () => {
                     <CaseRiskFields caseId={selected.id} fields={riskFields} liveValues={liveRiskValues} refreshToken={riskRefresh} />
                   </CaseOverview>
                 </div>
-                <SectionLabel className="mb-2">Transcript</SectionLabel>
+                <SectionLabel as="h3" className="mb-2 mt-4 border-t border-gray-100 pt-4">Transcript</SectionLabel>
                 <LiveTranscript
                   segments={segments}
                   caseStartedAt={selected.started_at}

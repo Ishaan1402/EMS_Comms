@@ -34,6 +34,7 @@ const BUTTONS = {
   primary: 'bg-blue-600 text-white hover:bg-blue-700',
   secondary: 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50',
   ghost: 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+  ink: 'bg-slate-900 text-white hover:bg-slate-800',   // actions on a crew's alert
 };
 
 export const Button = ({ variant = 'secondary', type = 'button', className = '', ...rest }) => (
