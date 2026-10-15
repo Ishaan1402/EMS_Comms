@@ -7,15 +7,15 @@ const KIND_LABELS = { yes_no: 'Yes / no', number: 'Number', text: 'Short text' }
 
 const errorText = (error, fallback) => error.response?.data?.error || fallback;
 
-/** Auto-order on or off for this hospital, and the risk fields its doctors fill in on each case. */
-export default function DoctorQueueSettings({ autoOrder, riskFields, onAutoOrderChange }) {
+/** Auto-order on or off for this hospital: whose order the queue shows, the rule's or the team's. */
+export function AutoOrderSwitch({ autoOrder, ruleVersion, onChange }) {
   const [saving, setSaving] = useState(false);
 
   const toggle = async () => {
     setSaving(true);
     try {
       await axios.put('/api/hospitals/mine/auto-order', { auto_order: !autoOrder });
-      onAutoOrderChange();
+      onChange();
     } catch (error) {
       toast.error(errorText(error, 'Could not change the order setting'));
     } finally {
@@ -24,26 +24,21 @@ export default function DoctorQueueSettings({ autoOrder, riskFields, onAutoOrder
   };
 
   return (
-    <div className="px-6 py-2 border-b border-gray-200 text-sm text-gray-700 flex flex-wrap items-start gap-x-6 gap-y-1">
-      <div className="flex items-center gap-2">
-        <button type="button" role="switch" aria-checked={autoOrder} onClick={toggle} disabled={saving}
-          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 ${autoOrder ? 'bg-blue-700' : 'bg-gray-300'}`}>
-          <span className="sr-only">Auto-order</span>
-          <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${autoOrder ? 'translate-x-4' : 'translate-x-0.5'}`} />
-        </button>
-        <span>
-          <span className="font-medium">Auto-order {autoOrder ? 'on' : 'off'}</span>
-          <span className="text-gray-500">
-            {autoOrder ? ' · the rule below sets the order' : ' · your team sets the order with the arrows; new cases appear on top'}
-          </span>
-        </span>
-      </div>
-      <RiskFieldSettings fields={riskFields} />
+    <div className="flex items-center gap-2">
+      <button type="button" role="switch" aria-checked={autoOrder} onClick={toggle} disabled={saving}
+        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 ${autoOrder ? 'bg-blue-700' : 'bg-gray-300'}`}>
+        <span className="sr-only">Auto-order</span>
+        <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${autoOrder ? 'translate-x-4' : 'translate-x-0.5'}`} />
+      </button>
+      <span>
+        Order: <span className="font-medium">{autoOrder ? `Auto · ${ruleVersion}` : 'set by your team'}</span>
+      </span>
     </div>
   );
 }
 
-function RiskFieldSettings({ fields }) {
+/** The risk fields this hospital's doctors fill in on each case: add and remove them here. */
+export function RiskFieldSettings({ fields }) {
   const id = useId();
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState('yes_no');
