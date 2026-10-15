@@ -370,9 +370,9 @@ def test_the_order_does_not_change_just_because_time_passes():
     assert early == late == [2, 1]
 
 
-# ---- Smart (AI): the AI's category as one more tier, below a person's calls ----------------------
+# ---- AI-assisted: the AI's category as one more tier, below a person's calls ----------------------
 
-def smart_case(case_id, category=None, eta="2026-10-15T15:20:00.000Z", acknowledged=True, alert=False,
+def ai_assisted_case(case_id, category=None, eta="2026-10-15T15:20:00.000Z", acknowledged=True, alert=False,
                needs_review=False, alert_unacknowledged=False):
     """Only the stored fields the ordering reads, so the table below is a spec anyone can reimplement."""
     return {"id": case_id, "preparation_category": category, "eta_at": eta,
@@ -383,29 +383,29 @@ def smart_case(case_id, category=None, eta="2026-10-15T15:20:00.000Z", acknowled
 
 @pytest.mark.parametrize("name, cases, expected", [
     ("the AI category orders cases that are otherwise equal",
-     [smart_case(1, "Routine", "2026-10-15T15:05:00.000Z"), smart_case(2, "Can wait", "2026-10-15T15:10:00.000Z"),
-      smart_case(3, "Prepare now", "2026-10-15T15:30:00.000Z")], [3, 2, 1]),
+     [ai_assisted_case(1, "Routine", "2026-10-15T15:05:00.000Z"), ai_assisted_case(2, "Can wait", "2026-10-15T15:10:00.000Z"),
+      ai_assisted_case(3, "Prepare now", "2026-10-15T15:30:00.000Z")], [3, 2, 1]),
     ("arrival breaks ties inside one category",
-     [smart_case(1, "Prepare now", "2026-10-15T15:30:00.000Z"), smart_case(2, "Prepare now", "2026-10-15T15:10:00.000Z")], [2, 1]),
+     [ai_assisted_case(1, "Prepare now", "2026-10-15T15:30:00.000Z"), ai_assisted_case(2, "Prepare now", "2026-10-15T15:10:00.000Z")], [2, 1]),
     ("unacknowledged information outranks the AI",
-     [smart_case(1, "Prepare now"), smart_case(2, "Routine", acknowledged=False)], [2, 1]),
+     [ai_assisted_case(1, "Prepare now"), ai_assisted_case(2, "Routine", acknowledged=False)], [2, 1]),
     ("an unacknowledged crew alert outranks the AI",
-     [smart_case(1, "Prepare now"), smart_case(2, "Routine", alert_unacknowledged=True)], [2, 1]),
+     [ai_assisted_case(1, "Prepare now"), ai_assisted_case(2, "Routine", alert_unacknowledged=True)], [2, 1]),
     ("a processing failure outranks the AI",
-     [smart_case(1, "Prepare now"), smart_case(2, None, needs_review=True)], [2, 1]),
+     [ai_assisted_case(1, "Prepare now"), ai_assisted_case(2, None, needs_review=True)], [2, 1]),
     ("an active crew alert outranks the AI",
-     [smart_case(1, "Prepare now"), smart_case(2, "Routine", alert=True)], [2, 1]),
+     [ai_assisted_case(1, "Prepare now"), ai_assisted_case(2, "Routine", alert=True)], [2, 1]),
     ("Cannot assess and no assessment share the unknown tier, between Prepare now and Can wait",
-     [smart_case(1, "Can wait", "2026-10-15T15:05:00.000Z"), smart_case(2, "Cannot assess", "2026-10-15T15:20:00.000Z"),
-      smart_case(3, None, "2026-10-15T15:10:00.000Z"), smart_case(4, "Prepare now", "2026-10-15T15:30:00.000Z")], [4, 3, 2, 1]),
+     [ai_assisted_case(1, "Can wait", "2026-10-15T15:05:00.000Z"), ai_assisted_case(2, "Cannot assess", "2026-10-15T15:20:00.000Z"),
+      ai_assisted_case(3, None, "2026-10-15T15:10:00.000Z"), ai_assisted_case(4, "Prepare now", "2026-10-15T15:30:00.000Z")], [4, 3, 2, 1]),
     ("a case without an ETA goes last in its tier",
-     [smart_case(1, "Can wait", None), smart_case(2, "Can wait", "2026-10-15T15:50:00.000Z")], [2, 1]),
+     [ai_assisted_case(1, "Can wait", None), ai_assisted_case(2, "Can wait", "2026-10-15T15:50:00.000Z")], [2, 1]),
 ])
-def test_smart_ordering_table(name, cases, expected):
-    assert [c["id"] for c in sorted(cases, key=case_queue.smart_key)] == expected, name
+def test_ai_assisted_ordering_table(name, cases, expected):
+    assert [c["id"] for c in sorted(cases, key=case_queue.ai_assisted_key)] == expected, name
 
 
-def test_smart_mode_reorders_by_the_ai_category_and_says_where_standard_would_put_each(monkeypatch):
+def test_ai_assisted_mode_reorders_by_the_ai_category_and_says_where_standard_would_put_each(monkeypatch):
     score_as(monkeypatch, {"routine": "Routine", "wait": "Can wait", "now": "Prepare now"})
     routine = open_case("emt.wilson", "routine patient", eta=5)
     wait = open_case("emt.garcia", "wait patient", eta=20)
@@ -417,16 +417,16 @@ def test_smart_mode_reorders_by_the_ai_category_and_says_where_standard_would_pu
     assert standard["queue_mode"] == "standard"
     assert [c["id"] for c in standard["cases"]] == [routine, wait, now]
 
-    assert client.put("/api/hospitals/mine/queue-mode", json={"mode": "smart"}, headers=auth(DOCTOR)).status_code == 200
-    smart = queue()
-    assert smart["queue_mode"] == "smart" and smart["auto_order"] is True
-    assert [(c["id"], c["queue_position"], c["suggested_position"]) for c in smart["cases"]] == [
+    assert client.put("/api/hospitals/mine/queue-mode", json={"mode": "ai_assisted"}, headers=auth(DOCTOR)).status_code == 200
+    assisted = queue()
+    assert assisted["queue_mode"] == "ai_assisted" and assisted["auto_order"] is True
+    assert [(c["id"], c["queue_position"], c["suggested_position"]) for c in assisted["cases"]] == [
         (now, 1, 3), (wait, 2, 2), (routine, 3, 1)]
-    # "Why here" names what Smart used, and the Standard rule's text and both versions are in the response.
-    assert smart["cases"][0]["queue_reasons"] == ["AI suggests Prepare now", "ETA 30 min"]
-    assert smart["rule_versions"] == {"standard": "draft-4", "smart": "smart-1"}
-    assert smart["rules"]["smart"] == case_queue.SMART_RULE and smart["rules"]["standard"] == case_queue.QUEUE_RULE
-    assert smart["counts"] == standard["counts"]
+    # "Why here" names what AI-assisted used, and the Standard rule's text and both versions are in the response.
+    assert assisted["cases"][0]["queue_reasons"] == ["AI suggests Prepare now", "ETA 30 min"]
+    assert assisted["rule_versions"] == {"standard": "draft-4", "ai_assisted": "ai-assisted-1"}
+    assert assisted["rules"]["ai_assisted"] == case_queue.AI_ASSISTED_RULE and assisted["rules"]["standard"] == case_queue.QUEUE_RULE
+    assert assisted["counts"] == standard["counts"]
     # Queue history keeps recording the Standard order: switching mode changes nothing on record.
     assert len(history()) == recorded
 
@@ -434,7 +434,7 @@ def test_smart_mode_reorders_by_the_ai_category_and_says_where_standard_would_pu
     assert [c["id"] for c in queue()["cases"]] == [routine, wait, now]
 
 
-def test_smart_mode_keeps_a_persons_call_above_the_ai(monkeypatch):
+def test_ai_assisted_mode_keeps_a_persons_call_above_the_ai(monkeypatch):
     score_as(monkeypatch, {"calm": "Routine", "now": "Prepare now"})
     calm = open_case("emt.wilson", "calm patient", eta=30)
     now = open_case("emt.garcia", "now patient", eta=10)
@@ -442,5 +442,5 @@ def test_smart_mode_keeps_a_persons_call_above_the_ai(monkeypatch):
     acknowledge(now)
     call_alert(calm, "emt.wilson", "stroke")
     acknowledge_alerts(calm)
-    client.put("/api/hospitals/mine/queue-mode", json={"mode": "smart"}, headers=auth(DOCTOR))
+    client.put("/api/hospitals/mine/queue-mode", json={"mode": "ai_assisted"}, headers=auth(DOCTOR))
     assert [c["id"] for c in queue()["cases"]] == [calm, now]   # the crew's alert beats the AI's Prepare now

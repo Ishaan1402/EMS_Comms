@@ -17,8 +17,8 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 
-const rules = { standard: 'Standard text.', smart: 'Smart text.' };
-const versions = { standard: 'draft-4', smart: 'smart-1' };
+const rules = { standard: 'Standard text.', ai_assisted: 'AI-assisted text.' };
+const versions = { standard: 'draft-4', ai_assisted: 'ai-assisted-1' };
 const render = (props = {}) => act(() => root.render(
   <QueueModeControl mode="standard" rules={rules} ruleVersions={versions} onChange={() => {}} {...props} />,
 ));
@@ -27,9 +27,9 @@ const help = () => container.querySelector('#queue-order-help');
 const info = () => container.querySelector('[aria-label="How the queue is ordered"]');
 
 test('three choices, one selected, named for what they are', () => {
-  render({ mode: 'smart' });
-  expect([...container.querySelectorAll('[role="radio"]')].map((r) => r.textContent)).toEqual(['Standard', 'Smart (AI)', 'Manual']);
-  expect(radio('Smart (AI)').getAttribute('aria-checked')).toBe('true');
+  render({ mode: 'ai_assisted' });
+  expect([...container.querySelectorAll('[role="radio"]')].map((r) => r.textContent)).toEqual(['Standard', 'AI-assisted', 'Manual']);
+  expect(radio('AI-assisted').getAttribute('aria-checked')).toBe('true');
   expect(radio('Standard').getAttribute('aria-checked')).toBe('false');
   expect(container.querySelector('[role="radiogroup"]').getAttribute('aria-label')).toBe('Queue order');
 });
@@ -38,8 +38,8 @@ test('choosing a mode saves it for the hospital and then asks the screen to refr
   axios.put.mockResolvedValue({ data: {} });
   const onChange = jest.fn();
   render({ onChange });
-  await act(async () => radio('Smart (AI)').click());
-  expect(axios.put).toHaveBeenCalledWith('/api/hospitals/mine/queue-mode', { mode: 'smart' });
+  await act(async () => radio('AI-assisted').click());
+  expect(axios.put).toHaveBeenCalledWith('/api/hospitals/mine/queue-mode', { mode: 'ai_assisted' });
   expect(onChange).toHaveBeenCalledTimes(1);
   await act(async () => radio('Standard').click());   // already selected: nothing to save
   expect(axios.put).toHaveBeenCalledTimes(1);
@@ -58,10 +58,10 @@ test('the explanation and the AI disclosure are in the page while closed, and op
   render();
   expect(help().hidden).toBe(true);
   expect(help().textContent).toContain('Standard text.');
-  expect(help().textContent).toContain('Smart text.');
+  expect(help().textContent).toContain('AI-assisted text.');
   expect(help().textContent).toContain('Your team orders the queue with the arrows');
   expect(help().textContent).toContain('not validated on real EMS audio');
-  expect(help().textContent).toContain('Rules draft-4 and smart-1 are drafts a clinician has not yet approved.');
+  expect(help().textContent).toContain('Rules draft-4 and ai-assisted-1 are drafts a clinician has not yet approved.');
   act(() => info().click());
   expect(help().hidden).toBe(false);
   expect(info().getAttribute('aria-expanded')).toBe('true');

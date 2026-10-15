@@ -14,8 +14,8 @@ beforeEach(() => {
 afterEach(() => act(() => root.unmount()));
 
 const queue = (overrides = {}) => ({
-  queue_mode: 'standard', rules: { standard: 'Arrival order rule.', smart: 'Smart rule.' },
-  rule_versions: { standard: 'draft-4', smart: 'smart-1' }, ...overrides,
+  queue_mode: 'standard', rules: { standard: 'Arrival order rule.', ai_assisted: 'AI rule.' },
+  rule_versions: { standard: 'draft-4', ai_assisted: 'ai-assisted-1' }, ...overrides,
 });
 const counts = { inbound: 3, needsReview: 0, unacknowledged: 1, crewAlerts: 1, prepareNow: 2, arrivingSoon: 1 };
 const hospital = { id: 1, name: 'General', arrival_highlight_minutes: 5, settings_version: 1 };
@@ -81,8 +81,8 @@ test('arriving soon is only offered when the screen can count it', () => {
 test('the strip always shows which order is in use, with no draft label and no standing paragraph', () => {
   render();
   expect(container.querySelector('[aria-checked="true"]').textContent).toBe('Standard');
-  render({ queue: queue({ queue_mode: 'smart' }) });
-  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('Smart (AI)');
+  render({ queue: queue({ queue_mode: 'ai_assisted' }) });
+  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('AI-assisted');
   render({ queue: queue({ queue_mode: 'manual' }) });
   expect(container.querySelector('[aria-checked="true"]').textContent).toBe('Manual');
   expect(container.querySelector('#queue-order-note')).toBeNull();

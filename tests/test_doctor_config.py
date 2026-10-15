@@ -109,9 +109,9 @@ def test_queue_mode_is_standard_until_chosen_and_is_per_hospital():
     assert queue()["queue_mode"] == "standard" and queue()["auto_order"] is True
     assert client.get("/api/hospitals/mine/config", headers=auth()).json()["queue_mode"] == "standard"
 
-    assert set_mode("smart").json() == {"queue_mode": "smart", "auto_order": True}
-    assert queue()["queue_mode"] == "smart" and queue()["auto_order"] is True
-    assert client.get("/api/hospitals/mine/config", headers=auth()).json()["queue_mode"] == "smart"
+    assert set_mode("ai_assisted").json() == {"queue_mode": "ai_assisted", "auto_order": True}
+    assert queue()["queue_mode"] == "ai_assisted" and queue()["auto_order"] is True
+    assert client.get("/api/hospitals/mine/config", headers=auth()).json()["queue_mode"] == "ai_assisted"
     assert queue("dr.jones")["queue_mode"] == "standard"           # another hospital is unaffected
 
     assert set_mode("manual").json() == {"queue_mode": "manual", "auto_order": False}
@@ -120,21 +120,21 @@ def test_queue_mode_is_standard_until_chosen_and_is_per_hospital():
 
 
 def test_queue_mode_is_validated_and_only_doctors_can_change_it():
-    for bad in ("ai", "", None, ["smart"], True, 1):
+    for bad in ("ai", "", None, ["ai_assisted"], True, 1):
         response = client.put("/api/hospitals/mine/queue-mode", headers=auth(), json={"mode": bad})
         assert response.status_code == 400, bad
-    assert client.put("/api/hospitals/mine/queue-mode", headers=auth("emt.wilson"), json={"mode": "smart"}).status_code == 403
+    assert client.put("/api/hospitals/mine/queue-mode", headers=auth("emt.wilson"), json={"mode": "ai_assisted"}).status_code == 403
     assert queue()["queue_mode"] == "standard"
 
 
 def test_the_earlier_auto_order_setting_still_works_and_maps_to_the_modes():
     put = lambda on: client.put("/api/hospitals/mine/auto-order", headers=auth(), json={"auto_order": on})  # noqa: E731
-    client.put("/api/hospitals/mine/queue-mode", headers=auth(), json={"mode": "smart"})
+    client.put("/api/hospitals/mine/queue-mode", headers=auth(), json={"mode": "ai_assisted"})
     assert put(False).status_code == 200 and queue()["queue_mode"] == "manual"
-    assert put(True).status_code == 200 and queue()["queue_mode"] == "standard"   # on is Standard, not Smart
+    assert put(True).status_code == 200 and queue()["queue_mode"] == "standard"   # on is Standard, not AI-assisted
 
 
-def test_a_database_from_before_smart_gets_the_ai_ranking_column_and_stays_standard(tmp_path):
+def test_a_database_from_before_ai_assisted_gets_the_ai_ranking_column_and_stays_standard(tmp_path):
     import sqlite3
     conn = sqlite3.connect(tmp_path / "old.db")
     conn.row_factory = sqlite3.Row

@@ -86,13 +86,13 @@ test('queue rows label the AI category as a suggestion, and the order control ca
   await resolve(pendingFor('/api/cases')[0], [inbound(1, 'Medic 1')]);
   const body = queue(1, [[1, 'Medic 1']]);
   await resolve(pendingFor('/api/cases/queue')[0], { ...body, queue_mode: 'standard', counts: { ...body.counts, crew_alerts: 0 },
-    rules: { standard: 'Arrival order rule.', smart: 'Smart rule.' }, rule_versions: { standard: 'draft-4', smart: 'smart-1' } });
+    rules: { standard: 'Arrival order rule.', ai_assisted: 'AI rule.' }, rule_versions: { standard: 'draft-4', ai_assisted: 'ai-assisted-1' } });
   const row = container.querySelector('ul').textContent;
   expect(row).toContain('AI suggests:Can wait');
   const help = container.querySelector('#queue-order-help');
   expect(help.hidden).toBe(true);                       // closed, but in the page
   expect(help.textContent).toContain('Arrival order rule.');
-  expect(help.textContent).toContain('Smart rule.');
+  expect(help.textContent).toContain('AI rule.');
   expect(help.textContent).toContain('not validated on real EMS audio');
   expect(container.textContent).toContain('0 crew alerts');
   expect(container.textContent).not.toContain('draft-3');
@@ -110,8 +110,8 @@ test('in Manual the control says so, and only then do the rows get arrows', asyn
   expect(container.querySelector('ul').querySelector('[aria-label="Move up"]')).not.toBeNull();
   await act(() => { mockHandler('queue.reordered', {}); });
   await new Promise((done) => setTimeout(done, 350));    // the panel re-fetches the queue shortly after
-  await resolve(pendingFor('/api/cases/queue')[0], { ...manual, as_of: at(9), queue_mode: 'smart', auto_order: true });
-  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('Smart (AI)');
+  await resolve(pendingFor('/api/cases/queue')[0], { ...manual, as_of: at(9), queue_mode: 'ai_assisted', auto_order: true });
+  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('AI-assisted');
   expect(container.querySelector('ul').querySelector('[aria-label="Move up"]')).toBeNull();
 });
 

@@ -414,7 +414,7 @@ def init_database():
     );
 
     -- How a hospital's doctors want the queue ordered (doctor_config.py). auto_order = 1 shows the
-    -- server's rule (case_queue.py), as Standard or, with ai_ranking = 1, Smart (AI); 0 shows
+    -- server's rule (case_queue.py), as Standard or, with ai_ranking = 1, AI-assisted; 0 shows
     -- doctor_order, a JSON list of case ids the doctors set (Manual).
     CREATE TABLE IF NOT EXISTS hospital_queue_settings (
       hospital_id INTEGER PRIMARY KEY,
