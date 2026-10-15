@@ -74,14 +74,17 @@ const VitalsSection = ({ vitals, spoken, isNew }) => {
   const anyNew = rows.some((row) => row.readings.some((r) => isNew(r.version)));
   const summary = rows.map((row, index) => {
     const way = direction(row);
+    // The space around the separator is where a narrow screen may wrap; each reading stays whole.
     return (
-      <span key={row.name} className="whitespace-nowrap">
-        {index > 0 && <span className="mx-1.5 text-gray-400">·</span>}
+      <React.Fragment key={row.name}>
+        {index > 0 && <>{' '}<span className="mx-1 text-gray-400">·</span>{' '}</>}
+        <span className="whitespace-nowrap">
         {latestReading(row)}
         {way && (way === 'up'
           ? <ArrowUp className="ml-0.5 inline h-3 w-3 text-gray-500" aria-label={`up from ${row.readings[row.readings.length - 2].value}`} />
           : <ArrowDown className="ml-0.5 inline h-3 w-3 text-gray-500" aria-label={`down from ${row.readings[row.readings.length - 2].value}`} />)}
-      </span>
+        </span>
+      </React.Fragment>
     );
   });
   return (
