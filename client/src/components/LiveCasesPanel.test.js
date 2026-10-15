@@ -123,3 +123,10 @@ test('a pushed clip row from a finished report clears its "reporting…" label',
   }));
   expect(container.textContent).not.toContain('reporting…');
 });
+
+test('the panel clips its corners without becoming a scroll container, so the case header can stick to the window', async () => {
+  await act(async () => root.render(<LiveCasesPanel />));
+  const panel = container.firstChild;
+  expect(panel.className).toContain('overflow-clip');
+  expect(panel.className).not.toContain('overflow-hidden');
+});

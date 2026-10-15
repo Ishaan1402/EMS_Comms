@@ -72,17 +72,21 @@ const VitalsTrend = ({ vitals, spoken, isNew, startOpen }) => {
                 {row.label} {row.unit && <span className="text-xs font-normal text-gray-500">{row.unit}</span>}
               </td>
               <td className="pr-3 py-0.5 text-gray-900">
-                {row.readings.map((r, index) => (
-                  <React.Fragment key={r.id}>
-                    {index > 0 && ' → '}
-                    <span title={sourceTitle(r.source === 'typed vitals' ? 'typed' : r.source, r.at, r.quote)}>
-                      {r.value}
-                      {r.qualifier && <span className="text-xs text-gray-500"> ({r.qualifier})</span>}
-                      <SourceIcon source={r.source} />
-                      {isNew(r.version) && <NewTag />}
-                    </span>
-                  </React.Fragment>
-                ))}
+                {row.readings.map((r, index) => {
+                  const isLatest = index === row.readings.length - 1;
+                  return (
+                    <React.Fragment key={r.id}>
+                      {index > 0 && <span className="text-gray-400"> → </span>}
+                      <span title={sourceTitle(r.source === 'typed vitals' ? 'typed' : r.source, r.at, r.quote)}
+                            className={isLatest ? 'font-semibold text-gray-900' : 'text-gray-500'}>
+                        {r.value}
+                        {r.qualifier && <span className="text-xs font-normal text-gray-500"> ({r.qualifier})</span>}
+                        {isLatest && <SourceIcon source={r.source} />}
+                        {isNew(r.version) && <NewTag />}
+                      </span>
+                    </React.Fragment>
+                  );
+                })}
               </td>
               <td className="py-0.5 text-xs text-gray-500 align-top">{formatTime(latestOf(row).at)}</td>
             </tr>
@@ -178,7 +182,7 @@ const UpdatesTimeline = ({ updates, isNew }) => {
  * acknowledgment, so the clinician sees exactly what they are acknowledging.
  */
 const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, onRetryAssessment, onRetryFindings,
-  markNew = false }) => {
+  markNew = false, children = null }) => {
   const { processing } = liveCase;
   const assessment = liveCase.current_assessment;
   const isNew = newSince(liveCase, markNew);
@@ -239,8 +243,8 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
           )}
           <p className="text-base leading-relaxed text-gray-900">{assessment.summary}</p>
           {assessment.meaningful_change && assessment.meaningful_change !== 'No earlier report' && (
-            <p className="text-gray-700">
-              <span className="font-medium">
+            <p className={`pl-3 border-l-4 text-gray-700 ${assessment.meaningful_change === 'Yes' ? 'border-amber-400' : 'border-gray-200'}`}>
+              <span className="font-medium text-gray-900">
                 {assessment.meaningful_change === 'Yes' ? 'Changed since the earlier acknowledged report'
                   : assessment.meaningful_change === 'No' ? 'No meaningful change since the earlier acknowledged report'
                     : 'Change unclear'}:
@@ -249,7 +253,7 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
             </p>
           )}
           {assessment.missing_information && assessment.missing_information !== 'None identified' && (
-            <p className="text-gray-700"><span className="font-medium">Missing:</span> {assessment.missing_information}</p>
+            <p className="pl-3 border-l-4 border-gray-200 text-gray-700"><span className="font-medium text-gray-900">Missing:</span> {assessment.missing_information}</p>
           )}
         </div>
       )}
@@ -265,6 +269,8 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
           <PatientInformation findings={findings} onRetry={onRetryFindings} isNew={isNew} />
         </div>
       </div>
+
+      {children}
 
       {updates.length > 0 && (
         <details>

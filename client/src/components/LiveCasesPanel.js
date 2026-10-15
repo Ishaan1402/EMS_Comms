@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Radio, WifiOff, CheckCircle } from 'lucide-react';
+import { Radio, WifiOff } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import useCaseEvents from '../hooks/useCaseEvents';
@@ -8,7 +8,8 @@ import useCaseDetails from '../hooks/useCaseDetails';
 import useCaseFindings from '../hooks/useCaseFindings';
 import LiveTranscript from './LiveTranscript';
 import CaseOverview from './CaseOverview';
-import QueueRow, { clockTime } from './QueueRow';
+import QueueRow from './QueueRow';
+import CaseHeader from './CaseHeader';
 import { SectionLabel } from './ui';
 import CaseChat from './CaseChat';
 import QueueStrip from './QueueStrip';
@@ -38,20 +39,6 @@ const ConnectionBadge = ({ status }) =>
       <WifiOff className="h-3 w-3" /> {OFFLINE_LABELS[status]}
     </span>
   );
-
-// The verified handoff as a FHIR R4 Bundle (GET /api/cases/:id/fhir), saved as a file.
-const downloadFhir = async (caseId) => {
-  try {
-    const { data } = await axios.get(`/api/cases/${caseId}/fhir`);
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/fhir+json' }));
-    link.download = `case-${caseId}-handoff.fhir.json`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-  } catch (error) {
-    toast.error('Could not export the handoff');
-  }
-};
 
 const LiveCasesPanel = () => {
   const [cases, setCases] = useState([]);
@@ -262,7 +249,7 @@ const LiveCasesPanel = () => {
   const retryAssessment = () => caseAction('assessments/retry', undefined, 'Could not retry the assessment');
 
   return (
-    <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden mb-8">
+    <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-clip mb-8">
       <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-3 border-b border-gray-200 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="p-2 bg-gradient-to-r from-red-600 to-pink-600 rounded-lg">
@@ -313,48 +300,8 @@ const LiveCasesPanel = () => {
           <div className="lg:col-span-3 p-6">
             {selected ? (
               <>
-                <div className="mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    {selected.ems_unit && `${selected.ems_unit} · `}Case #{selected.id} — EMT {selected.emt_first_name} {selected.emt_last_name}
-                  </h3>
-                  <p className="text-sm text-gray-600">{selected.patient_info || 'No patient info provided'}</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Started {clockTime(selected.started_at)}
-                    {selected.closed_at && ` · Closed ${clockTime(selected.closed_at)}`}
-                    {' · '}
-                    <button onClick={() => downloadFhir(selected.id)} className="text-blue-700 underline"
-                            title="The handoff as a FHIR R4 Bundle for the hospital's record system: each extracted fact with the report it quotes">
-                      Download for the EHR (FHIR R4)
-                    </button>
-                  </p>
-                  {selectedInQueue?.queue_reasons && (
-                    <p className="mt-1 text-sm text-gray-700">
-                      {selectedInQueue.suggested_position ? `Auto-order would put it #${selectedInQueue.suggested_position}: ` : 'Why here: '}
-                      {selectedInQueue.queue_reasons.join(' · ')}
-                    </p>
-                  )}
-                </div>
-                {selected.status === 'active' && (
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {!selected.latest_update_acknowledged && (
-                      <button
-                        onClick={acknowledge}
-                        className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
-                      >
-                        <CheckCircle className="h-4 w-4" /> Acknowledge
-                      </button>
-                    )}
-                    {!selected.arrived_at && (
-                      <button
-                        onClick={markArrived}
-                        className="px-3 py-1.5 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                      >
-                        Mark arrived
-                      </button>
-                    )}
-                  </div>
-                )}
-                <CaseRiskFields caseId={selected.id} fields={riskFields} liveValues={liveRiskValues} />
+                <CaseHeader liveCase={selected} inQueue={selectedInQueue} onAcknowledge={acknowledge}
+                            onMarkArrived={markArrived} />
                 <CrewAlertPanel liveCase={selected} serverNow={serverNow}
                                 onChanged={(c) => { setCases((list) => upsertNewer(list, c)); refreshQueueSoon(); }} />
                 <div className="mb-6">
@@ -366,7 +313,9 @@ const LiveCasesPanel = () => {
                     onRetryAssessment={retryAssessment}
                     onRetryFindings={extracted.retry}
                     markNew
-                  />
+                  >
+                    <CaseRiskFields caseId={selected.id} fields={riskFields} liveValues={liveRiskValues} />
+                  </CaseOverview>
                 </div>
                 <SectionLabel className="mb-2">Transcript</SectionLabel>
                 <LiveTranscript
