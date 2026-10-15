@@ -570,15 +570,21 @@ async def hospital_queue(current_user: dict = Depends(require_role(["doctor"])))
     The user's hospital's inbound queue, ordered on the server (case_queue.py), with each
     case's position and the reasons for it. Arrived and closed cases are not in it.
     """
+    from routes import doctor_config  # imports this module, so it can't be imported at the top
     hospital_id = user_hospital_id(current_user)
     as_of = utc_now_iso()  # before reading, so a later snapshot always carries a later as_of
     ordered = hospital_queue_cases(hospital_id)
     changes = case_extraction.vital_changes([case["id"] for case in ordered])
     for case in ordered:
         case["vital_changes"] = changes[case["id"]]
+    # Auto-order off: the doctors' own order (routes/doctor_config.py); queue history keeps the rule's.
+    settings = doctor_config.queue_settings(hospital_id)
+    if not settings["auto_order"]:
+        ordered = case_queue.doctor_ordered(ordered, settings["doctor_order"])
     return {
         # Responses can arrive out of order; screens keep the snapshot with the latest as_of.
         "as_of": as_of,
+        "auto_order": settings["auto_order"],
         "rule_version": case_queue.QUEUE_RULE_VERSION,
         "rule": case_queue.QUEUE_RULE,
         "counts": case_queue.counts(ordered),
