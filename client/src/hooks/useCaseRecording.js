@@ -7,7 +7,7 @@ export default function useCaseRecording({ caseRef, nextSeqRef, uploads, onError
   const currentRecorder = useRef(null);
   const caseId = caseRef.current?.id;
   const status = caseRef.current?.status;
-  const arrivedAt = caseRef.current?.arrived_at;
+  const arrivedAt = caseRef.current?.arrived_at ?? null;
   const recorder = useSegmentRecorder({
     onSegment: ({ blob, recordedAt, durationMs, isPreview = false }) => {
       const session = owner.current;
@@ -29,7 +29,9 @@ export default function useCaseRecording({ caseRef, nextSeqRef, uploads, onError
       stream.getTracks().forEach((track) => track.stop());
       return false;
     }
-    owner.current = { caseId: report.caseId, arrivedAt, report, nextSeq: nextSeqRef.current };
+    // Read the case now, not from the last render: a case started with audio is set just before this call.
+    owner.current = { caseId: report.caseId, arrivedAt: caseRef.current?.arrived_at ?? null, report,
+      nextSeq: nextSeqRef.current };
     if (recorder.start(stream)) return true;
     owner.current = null;
     return false;

@@ -159,6 +159,24 @@ test('a remote case closure stops the microphone and keeps its final clip with t
   expect(mockEnqueue.mock.calls.every(([item]) => item.caseId === 1)).toBe(true);
 });
 
+test('starting a case with audio keeps recording when the new case arrives with arrived_at null', async () => {
+  getMicrophone.mockResolvedValue({ getTracks: () => [{ stop: jest.fn() }] });
+  mockStart.mockImplementation(() => { mockRecording = true; return true; });
+  await act(async () => root.render(<LiveCaseRecorder />));
+  await answer('/api/hospitals', [{ id: 1, name: 'General' }]);
+  await answer('/api/cases?status=active', []);
+  act(() => {
+    const hospital = container.querySelector('select');
+    hospital.value = '1';
+    hospital.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await click('Start Case & Record Report');
+  await answer('/api/cases', { ...patient(1, 'Patient 1', 7), arrived_at: null });
+  await answerAll('/api/cases/1/segments', []);
+  expect(mockStart).toHaveBeenCalledTimes(1);
+  expect(mockStop).not.toHaveBeenCalled();
+});
+
 test('unsent audio from a remotely closed case stays visible and blocks adopting another patient', async () => {
   await act(async () => root.render(<LiveCaseRecorder />));
   await openPatient(1);
