@@ -106,9 +106,9 @@ function RiskFieldSettings({ fields }) {
 export const MoveButtons = ({ onMove, first, last }) => (
   <div className="flex flex-col justify-center border-b border-gray-100 px-1">
     <button type="button" onClick={() => onMove(-1)} disabled={first} aria-label="Move up"
-      className="px-1 text-gray-500 hover:text-gray-900 disabled:opacity-25">▲</button>
+      className="h-8 w-8 rounded text-gray-600 hover:bg-gray-100 hover:text-gray-900 disabled:opacity-25">▲</button>
     <button type="button" onClick={() => onMove(1)} disabled={last} aria-label="Move down"
-      className="px-1 text-gray-500 hover:text-gray-900 disabled:opacity-25">▼</button>
+      className="h-8 w-8 rounded text-gray-600 hover:bg-gray-100 hover:text-gray-900 disabled:opacity-25">▼</button>
   </div>
 );
 
