@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import copy
 import json
 import os
@@ -673,3 +674,133 @@ class TestLiveStream:
         while broker.subscriber_count != before and time.time() < deadline:
             time.sleep(0.05)
         assert broker.subscriber_count == before
+
+
+class TestLiveDrafts:
+    def test_live_draft_cannot_supply_model_inputs_or_fhir_even_after_send(self, monkeypatch):
+        from backend import case_extraction
+        prompts = []
+        def transcribe(path, prompt):
+            prompts.append(prompt)
+            return 'BP 100 over 60' if '-seg-0-' in path else 'BP 100 over 64'
+        monkeypatch.setattr(cases, 'transcribe_segment_sync', transcribe)
+        case = start_case(patient_info=None)
+        preview = upload(case['id'], 0, report_id='draft-r1', preview='true').json()
+        assert preview['is_preview'] == 1
+        assert get_case(case['id'])['info_version'] == 1
+        assert not case_assessment.read_inputs(case['id'])['has_information']
+        assert case_extraction.read_new_information(case['id'])['new'] == []
+        # Sending counts complete audio only. An arrived draft cannot satisfy it.
+        assert end_report(case['id'], 'draft-r1', 1).json()['completed_at'] is None
+        full = upload(case['id'], 1, report_id='draft-r1').json()
+        assert get_case(case['id'])['info_version'] == 2
+        assert get_segments(case['id'])[0]['info_version'] is None
+        assert case_assessment.read_inputs(case['id'])['input']['current_transcript'] == 'BP 100 over 64'
+        items = case_extraction.read_new_information(case['id'])['new']
+        assert [(i['text'], i['segment_id']) for i in items] == [('BP 100 over 64', full['id'])]
+        assert prompts[-1] is None  # No wrong draft value in the final transcription prompt.
+        bundle = client.get(f"/api/cases/{case['id']}/fhir", headers=auth_headers(DOCTOR)).json()
+        documents = [base64.b64decode(e['resource']['content'][0]['attachment']['data']).decode()
+                     for e in bundle['entry'] if e['resource']['resourceType'] == 'DocumentReference']
+        assert '100 over 60' not in ' '.join(documents)
+        assert 'BP 100 over 64' in documents
+
+    def test_late_draft_never_changes_the_version_or_blocks_full_report(self, monkeypatch):
+        monkeypatch.setattr(cases, 'transcribe_segment_sync', fake_transcriber({0: 'first draft', 1: 'full report', 2: 'late draft'}))
+        case = start_case(patient_info=None)
+        upload(case['id'], 0, report_id='draft-r2', preview='true')
+        end_report(case['id'], 'draft-r2', 1)
+        upload(case['id'], 1, report_id='draft-r2')
+        upload(case['id'], 2, report_id='draft-r2', preview='true')
+        assert get_case(case['id'])['info_version'] == 2
+        assert case_assessment.read_inputs(case['id'])['input']['current_transcript'] == 'full report'
+
+    def test_a_pending_or_failed_draft_does_not_hold_up_complete_audio(self, monkeypatch):
+        monkeypatch.setattr(cases, 'transcribe_segment_sync', fake_transcriber({0: 'draft', 1: 'complete'}))
+        case = start_case(patient_info=None)
+        preview = upload(case['id'], 0, report_id='draft-r3', preview='true').json()
+        database.run("UPDATE transcript_segments SET status = 'pending' WHERE id = ?", (preview['id'],))
+        assert not case_assessment.transcription_in_flight(case['id'])
+        end_report(case['id'], 'draft-r3', 1)
+        upload(case['id'], 1, report_id='draft-r3')
+        assert get_case(case['id'])['info_version'] == 2
+        database.run("UPDATE transcript_segments SET status = 'failed', error = 'timed out' WHERE id = ?", (preview['id'],))
+        assert get_case(case['id'])['failed_segment_count'] == 0
+
+    @pytest.mark.parametrize('finish', ['close', 'arrive', 'reload'])
+    def test_abandoned_draft_flags_missing_full_audio_without_assessing_it(self, monkeypatch, finish):
+        monkeypatch.setattr(cases, 'transcribe_segment_sync', fake_transcriber({0: 'BP 100 over 60'}))
+        case = start_case(patient_info=None)
+        draft = upload(case['id'], 0, report_id='draft-r4', preview='true').json()
+        if finish == 'reload':
+            assert get_case(case['id'])['open_report']['clips'] == 0
+            end_report(case['id'], 'draft-r4', 0)
+        else:
+            client.post(f"/api/cases/{case['id']}/{finish}", headers=auth_headers(EMT))
+        after = get_case(case['id'])
+        assert after['info_version'] == 1
+        assert after['failed_segment_count'] == 1
+        saved = get_segments(case['id'])[0]
+        assert saved['text'] == 'BP 100 over 60'  # Draft is retained, never promoted to a source.
+        assert saved['error'] == cases.case_reports.MISSING_AUDIO_ERROR
+        assert not case_assessment.read_inputs(case['id'])['has_information']
+        retry = client.post(f"/api/cases/{case['id']}/segments/{draft['id']}/retry", headers=auth_headers(EMT))
+        assert retry.status_code == 409
+        handled = client.post(f"/api/cases/{case['id']}/segments/{draft['id']}/dismiss", headers=auth_headers(EMT))
+        assert handled.status_code == 200
+        assert get_case(case['id'])['failed_segment_count'] == 0
+
+    def test_draft_upload_requires_an_explicit_report(self):
+        case = start_case()
+        assert upload(case['id'], 0, preview='true').status_code == 400
+
+    def test_sas_marks_drafts_as_drafts(self, monkeypatch):
+        from backend import sas_sync
+        monkeypatch.setattr(cases, 'transcribe_segment_sync', fake_transcriber({0: 'draft'}))
+        case = start_case(patient_info=None)
+        draft = upload(case['id'], 0, report_id='draft-r5', preview='true').json()
+        rows = [e for e in sas_sync.build_tables()['EVENTS'] if e['EVENT_ID'] == f"segment:{draft['id']}:uploaded"]
+        assert len(rows) == 1 and rows[0]['DETAIL'] == 'live draft seq 0'
+
+    def test_failed_full_audio_never_promotes_draft_words(self, monkeypatch):
+        def transcribe(path, prompt):
+            if '-seg-0-' in path:
+                return 'draft number 60'
+            raise RuntimeError('synthetic failure')
+        monkeypatch.setattr(cases, 'transcribe_segment_sync', transcribe)
+        case = start_case(patient_info=None)
+        upload(case['id'], 0, report_id='draft-fail', preview='true')
+        full = upload(case['id'], 1, report_id='draft-fail').json()
+        end_report(case['id'], 'draft-fail', 1)
+        assert get_case(case['id'])['failed_segment_count'] == 1
+        assert not case_assessment.read_inputs(case['id'])['has_information']
+        monkeypatch.setattr(cases, 'transcribe_segment_sync', lambda *args: 'complete number 64')
+        assert client.post(f"/api/cases/{case['id']}/segments/{full['id']}/retry", headers=auth_headers(EMT)).status_code == 200
+        assert case_assessment.read_inputs(case['id'])['input']['current_transcript'] == 'complete number 64'
+        assert get_case(case['id'])['info_version'] == 2
+
+    def test_missing_audio_failure_clears_only_when_full_audio_arrives(self, monkeypatch):
+        monkeypatch.setattr(cases, 'transcribe_segment_sync', fake_transcriber({0: 'first draft', 1: 'late draft', 2: 'full audio'}))
+        case = start_case(patient_info=None)
+        upload(case['id'], 0, report_id='draft-late', preview='true')
+        end_report(case['id'], 'draft-late', 0)
+        upload(case['id'], 1, report_id='draft-late', preview='true')
+        assert get_case(case['id'])['failed_segment_count'] == 1
+        assert get_case(case['id'])['info_version'] == 1
+        upload(case['id'], 2, report_id='draft-late')
+        assert get_case(case['id'])['failed_segment_count'] == 0
+        assert get_case(case['id'])['info_version'] == 2
+        assert case_assessment.read_inputs(case['id'])['input']['current_transcript'] == 'full audio'
+
+    def test_existing_database_migration_preserves_old_clips(self, monkeypatch, tmp_path):
+        import sqlite3
+        target = tmp_path / 'old.db'
+        with database.get_db() as old, sqlite3.connect(target) as new:
+            old.backup(new)
+            new.execute('ALTER TABLE transcript_segments DROP COLUMN is_preview')
+            before = new.execute('SELECT COUNT(*) FROM transcript_segments').fetchone()[0]
+        monkeypatch.setattr(database, 'DB_PATH', target)
+        init_database()
+        init_database()  # Repeated startup is harmless.
+        assert query('SELECT COUNT(*) AS n FROM transcript_segments')[0]['n'] == before
+        assert query('SELECT COUNT(*) AS n FROM transcript_segments WHERE is_preview != 0')[0]['n'] == 0

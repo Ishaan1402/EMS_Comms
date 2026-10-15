@@ -63,6 +63,12 @@ The server starts even with settings missing, and warns about the main ones.
 - **Accounts** (password `password123`): `dr.smith` (General Hospital), `dr.jones` (Northside), `emt.wilson`, `emt.garcia` and `emt.lee`. They're created only with `SEED_DEMO_USERS=1`, or by running `python3 -m backend.database --seed`.
 - **[demo/README.md](demo/README.md)** has the three-patient replay, the presenter's run sheet, and how to score a run against the clinician's answers.
 
+### Synthetic clinician-review pilot
+
+The [simplified clinician guide and annotation notebook](docs/clinician-annotation/README.md) include live Google Doc/Sheet links, a one-page PDF guide, and an XLSX notebook. The 10 reports are fictional AI-authored fixtures; clinician answers are not prefilled. These materials support a hackathon evaluation pilot, not clinical validation.
+
+The [evaluation pipeline](evals/README.md) and [evaluation notebook](analytics/ems_evaluation.ipynb) import that workbook, compare model outputs with approved clinician references, and export a dashboard plus CSVs for Python/SAS. Mock mode tests the pipeline while annotations are pending; it does not report clinical performance. [Model comparison](evals/MODEL_COMPARISON.md) adds opt-in OpenAI, Claude, Gemini, and local Ollama adapters; planning is offline and does not run inference.
+
 ## Tests
 
 ```bash
@@ -71,7 +77,7 @@ The server starts even with settings missing, and warns about the main ones.
 cd client && CI=true npm test -- --watchAll=false --runInBand      # frontend
 ```
 
-- Backend tests use temporary databases and need no API keys. Two skip until Vrishank's branch, with the evaluation contract and the pilot cases, is merged.
+- Backend tests use temporary databases and need no API keys. The evaluation contract and pilot fixtures are included. Install `evals/requirements.txt` for optional workbook import, then run `python -m pytest evals/tests` too.
 - The backend began as a port of a Node/Express server, which has since been removed. `tests/test_parity.py` still checks the API contract the port kept, such as error codes and messages.
 
 ## Repo layout
@@ -85,7 +91,7 @@ cd client && CI=true npm test -- --watchAll=false --runInBand      # frontend
 ## How it works
 
 1. **The EMT opens a case:** the destination hospital, the unit, an ETA and a short summary.
-2. **The crew talks or types.** The browser records ~8-second clips. Each one is uploaded, transcribed and shown to the hospital as soon as it's ready. Typed notes, vitals, corrections and ETA changes go in as updates.
+2. **The crew talks or types.** The hospital sees live draft words while the crew records a report (up to two minutes). Send uploads the uninterrupted recording for the completed transcript and AI handoff. Typed notes, vitals, corrections and ETA changes go in as updates.
 3. **Each new piece of patient information gets a version number.** The AI writes a short handoff that compares it with what the hospital last acknowledged. A separate step pulls out vitals, findings and treatments, each quoting the words it came from.
 4. **The hospital** sees its inbound patients in an order set by a stated rule, acknowledges what it has seen, and can message the crew.
 5. **Nothing is overwritten:** a correction is a new row. Case data can be exported to SAS Viya without any free text.
@@ -94,15 +100,18 @@ A real-model run on Oct 11 measured, on the server, about 1 s from a clip arrivi
 
 ### Live case transcription
 
-The EMT records one report at a time (Record Report, then Send Report), in ~8-second clips. Each clip is a complete audio file, uploaded and transcribed on its own (`OPENAI_TRANSCRIPTION_MODEL`). Every clip is timestamped, stored under its case, and pushed to the hospital dashboard twice: when it's uploaded, and again when its transcript is ready.
+The EMT records one report at a time (Record Report, then Send Report). The hospital sees draft transcripts from roughly eight-second clips as the crew speaks. Those words are labelled **Live draft** and may change on Send. At the same time, one uninterrupted MediaRecorder captures the complete report. Send uploads that recording for a fresh transcription (`OPENAI_TRANSCRIPTION_MODEL`); only this completed transcript enters the AI handoff, extraction, acknowledgment and FHIR export. The completed transcript replaces drafts in the normal view; the earlier drafts remain available for inspection.
+
+This keeps early visibility while avoiding fixed audio cuts in the transcript used by the AI. It does not establish speech accuracy; check the transcript and correct it when needed. The two-minute limit stops recording and asks the crew to Send. Typed updates and crew alerts remain immediate. Complete audio awaiting upload stays in this page's memory: keep the page open until delivery completes. Draft uploads are best effort and cannot block the complete recording.
 
 - **Storage:** the `cases` and `transcript_segments` tables. An EMT can have only one open case at a time.
   - A clip's `seq` is assigned by the client, is unique per case, and sets the order.
   - Its `client_id` identifies the recording. Re-uploading the same clip returns the stored row; a different clip that reuses a taken `seq` gets a 409.
   - `recorded_at` is when the EMT started recording, corrected to the server clock using the upload's `sent_at`.
   - Every row has an `updated_at`, and clients keep the newest version of each row, so a slow fetch never overwrites a newer pushed update.
+  - `is_preview=1` identifies a live draft. It never receives an information version or supplies model inputs. SAS event details identify these as live drafts.
   - Audio is saved under `private_uploads/` with random file names and is never served over HTTP.
-- **Reports** (`backend/case_reports.py`): the clips between Record Report and Send Report form one report, and `POST /api/cases/:id/reports/:report_id/end` with the clip count closes it. The hospital sees "Reporting…" and the unsent words dimmed until then; the case gets new information (and a new AI handoff) once per sent report, not every 8 seconds. The send may arrive before its clips, sending twice is harmless, and closing the case or marking arrival ends an unsent report. A clip uploaded without a report id is a report of its own.
+- **Reports** (`backend/case_reports.py`): the clips between Record Report and Send Report form one report, and `POST /api/cases/:id/reports/:report_id/end` with the non-draft clip count closes it (normally one for a microphone report). The case gets new information and a new AI handoff once the sent report is transcribed. Older multi-clip clients and the replay still show "Reporting…" until their report completes. A failed Send remains visible and can be retried with the same report id and clip count. The send may arrive before its clips, sending twice is harmless, and closing the case or marking arrival ends an unsent report. A clip uploaded without a report id is a report of its own.
 - **Push:** Server-Sent Events at `GET /api/cases/events`, authenticated with the normal `Authorization: Bearer` header.
   - Hospital users receive the cases routed to their hospital; EMTs receive only their own.
   - Each (re)connect starts with a `ready` event, and clients re-fetch state at that point, because events sent while a client is disconnected aren't replayed.
@@ -113,7 +122,7 @@ The EMT records one report at a time (Record Report, then Send Report), in ~8-se
   - Timeouts, network errors, rate limits and 5xx responses are retried once on the server. After that, the clip is marked `failed` with a short reason, which both dashboards show. The EMT can retry it, and either side can mark it handled.
   - Clips still pending after 20 s are flagged as delayed. An open case with no audio for 2 minutes stops showing as LIVE.
   - The EMT client retries failed uploads with backoff and keeps the audio in the open page until it's accepted; a page reload loses audio that wasn't uploaded.
-  - If a page refresh leaves a case open, the EMT can resume recording or end the case.
+  - If only drafts reached the server before a refresh, arrival or closure, the case shows that the complete audio is missing. The draft is never silently treated as a completed report; re-record or send a typed update, then mark the failure handled.
 
 ### Cases: one per patient transport
 
@@ -136,7 +145,7 @@ The case is the main object. One transport is one case, and everything about the
   - `processing`: `pending` | `processing` | `completed` | `failed` | `needs_review`. Whenever a person should look, it sets `needs_review: true` with plain-language `reasons`: a failed transcription, a failed assessment, or an assessment that couldn't decide.
 - **Failed audio:** a clip that can't be transcribed flags the case until it's retried (`POST /api/cases/:id/segments/:segmentId/retry`) or marked handled (`.../dismiss`, EMT or hospital user), for example after the crew re-sent it as text. A dismissed failure stays on record, with who dismissed it and when.
 - **AI assessments** (`backend/case_assessment.py`):
-  - **Contract.** The model gets the evaluation harness's prompt (`evals/prompts/awareness_v3.txt`; v2 is kept for comparison) and input fields. It must answer in the evaluation contract's five fields: `summary`, `meaningful_change`, `change_explanation`, `missing_information` and `preparation_category` (Prepare now / Can wait / Routine / Cannot assess). So what the evaluation measures is what the app runs. `tests/test_case_model.py` checks the contract against `evals/contracts.py` once Vrishank's branch is merged.
+  - **Contract.** The model gets the evaluation harness's prompt (`evals/prompts/awareness_v3.txt`; v2 is kept for comparison) and input fields. It must answer in the evaluation contract's five fields: `summary`, `meaningful_change`, `change_explanation`, `missing_information` and `preparation_category` (Prepare now / Can wait / Routine / Cannot assess). So what the evaluation measures is what the app runs. `tests/test_case_model.py` checks the contract against the included `evals/contracts.py`.
   - **What "earlier" means.** Earlier information is what the hospital had acknowledged, so `meaningful_change` answers "what changed since the earlier acknowledged report". Before any acknowledgment, everything counts as current, as in a first report. Acknowledging an earlier version while newer information exists re-assesses the case against it. Information is put in the order it was spoken or typed; text with no recorded version (from before upgrading) counts as not yet seen.
   - **Cannot assess.** `Cannot assess` (the prompt's "Unsure") marks the case Needs Review. An answer that doesn't follow the format is a retryable failure, and the last usable assessment stays current. Nothing is filled with a default.
   - **Every attempt is kept.** Each is a row in `risk_assessments` with the `info_version` it read, its `baseline_version`, the ETA it saw (`input_eta_at`), `input_tokens`, `output_tokens`, `latency_ms` and a list-price `cost_usd`. The case's `current_assessment` is the usable one with the highest version, so a slow result for older information never replaces a newer one. A failure keeps the previous assessment (`assessment_is_outdated: true`) and can be retried (`POST /api/cases/:id/assessments/retry`). `GET /api/cases/:id/assessments` lists every attempt.

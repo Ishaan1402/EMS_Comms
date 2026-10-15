@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { ChevronDown, ChevronUp } from 'lucide-react';
@@ -87,30 +87,43 @@ export const MoveButtons = ({ onMove, first, last }) => (
 );
 
 /** The hospital's risk fields on one case, filled in by its doctors. */
-export function CaseRiskFields({ caseId, fields, liveValues }) {
+export function CaseRiskFields(props) {
+  // A new patient owns a new set of field drafts and pending requests.
+  return <CaseRiskValues key={props.caseId} {...props} />;
+}
+
+function CaseRiskValues({ caseId, fields, liveValues, refreshToken }) {
   const [values, setValues] = useState({});
+  const generation = useRef(0);
+  const lastLive = useRef(liveValues);
 
   useEffect(() => {
     let current = true;
-    setValues({});
+    const request = ++generation.current;
     axios.get(`/api/cases/${caseId}/risk-values`)
-      .then((response) => { if (current) setValues(response.data.values); })
-      .catch(() => toast.error('Could not load risk fields'));
-    return () => { current = false; };
-  }, [caseId]);
+      .then((response) => { if (current && request === generation.current) setValues(response.data.values); })
+      .catch(() => { if (current && request === generation.current) toast.error('Could not load risk fields'); });
+    return () => { current = false; generation.current += 1; };
+  }, [caseId, refreshToken]);
 
   useEffect(() => {
-    if (liveValues?.case_id === caseId) setValues(liveValues.values);
+    if (liveValues?.case_id === caseId) {
+      // New live data wins over an earlier fetch/save; an initial cached event can be refreshed.
+      if (lastLive.current !== liveValues) generation.current += 1;
+      lastLive.current = liveValues;
+      setValues(liveValues.values);
+    }
   }, [liveValues, caseId]);
 
   if (fields.length === 0) return null;
 
   const save = async (field, value) => {
+    const request = ++generation.current;
     try {
       const { data } = await axios.put(`/api/cases/${caseId}/risk-values`, { field_id: field.id, value });
-      setValues(data.values);
+      if (request === generation.current) setValues(data.values);
     } catch (error) {
-      toast.error(errorText(error, `Could not save ${field.label}`));
+      if (request === generation.current) toast.error(errorText(error, `Could not save ${field.label}`));
     }
   };
 
