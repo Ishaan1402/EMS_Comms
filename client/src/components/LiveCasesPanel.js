@@ -52,6 +52,7 @@ const LiveCasesPanel = () => {
   const [cases, setCases] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [segments, setSegments] = useState([]);
+  const [riskRefresh, setRiskRefresh] = useState(0);
   const [unseen, setUnseen] = useState({});
   // Server clock minus local clock, so idle times aren't skewed by a wrong local clock.
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
@@ -168,6 +169,7 @@ const LiveCasesPanel = () => {
   // The stream sends `ready` on every (re)connect; events missed while disconnected are re-fetched.
   const handleEvent = useCallback((type, data) => {
     if (type === 'ready') {
+      setRiskRefresh((version) => version + 1);
       setClockOffsetMs(Date.parse(data.server_time) - Date.now());
       fetchHospital();
       fetchConfig();
@@ -337,7 +339,7 @@ const LiveCasesPanel = () => {
                     onRetryFindings={extracted.retry}
                     markNew
                   >
-                    <CaseRiskFields caseId={selected.id} fields={riskFields} liveValues={liveRiskValues} />
+                    <CaseRiskFields caseId={selected.id} fields={riskFields} liveValues={liveRiskValues} refreshToken={riskRefresh} />
                   </CaseOverview>
                 </div>
                 <SectionLabel className="mb-2">Transcript</SectionLabel>
