@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Radio, Clock, WifiOff, CheckCircle } from 'lucide-react';
+import { Radio, WifiOff, CheckCircle } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import useCaseEvents from '../hooks/useCaseEvents';
@@ -8,15 +8,12 @@ import useCaseDetails from '../hooks/useCaseDetails';
 import useCaseFindings from '../hooks/useCaseFindings';
 import LiveTranscript from './LiveTranscript';
 import CaseOverview from './CaseOverview';
-import { CategoryBadge, OperationalBadge, ProcessingBadge, ReportingBadge } from './CaseBadges';
+import QueueRow, { clockTime } from './QueueRow';
 import { SectionLabel } from './ui';
 import CaseChat from './CaseChat';
-import HospitalWorkflowSettings, { ArrivalHighlight } from './HospitalWorkflowSettings';
-import { CrewAlertBadges, CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
+import HospitalWorkflowSettings from './HospitalWorkflowSettings';
+import { CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
 import DoctorQueueSettings, { CaseRiskFields, MoveButtons } from './DoctorQueueSettings';
-
-// An open case with no new audio for this long is shown as idle instead of LIVE.
-const IDLE_AFTER_MS = 2 * 60 * 1000;
 
 const OFFLINE_LABELS = {
   connecting: 'Connecting…',
@@ -31,30 +28,6 @@ const QUEUE_REFRESH_MS = 300;
 // How long a case that changed position shows where it came from.
 const MOVE_CUE_MS = 30 * 1000;
 
-const clockTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-// "arrives in 11 min (14:32)", counted down against the server clock.
-const etaText = (etaAt, serverNow) => {
-  if (!etaAt) return 'ETA not given';
-  const minutes = Math.round((Date.parse(etaAt) - serverNow) / 60000);
-  if (minutes > 0) return `arrives in ${minutes} min (${clockTime(etaAt)})`;
-  if (minutes === 0) return `arriving now (${clockTime(etaAt)})`;
-  return `ETA passed ${-minutes} min ago (${clockTime(etaAt)})`;
-};
-
-// "SpO2 94→89", with the conditions when they differ: "SpO2 89 (on room air)→92 (on 4 liters oxygen)".
-const vitalChange = (v) => {
-  const conditions = v.from_qualifier !== v.to_qualifier;
-  const value = (number, qualifier) => (conditions && qualifier ? `${number} (${qualifier})` : number);
-  return `${v.label} ${value(v.from, v.from_qualifier)}→${value(v.to, v.to_qualifier)}`;
-};
-
-const MoveCue = ({ move }) => (move.to < move.from ? (
-  <span className="px-2 py-0.5 text-xs font-bold text-white bg-amber-500 rounded-full">↑ from #{move.from}</span>
-) : (
-  <span className="px-2 py-0.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-full">↓ from #{move.from}</span>
-));
-
 const ConnectionBadge = ({ status }) =>
   status === 'live' ? (
     <span className="flex items-center gap-1 text-xs font-medium text-green-700">
@@ -65,71 +38,6 @@ const ConnectionBadge = ({ status }) =>
       <WifiOff className="h-3 w-3" /> {OFFLINE_LABELS[status]}
     </span>
   );
-
-const CaseStatusBadge = ({ liveCase, serverNow }) => {
-  if (liveCase.status !== 'active') {
-    return <span className="px-2 py-0.5 text-xs text-gray-600 bg-gray-200 rounded-full">Closed</span>;
-  }
-  if (liveCase.arrived_at) return null;  // the Arrived badge says it; it's no longer live
-  const idleMs = serverNow - Date.parse(liveCase.last_segment_at || liveCase.started_at);
-  if (idleMs > IDLE_AFTER_MS) {
-    // Quiet on purpose: a crew between reports is normal, not something to act on.
-    return <span className="text-xs text-gray-500">last audio {Math.floor(idleMs / 60000)}m ago</span>;
-  }
-  return <span className="px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full animate-pulse">LIVE</span>;
-};
-
-const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, arrivalMinutes, moveButtons }) => (
-  <li className="flex">
-    {moveButtons}
-    <button
-      onClick={() => onSelect(c.id)}
-      className={`flex-1 min-w-0 text-left px-4 py-3 border-b border-gray-100 hover:bg-blue-50 transition-colors ${selected ? 'bg-blue-50' : ''} ${move && move.to < move.from ? 'ring-2 ring-inset ring-amber-300' : ''}`}
-    >
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <span className="flex flex-wrap items-baseline gap-x-2 text-gray-900">
-          <span className="font-semibold whitespace-nowrap">
-            {c.queue_position && <span className="mr-2 text-gray-500">#{c.queue_position}</span>}
-            {c.ems_unit || `Case #${c.id}`}
-          </span>
-          {c.status === 'active' && !c.arrived_at && (
-            <span className="text-sm text-gray-600 whitespace-nowrap">{etaText(c.eta_at, serverNow)}</span>
-          )}
-        </span>
-        <div className="flex items-center gap-2 shrink-0">
-          {move && <MoveCue move={move} />}
-          {unseen > 0 && <span className="px-2 text-xs font-bold text-white bg-blue-600 rounded-full">{unseen} new</span>}
-          <CaseStatusBadge liveCase={c} serverNow={serverNow} />
-        </div>
-      </div>
-      <CrewAlertBadges liveCase={c} serverNow={serverNow} />
-      <div className="flex flex-wrap items-center gap-1 mb-1">
-        {c.queue_position && <span className="text-xs text-gray-500">AI suggests:</span>}
-        <CategoryBadge liveCase={c} />
-        <ReportingBadge liveCase={c} />
-        <ArrivalHighlight liveCase={c} serverNow={serverNow} minutes={arrivalMinutes} />
-        {c.status === 'active' && <OperationalBadge status={c.operational_status} />}
-        {c.processing?.needs_review && <ProcessingBadge processing={c.processing} />}
-      </div>
-      <p className="text-sm text-gray-700 truncate">{c.patient_info || 'No patient info'}</p>
-      {c.vital_changes?.length > 0 && (
-        <p className="text-xs font-medium text-gray-800 mt-0.5">
-          {c.vital_changes.map(vitalChange).join(' · ')}
-        </p>
-      )}
-      {c.queue_reasons && (
-        <p className="text-xs text-gray-600 mt-0.5 truncate" title={c.queue_reasons.join(' · ')}>
-          {c.suggested_position ? `Auto-order would put it #${c.suggested_position}: ` : 'Why here: '}
-          {c.queue_reasons.join(' · ')}
-        </p>
-      )}
-      <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
-        <Clock className="h-3 w-3" />
-        #{c.id} · {clockTime(c.started_at)} · {c.emt_first_name} {c.emt_last_name}
-      </p>
-    </button>
-  </li>
-);
 
 // The verified handoff as a FHIR R4 Bundle (GET /api/cases/:id/fhir), saved as a file.
 const downloadFhir = async (caseId) => {
@@ -312,7 +220,8 @@ const LiveCasesPanel = () => {
     queue_position: entry.queue_position, queue_reasons: entry.queue_reasons }));
   const queuedIds = new Set(queued.map((c) => c.id));
   const others = newestFirst(cases.filter((c) => !queuedIds.has(c.id)));
-  const selected = byId.get(selectedId) || queued.find((c) => c.id === selectedId);
+  const selectedInQueue = queued.find((c) => c.id === selectedId);
+  const selected = byId.get(selectedId) || selectedInQueue;
   const serverNow = now + clockOffsetMs;
   const autoOrder = queue.auto_order !== false;
 
@@ -406,7 +315,7 @@ const LiveCasesPanel = () => {
         <div className="grid grid-cols-1 lg:grid-cols-5">
           <ul className="lg:col-span-2 border-r border-gray-200 max-h-[48rem] overflow-y-auto">
             {queued.map((c, index) => (
-              <CaseListItem key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
+              <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
                             unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
                             arrivalMinutes={hospital?.arrival_highlight_minutes}
                             moveButtons={!autoOrder && (
@@ -420,7 +329,7 @@ const LiveCasesPanel = () => {
               </li>
             )}
             {others.map((c) => (
-              <CaseListItem key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
+              <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
                             unseen={unseen[c.id]} serverNow={serverNow} />
             ))}
           </ul>
@@ -442,6 +351,12 @@ const LiveCasesPanel = () => {
                       Download for the EHR (FHIR R4)
                     </button>
                   </p>
+                  {selectedInQueue?.queue_reasons && (
+                    <p className="mt-1 text-sm text-gray-700">
+                      {selectedInQueue.suggested_position ? `Auto-order would put it #${selectedInQueue.suggested_position}: ` : 'Why here: '}
+                      {selectedInQueue.queue_reasons.join(' · ')}
+                    </p>
+                  )}
                 </div>
                 {selected.status === 'active' && (
                   <div className="flex flex-wrap gap-2 mb-4">
