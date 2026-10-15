@@ -58,3 +58,35 @@ test('a report with no assessment never invents a category', () => {
   expect(container.textContent).toContain('Assessing…');
   expect(container.textContent).not.toContain('Can wait');
 });
+
+// Vitals as the API returns them: typed readings, and those extracted from the crew's reports.
+const spoken = (id, name, label, unit, value, qualifier) => ({
+  id, name, label, unit, value, qualifier, recorded_at: '2026-10-13T15:00:00Z', source: { kind: 'radio' },
+  quote: null, source_version: 2,
+});
+const typed = (id, name, label, unit, value) => ({
+  id, name, label, unit, value, measured_at: '2026-10-13T15:00:00Z', info_version: 2,
+});
+const reported = {
+  vitals: [typed(1, 'sbp', 'SBP', 'mmHg', 100), typed(2, 'dbp', 'DBP', 'mmHg', 64)],
+  findings: {
+    status: 'completed', chief_complaint: null, findings: [], treatments: [],
+    vitals: [spoken(1, 'spo2', 'SpO2', '%', 95, 'on 4L oxygen'), spoken(2, 'temp_c', 'Temp', '°C', 39.1, null)],
+  },
+};
+const vitalsDetails = () => [...container.querySelectorAll('details')].find((d) => d.textContent.startsWith('Vitals'));
+
+test('folded vitals keep each unit and the conditions of the reading', () => {
+  act(() => root.render(<CaseOverview liveCase={inbound()} {...reported} />));
+  const line = vitalsDetails().querySelector('summary').textContent;
+  expect(line).toContain('BP 100/64 mmHg');
+  expect(line).toContain('SpO2 95 % (on 4L oxygen)');
+  expect(line).toContain('Temp 39.1 °C');
+});
+
+test('the hospital reads the vitals trend open; the crew\'s screen starts folded', () => {
+  act(() => root.render(<CaseOverview liveCase={inbound()} {...reported} markNew />));
+  expect(vitalsDetails().open).toBe(true);
+  act(() => root.render(<CaseOverview liveCase={inbound()} {...reported} />));
+  expect(vitalsDetails().open).toBe(false);
+});

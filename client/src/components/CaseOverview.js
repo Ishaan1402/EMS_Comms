@@ -100,16 +100,42 @@ const SourceIcon = ({ source }) => (source === 'radio'
   ? <Radio className="inline h-3 w-3 ml-0.5 text-gray-400" aria-label="from the radio" />
   : <Keyboard className="inline h-3 w-3 ml-0.5 text-gray-400" aria-label="typed" />);
 
-/** One row per vital sign, oldest value first, each marked with where it came from (hover for the words). */
-const VitalsTrend = ({ vitals, spoken, isNew }) => {
+const latestOf = (row) => row.readings[row.readings.length - 1];
+
+// "SpO2 89 % (on room air)": a number never travels without its unit and the conditions it was taken in.
+const latestReading = (row) => {
+  const latest = latestOf(row);
+  return `${row.label} ${latest.value}${row.unit ? ` ${row.unit}` : ''}${latest.qualifier ? ` (${latest.qualifier})` : ''}`;
+};
+
+/**
+ * Folded to the latest reading of each sign; open it for one row per sign, oldest value first,
+ * each marked with where it came from (hover for the words). startOpen: the hospital reads how
+ * the numbers moved, so it starts open; the crew's own screen starts folded.
+ */
+const VitalsTrend = ({ vitals, spoken, isNew, startOpen }) => {
   const rows = buildVitalRows(vitals, spoken);
-  if (rows.length === 0) return <p className="text-sm text-gray-500 italic">No vitals reported yet.</p>;
+  if (rows.length === 0) {
+    return (
+      <>
+        <h4 className="text-sm font-semibold text-gray-700 mb-1">Vitals</h4>
+        <p className="text-sm text-gray-500 italic">No vitals reported yet.</p>
+      </>
+    );
+  }
+  const anyNew = rows.some((row) => row.readings.some((r) => isNew(r.version)));
   return (
-    <table className="text-sm">
-      <tbody>
-        {rows.map((row) => {
-          const latest = row.readings[row.readings.length - 1];
-          return (
+    <details className="group" open={startOpen}>
+      <summary className="cursor-pointer text-sm">
+        <span className="font-semibold text-gray-700">Vitals</span>
+        <span className="text-gray-900 group-open:hidden">
+          {' '}{rows.map(latestReading).join(' · ')}
+        </span>
+        {anyNew && <NewTag />}
+      </summary>
+      <table className="mt-1 text-sm">
+        <tbody>
+          {rows.map((row) => (
             <tr key={row.name}>
               <td className="pr-3 py-0.5 font-medium text-gray-700 whitespace-nowrap align-top">
                 {row.label} {row.unit && <span className="text-xs font-normal text-gray-500">{row.unit}</span>}
@@ -127,12 +153,12 @@ const VitalsTrend = ({ vitals, spoken, isNew }) => {
                   </React.Fragment>
                 ))}
               </td>
-              <td className="py-0.5 text-xs text-gray-500 align-top">{formatTime(latest.at)}</td>
+              <td className="py-0.5 text-xs text-gray-500 align-top">{formatTime(latestOf(row).at)}</td>
             </tr>
-          );
-        })}
-      </tbody>
-    </table>
+          ))}
+        </tbody>
+      </table>
+    </details>
   );
 };
 
@@ -193,7 +219,6 @@ const PatientInformation = ({ findings, onRetry, isNew }) => {
 };
 
 const UpdatesTimeline = ({ updates, isNew }) => {
-  if (updates.length === 0) return <p className="text-sm text-gray-500 italic">No typed updates yet.</p>;
   return (
     <ul className="space-y-1 text-sm max-h-48 overflow-y-auto">
       {updates.map((update) => (
@@ -300,21 +325,25 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <h4 className="text-sm font-semibold text-gray-700 mb-1">Vitals</h4>
-          <VitalsTrend vitals={vitals} spoken={findings?.vitals || []} isNew={isNew} />
+          <VitalsTrend vitals={vitals} spoken={findings?.vitals || []} isNew={isNew} startOpen={markNew} />
         </div>
         <div>
           <h4 className="text-sm font-semibold text-gray-700 mb-1">
-            Patient information <span className="font-normal text-xs text-gray-500">· AI-extracted from the crew's reports; hover for their words</span>
+            Patient information <span className="font-normal text-xs text-gray-500">· AI-extracted, hover for quotes</span>
           </h4>
           <PatientInformation findings={findings} onRetry={onRetryFindings} isNew={isNew} />
         </div>
       </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-gray-700 mb-1">Typed updates</h4>
-        <UpdatesTimeline updates={updates} isNew={isNew} />
-      </div>
+      {updates.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-sm font-semibold text-gray-700">
+            Typed updates ({updates.length})
+            {updates.some((u) => (u.kind === 'eta' ? isNew.since(u.created_at) : isNew(u.info_version))) && <NewTag />}
+          </summary>
+          <div className="mt-1"><UpdatesTimeline updates={updates} isNew={isNew} /></div>
+        </details>
+      )}
     </div>
   );
 };

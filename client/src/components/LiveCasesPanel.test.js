@@ -94,6 +94,19 @@ test('queue rows label the AI category as a suggestion and the board states the 
   expect(container.textContent).toContain('0 crew alerts');
 });
 
+test('with Auto-order off the order note says the team set it, and still gives the rule it is compared with', async () => {
+  await act(async () => root.render(<LiveCasesPanel />));
+  await resolve(pendingFor('/api/hospitals/mine')[0], { id: 1, name: 'General' });
+  await resolve(pendingFor('/api/cases')[0], [inbound(1, 'Medic 1')]);
+  const body = queue(1, [[1, 'Medic 1']]);
+  await resolve(pendingFor('/api/cases/queue')[0], { ...body, auto_order: false, rule_version: 'draft-4',
+    rule: 'Arrival order rule.', counts: { ...body.counts, crew_alerts: 0 } });
+  expect(container.textContent).toContain('Your team set this order');
+  expect(container.textContent).toContain('Auto-order would use draft-4: Arrival order rule.');
+  expect(container.textContent).not.toContain('Order (draft-4):');
+  expect(container.textContent).toContain('not validated on real EMS audio');
+});
+
 test('a pushed clip row from a finished report clears its "reporting…" label', async () => {
   await act(async () => root.render(<LiveCasesPanel />));
   await resolve(pendingFor('/api/hospitals/mine')[0], { id: 1, name: 'General' });
