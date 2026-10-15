@@ -384,9 +384,11 @@ const LiveCasesPanel = () => {
           <details className="w-full text-xs text-gray-600">
             <summary className="cursor-pointer text-gray-500">How this order is set</summary>
             <p className="mt-1">
-              Order ({queue.rule_version}): {queue.rule} AI suggestions come from a language model reading the
-              crew&apos;s reports; they are not validated on real EMS audio. Check each one against the quotes and
-              missing items in the handoff.
+              {autoOrder
+                ? `Order (${queue.rule_version}): ${queue.rule}`
+                : `Your team set this order with the arrows; new cases appear on top. Auto-order would use ${queue.rule_version}: ${queue.rule}`}
+              {' '}AI suggestions come from a language model reading the crew&apos;s reports; they are not
+              validated on real EMS audio. Check each one against the quotes and missing items in the handoff.
             </p>
           </details>
         </div>
@@ -435,7 +437,7 @@ const LiveCasesPanel = () => {
                     {' · '}
                     <button onClick={() => downloadFhir(selected.id)} className="text-blue-700 underline"
                             title="The handoff as a FHIR R4 Bundle for the hospital's record system: each extracted fact with the report it quotes">
-                      Export FHIR
+                      Download for the EHR (FHIR R4)
                     </button>
                   </p>
                 </div>

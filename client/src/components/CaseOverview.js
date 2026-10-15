@@ -100,11 +100,20 @@ const SourceIcon = ({ source }) => (source === 'radio'
   ? <Radio className="inline h-3 w-3 ml-0.5 text-gray-400" aria-label="from the radio" />
   : <Keyboard className="inline h-3 w-3 ml-0.5 text-gray-400" aria-label="typed" />);
 
+const latestOf = (row) => row.readings[row.readings.length - 1];
+
+// "SpO2 89 % (on room air)": a number never travels without its unit and the conditions it was taken in.
+const latestReading = (row) => {
+  const latest = latestOf(row);
+  return `${row.label} ${latest.value}${row.unit ? ` ${row.unit}` : ''}${latest.qualifier ? ` (${latest.qualifier})` : ''}`;
+};
+
 /**
- * Collapsed to the latest value of each sign; open it for one row per sign, oldest value first,
- * each marked with where it came from (hover for the words).
+ * Folded to the latest reading of each sign; open it for one row per sign, oldest value first,
+ * each marked with where it came from (hover for the words). startOpen: the hospital reads how
+ * the numbers moved, so it starts open; the crew's own screen starts folded.
  */
-const VitalsTrend = ({ vitals, spoken, isNew }) => {
+const VitalsTrend = ({ vitals, spoken, isNew, startOpen }) => {
   const rows = buildVitalRows(vitals, spoken);
   if (rows.length === 0) {
     return (
@@ -114,14 +123,13 @@ const VitalsTrend = ({ vitals, spoken, isNew }) => {
       </>
     );
   }
-  const latest = (row) => row.readings[row.readings.length - 1];
   const anyNew = rows.some((row) => row.readings.some((r) => isNew(r.version)));
   return (
-    <details className="group">
+    <details className="group" open={startOpen}>
       <summary className="cursor-pointer text-sm">
         <span className="font-semibold text-gray-700">Vitals</span>
         <span className="text-gray-900 group-open:hidden">
-          {' '}{rows.map((row) => `${row.label} ${latest(row).value}`).join(' · ')}
+          {' '}{rows.map(latestReading).join(' · ')}
         </span>
         {anyNew && <NewTag />}
       </summary>
@@ -145,7 +153,7 @@ const VitalsTrend = ({ vitals, spoken, isNew }) => {
                   </React.Fragment>
                 ))}
               </td>
-              <td className="py-0.5 text-xs text-gray-500 align-top">{formatTime(latest(row).at)}</td>
+              <td className="py-0.5 text-xs text-gray-500 align-top">{formatTime(latestOf(row).at)}</td>
             </tr>
           ))}
         </tbody>
@@ -317,7 +325,7 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <VitalsTrend vitals={vitals} spoken={findings?.vitals || []} isNew={isNew} />
+          <VitalsTrend vitals={vitals} spoken={findings?.vitals || []} isNew={isNew} startOpen={markNew} />
         </div>
         <div>
           <h4 className="text-sm font-semibold text-gray-700 mb-1">
