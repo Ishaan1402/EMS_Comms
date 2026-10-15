@@ -23,7 +23,6 @@ const KNOWN = {
   'components/CaseOverview.js': ['native <details> accordion', 'monospace type', 'all-caps label',
     'amber, yellow or orange background or border'],
   'components/CaseUpdateForm.js': ['native <details> accordion'],
-  'components/HospitalWorkflowSettings.js': ['native <details> accordion'],
   'components/LiveCaseRecorder.js': ['emoji or glyph used as an icon'],
   'components/LiveTranscript.js': ['monospace type'],
 };

@@ -9,6 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
 
+from backend import case_queue
 from backend.database import get_db, query, utc_now_iso
 from backend.middleware.auth import APIError, require_role
 from backend.realtime import broker
@@ -73,6 +74,7 @@ async def get_config(current_user: dict = Depends(require_role(["doctor"]))):
     hospital_id = own_hospital(current_user)
     settings = queue_settings(hospital_id)
     return {"queue_mode": settings["queue_mode"], "auto_order": settings["auto_order"],
+            "rules": {"standard": case_queue.QUEUE_RULE, "ai_assisted": case_queue.AI_ASSISTED_RULE},
             "risk_fields": risk_fields(hospital_id)}
 
 

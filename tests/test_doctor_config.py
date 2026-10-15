@@ -119,6 +119,15 @@ def test_queue_mode_is_standard_until_chosen_and_is_per_hospital():
     assert set_mode("standard").status_code == 200 and queue()["queue_mode"] == "standard"
 
 
+def test_the_settings_page_gets_the_rule_text_with_the_mode_and_the_fields():
+    config = client.get("/api/hospitals/mine/config", headers=auth()).json()
+    assert config["queue_mode"] == "standard"
+    assert config["rules"]["standard"].startswith("Unacknowledged information")
+    assert "AI's suggested category" in config["rules"]["ai_assisted"]
+    assert config["risk_fields"] == []
+    assert client.get("/api/hospitals/mine/config", headers=auth("emt.wilson")).status_code == 403
+
+
 def test_queue_mode_is_validated_and_only_doctors_can_change_it():
     for bad in ("ai", "", None, ["ai_assisted"], True, 1):
         response = client.put("/api/hospitals/mine/queue-mode", headers=auth(), json={"mode": bad})

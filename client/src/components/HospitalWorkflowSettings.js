@@ -43,18 +43,15 @@ export default function HospitalWorkflowSettings({ hospital, onChange }) {
   };
 
   return (
-    <details className="px-6 py-2 border-b border-gray-200 text-sm text-gray-700">
-      <summary className="cursor-pointer">Arrival highlight · {hospital.arrival_highlight_minutes} min</summary>
-      <form onSubmit={save} className="flex flex-wrap items-center gap-2 py-2">
-        <label htmlFor={id}>Highlight arrivals within</label>
-        <input id={id} type="number" min="1" max="60" step="1" required value={minutes}
-          onChange={(event) => setMinutes(event.target.value)} disabled={saving}
-          className="w-20 px-2 py-1 border border-gray-300 rounded" />
-        <span>minutes</span>
-        <button type="submit" disabled={saving || Number(minutes) === hospital.arrival_highlight_minutes}
-          className="px-3 py-1 text-white bg-blue-700 rounded disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
-        {message && <p role="status" className="w-full">{message}</p>}
-      </form>
-    </details>
+    <form onSubmit={save} className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+      <label htmlFor={id}>Highlight arrivals within</label>
+      <input id={id} type="number" min="1" max="60" step="1" required value={minutes}
+        onChange={(event) => setMinutes(event.target.value)} disabled={saving}
+        className="w-20 rounded-lg border border-gray-300 px-3 py-1.5 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600" />
+      <span>minutes</span>
+      <button type="submit" disabled={saving || Number(minutes) === hospital.arrival_highlight_minutes}
+        className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
+      {message && <p role="status" className="w-full">{message}</p>}
+    </form>
   );
 }
