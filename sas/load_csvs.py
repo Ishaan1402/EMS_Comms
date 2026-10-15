@@ -1,7 +1,7 @@
 """Load the app's tables into CAS as yourself, from Jupyter in SAS Viya.
 
 Use this until the app's own login (OAuth client app.inthebud) may write to CAS. It creates the
-same tables, with the same column types and formats, that sas_sync.py pushes, so a dashboard built
+same tables, with the same column types and formats, that backend/sas_sync.py pushes, so a dashboard built
 on them keeps working when the live push takes over.
 
 1. On your laptop, in the repo:   python -m backend.sas_sync csv sas_export/
