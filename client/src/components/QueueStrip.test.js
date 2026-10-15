@@ -55,24 +55,47 @@ test('the settings stay in the page while closed, and open from the Settings but
   const settings = container.querySelector('#queue-settings');
   expect(settings.hidden).toBe(true);
   expect(container.textContent).toContain('Arrival highlight · 5 min');
-  click(button('Queue settings'));
+  click(button('Settings'));
   expect(settings.hidden).toBe(false);
-  expect(button('Queue settings').getAttribute('aria-expanded')).toBe('true');
-  click(button('Queue settings'));
+  expect(button('Settings').getAttribute('aria-expanded')).toBe('true');
+  click(button('Settings'));
   expect(settings.hidden).toBe(true);
+});
+
+test('the custom risk fields are a visible section of Settings, listed with their add form, ahead of the arrival highlight', () => {
+  const fields = [{ id: 1, label: 'On blood thinners', kind: 'yes_no' }, { id: 2, label: 'Frailty score', kind: 'number' }];
+  render({ riskFields: fields });
+  const settings = container.querySelector('#queue-settings');
+  const section = [...settings.querySelectorAll('section')].find((x) => x.textContent.includes('Custom risk fields'));
+  expect(section.closest('details')).toBeNull();            // not folded away inside a second collapsible
+  expect(section.querySelector('h4').textContent).toBe('Custom risk fields (2)');
+  expect(section.textContent).toContain('On blood thinners');
+  expect(section.textContent).toContain('Frailty score');
+  expect(section.querySelector('input[placeholder="e.g. On blood thinners"]')).not.toBeNull();
+  expect(section.querySelector('button[type="submit"]').textContent).toBe('Add field');
+  expect(section.textContent).toContain('They never change the queue order');
+  expect(settings.textContent.indexOf('Custom risk fields')).toBeLessThan(settings.textContent.indexOf('Arrival highlight'));
+});
+
+test('with no custom fields the section says so and still offers to add one', () => {
+  render();
+  const section = container.querySelector('#queue-settings section');
+  expect(section.querySelector('h4').textContent).toBe('Custom risk fields');
+  expect(section.textContent).toContain('None yet.');
+  expect(section.querySelector('form')).not.toBeNull();
 });
 
 test('an unsaved arrival-highlight draft survives opening and closing the settings', () => {
   render();
-  click(button('Queue settings'));
+  click(button('Settings'));
   const input = () => container.querySelector('input[type="number"]');
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input(), '15');
     input().dispatchEvent(new Event('input', { bubbles: true }));
   });
   expect(input().value).toBe('15');
-  click(button('Queue settings'));
-  click(button('Queue settings'));
+  click(button('Settings'));
+  click(button('Settings'));
   expect(input().value).toBe('15');
 });
 
@@ -80,6 +103,6 @@ test('without a linked hospital or counts there is nothing to show; without coun
   render({ hospital: null, queue: queue({ counts: null }) });
   expect(container.textContent).toBe('');
   render({ queue: queue({ counts: null }) });
-  expect(container.textContent).toContain('Queue settings');
+  expect(container.textContent).toContain('Settings');
   expect(container.textContent).not.toContain('inbound');
 });

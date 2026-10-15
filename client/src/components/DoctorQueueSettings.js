@@ -37,33 +37,35 @@ export function RiskFieldSettings({ fields }) {
   };
 
   return (
-    <details>
-      <summary className="cursor-pointer">Risk fields · {fields.length}</summary>
-      <div className="py-2 space-y-2">
-        {fields.length === 0 && <p className="text-gray-500">No custom risk fields yet. Fields you add show on every case.</p>}
-        <div className="space-y-1">
-          {fields.map((field) => (
-            <div key={field.id} className="flex items-center gap-2">
-              <span>{field.label}</span>
-              <span className="text-xs text-gray-500">{KIND_LABELS[field.kind]}</span>
-              <button type="button" onClick={() => remove(field)} className="text-xs text-red-700 underline">Remove</button>
-            </div>
-          ))}
-        </div>
-        <form onSubmit={add} className="flex flex-wrap items-center gap-2">
-          <label htmlFor={id} className="sr-only">Field name</label>
-          <input id={id} value={label} onChange={(event) => setLabel(event.target.value)} maxLength={40} required
-            placeholder="e.g. On blood thinners" disabled={saving}
-            className="w-56 px-2 py-1 border border-gray-300 rounded" />
-          <select value={kind} onChange={(event) => setKind(event.target.value)} disabled={saving}
-            aria-label="Field type" className="px-2 py-1 border border-gray-300 rounded">
-            {Object.entries(KIND_LABELS).map(([value, text]) => <option key={value} value={value}>{text}</option>)}
-          </select>
-          <button type="submit" disabled={saving || !label.trim()}
-            className="px-3 py-1 text-white bg-blue-700 rounded disabled:opacity-50">Add field</button>
-        </form>
+    <section className="space-y-2">
+      <SectionLabel as="h4">Custom risk fields{fields.length > 0 && ` (${fields.length})`}</SectionLabel>
+      <p className="text-gray-600">
+        Your own yes/no, number or short-text fields (up to 10). They show on every case, under the vitals, for your
+        doctors to fill in. They never change the queue order.
+      </p>
+      {fields.length === 0 && <p className="text-gray-500">None yet.</p>}
+      <div className="space-y-1">
+        {fields.map((field) => (
+          <div key={field.id} className="flex items-center gap-2">
+            <span>{field.label}</span>
+            <span className="text-xs text-gray-500">{KIND_LABELS[field.kind]}</span>
+            <button type="button" onClick={() => remove(field)} className="text-xs text-red-700 underline">Remove</button>
+          </div>
+        ))}
       </div>
-    </details>
+      <form onSubmit={add} className="flex flex-wrap items-center gap-2">
+        <label htmlFor={id} className="sr-only">Field name</label>
+        <input id={id} value={label} onChange={(event) => setLabel(event.target.value)} maxLength={40} required
+          placeholder="e.g. On blood thinners" disabled={saving}
+          className="w-56 px-2 py-1 border border-gray-300 rounded" />
+        <select value={kind} onChange={(event) => setKind(event.target.value)} disabled={saving}
+          aria-label="Field type" className="px-2 py-1 border border-gray-300 rounded">
+          {Object.entries(KIND_LABELS).map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+        </select>
+        <button type="submit" disabled={saving || !label.trim()}
+          className="px-3 py-1 text-white bg-blue-700 rounded disabled:opacity-50">Add field</button>
+      </form>
+    </section>
   );
 }
 
@@ -107,7 +109,7 @@ export function CaseRiskFields({ caseId, fields, liveValues }) {
 
   return (
     <div className="p-3 border border-gray-200 rounded-lg">
-      <SectionLabel className="mb-2">Risk fields</SectionLabel>
+      <SectionLabel className="mb-2">Custom risk fields</SectionLabel>
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
         {fields.map((field) => (
           <div key={field.id} className="flex items-center gap-2">
