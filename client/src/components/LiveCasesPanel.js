@@ -11,6 +11,7 @@ import CaseOverview, { CategoryBadge, OperationalBadge, ProcessingBadge, Reporti
 import CaseChat from './CaseChat';
 import HospitalWorkflowSettings, { ArrivalHighlight } from './HospitalWorkflowSettings';
 import { CrewAlertBadges, CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
+import DoctorQueueSettings, { CaseRiskFields, MoveButtons } from './DoctorQueueSettings';
 
 // An open case with no new audio for this long is shown as idle instead of LIVE.
 const IDLE_AFTER_MS = 2 * 60 * 1000;
@@ -76,11 +77,12 @@ const CaseStatusBadge = ({ liveCase, serverNow }) => {
   return <span className="px-2 py-0.5 text-xs font-bold text-white bg-red-600 rounded-full animate-pulse">LIVE</span>;
 };
 
-const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, arrivalMinutes }) => (
-  <li>
+const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, arrivalMinutes, moveButtons }) => (
+  <li className="flex">
+    {moveButtons}
     <button
       onClick={() => onSelect(c.id)}
-      className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-blue-50 transition-colors ${selected ? 'bg-blue-50' : ''} ${move && move.to < move.from ? 'ring-2 ring-inset ring-amber-300' : ''}`}
+      className={`flex-1 min-w-0 text-left px-4 py-3 border-b border-gray-100 hover:bg-blue-50 transition-colors ${selected ? 'bg-blue-50' : ''} ${move && move.to < move.from ? 'ring-2 ring-inset ring-amber-300' : ''}`}
     >
       <div className="flex items-start justify-between gap-2 mb-1">
         <span className="flex flex-wrap items-baseline gap-x-2 text-gray-900">
@@ -115,7 +117,8 @@ const CaseListItem = ({ liveCase: c, selected, onSelect, unseen, serverNow, move
       )}
       {c.queue_reasons && (
         <p className="text-xs text-gray-600 mt-0.5 truncate" title={c.queue_reasons.join(' · ')}>
-          Why here: {c.queue_reasons.join(' · ')}
+          {c.suggested_position ? `Auto-order would put it #${c.suggested_position}: ` : 'Why here: '}
+          {c.queue_reasons.join(' · ')}
         </p>
       )}
       <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
@@ -172,6 +175,9 @@ const LiveCasesPanel = () => {
   const positions = useRef(null);
   // Overlapping fetches can be answered out of order: keep the snapshot with the latest server as_of.
   const queueAsOf = useRef('');
+  // Doctors' own settings (DoctorQueueSettings): the risk fields, and the latest live risk values.
+  const [riskFields, setRiskFields] = useState([]);
+  const [liveRiskValues, setLiveRiskValues] = useState(null);
 
   const fetchQueue = useCallback(async () => {
     try {
@@ -208,6 +214,14 @@ const LiveCasesPanel = () => {
   useEffect(() => {
     fetchHospital();
   }, [fetchHospital]);
+
+  const hospitalId = hospital?.id;
+  const fetchConfig = useCallback(() => {
+    if (!hospitalId) return;
+    axios.get('/api/hospitals/mine/config').then((response) => setRiskFields(response.data.risk_fields))
+      .catch(() => toast.error('Could not load risk fields'));
+  }, [hospitalId]);
+  useEffect(() => { fetchConfig(); }, [fetchConfig]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 15000);
@@ -251,6 +265,7 @@ const LiveCasesPanel = () => {
     if (type === 'ready') {
       setClockOffsetMs(Date.parse(data.server_time) - Date.now());
       fetchHospital();
+      fetchConfig();
       fetchCases();
       fetchQueue();
       if (selectedRef.current) {
@@ -260,6 +275,12 @@ const LiveCasesPanel = () => {
       }
     } else if (type === 'hospital.updated') {
       applyHospital(data.hospital);
+    } else if (type === 'queue.reordered') {
+      refreshQueueSoon();
+    } else if (type === 'risk_fields.updated') {
+      setRiskFields(data.risk_fields);
+    } else if (type === 'risk_values.updated') {
+      setLiveRiskValues(data);
     } else if (type === 'update.created') {
       addCaseUpdate(data.update);
     } else if (type === 'findings.updated') {
@@ -280,7 +301,7 @@ const LiveCasesPanel = () => {
       }
     }
   }, [fetchCases, fetchQueue, refreshQueueSoon, fetchSegments, addCaseUpdate, reloadUpdates, applyFindings,
-    reloadFindings, fetchHospital, applyHospital]);
+    reloadFindings, fetchHospital, applyHospital, fetchConfig]);
 
   const connection = useCaseEvents(handleEvent);
   const byId = useMemo(() => new Map(cases.map((c) => [c.id, c])), [cases]);
@@ -291,6 +312,19 @@ const LiveCasesPanel = () => {
   const others = newestFirst(cases.filter((c) => !queuedIds.has(c.id)));
   const selected = byId.get(selectedId) || queued.find((c) => c.id === selectedId);
   const serverNow = now + clockOffsetMs;
+  const autoOrder = queue.auto_order !== false;
+
+  // Auto-order off: swap a row with its neighbour and save the whole order for the hospital.
+  const moveCase = async (index, step) => {
+    const ids = queued.map((c) => c.id);
+    [ids[index], ids[index + step]] = [ids[index + step], ids[index]];
+    try {
+      await axios.put('/api/hospitals/mine/doctor-order', { case_ids: ids });
+      fetchQueue();
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Could not move the case');
+    }
+  };
 
   const dismissSegment = async (segment) => {
     try {
@@ -334,6 +368,9 @@ const LiveCasesPanel = () => {
       </div>
 
       {hospital?.settings_version && <HospitalWorkflowSettings hospital={hospital} onChange={applyHospital} />}
+      {hospital?.id && queue.counts && (
+        <DoctorQueueSettings autoOrder={autoOrder} riskFields={riskFields} onAutoOrderChange={fetchQueue} />
+      )}
 
       {queue.counts && (
         <div className="px-6 py-3 border-b border-gray-200 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
@@ -364,10 +401,14 @@ const LiveCasesPanel = () => {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-5">
           <ul className="lg:col-span-2 border-r border-gray-200 max-h-[48rem] overflow-y-auto">
-            {queued.map((c) => (
+            {queued.map((c, index) => (
               <CaseListItem key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
                             unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
-                            arrivalMinutes={hospital?.arrival_highlight_minutes} />
+                            arrivalMinutes={hospital?.arrival_highlight_minutes}
+                            moveButtons={!autoOrder && (
+                              <MoveButtons first={index === 0} last={index === queued.length - 1}
+                                           onMove={(step) => moveCase(index, step)} />
+                            )} />
             ))}
             {others.length > 0 && (
               <li className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-100">
@@ -418,6 +459,7 @@ const LiveCasesPanel = () => {
                     )}
                   </div>
                 )}
+                <CaseRiskFields caseId={selected.id} fields={riskFields} liveValues={liveRiskValues} />
                 <CrewAlertPanel liveCase={selected} serverNow={serverNow}
                                 onChanged={(c) => { setCases((list) => upsertNewer(list, c)); refreshQueueSoon(); }} />
                 <div className="mb-6">

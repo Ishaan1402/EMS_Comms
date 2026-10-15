@@ -413,6 +413,41 @@ def init_database():
       FOREIGN KEY (user_id) REFERENCES users (id)
     );
 
+    -- How a hospital's doctors want the queue ordered (doctor_config.py). auto_order = 1 shows the
+    -- server's rule (case_queue.py); 0 shows doctor_order, a JSON list of case ids the doctors set.
+    CREATE TABLE IF NOT EXISTS hospital_queue_settings (
+      hospital_id INTEGER PRIMARY KEY,
+      auto_order INTEGER NOT NULL DEFAULT 1,
+      doctor_order TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT,
+      FOREIGN KEY (hospital_id) REFERENCES hospitals (id)
+    );
+
+    -- Risk fields a hospital's doctors add for themselves (doctor_config.py). Removing one hides it;
+    -- the values already recorded against it stay.
+    CREATE TABLE IF NOT EXISTS hospital_risk_fields (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hospital_id INTEGER NOT NULL,
+      label TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('yes_no', 'number', 'text')),
+      created_at TEXT NOT NULL,
+      removed_at TEXT,
+      FOREIGN KEY (hospital_id) REFERENCES hospitals (id)
+    );
+
+    -- A doctor's value for one risk field on one case; the latest write wins.
+    CREATE TABLE IF NOT EXISTS case_risk_values (
+      case_id INTEGER NOT NULL,
+      field_id INTEGER NOT NULL,
+      value TEXT,
+      updated_by INTEGER NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (case_id, field_id),
+      FOREIGN KEY (case_id) REFERENCES cases (id),
+      FOREIGN KEY (field_id) REFERENCES hospital_risk_fields (id),
+      FOREIGN KEY (updated_by) REFERENCES users (id)
+    );
+
     """ + MESSAGES_TABLE.format(name="messages") + """;
 
     -- Create indexes for better performance
