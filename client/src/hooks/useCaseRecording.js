@@ -9,15 +9,15 @@ export default function useCaseRecording({ caseRef, nextSeqRef, uploads, onError
   const status = caseRef.current?.status;
   const arrivedAt = caseRef.current?.arrived_at;
   const recorder = useSegmentRecorder({
-    onSegment: ({ blob, recordedAt, durationMs }) => {
+    onSegment: ({ blob, recordedAt, durationMs, isPreview = false }) => {
       const session = owner.current;
       if (!session) return;
       // Another device or a replay can add clips during this recording.
       const seq = Math.max(session.nextSeq, caseRef.current?.id === session.caseId ? nextSeqRef.current : 0);
       session.nextSeq = seq + 1;
       if (caseRef.current?.id === session.caseId) nextSeqRef.current = session.nextSeq;
-      session.report.clips += 1;
-      uploads.enqueue({ caseId: session.caseId, seq, report_id: session.report.id,
+      if (!isPreview) session.report.clips += 1;
+      uploads.enqueue({ caseId: session.caseId, seq, report_id: session.report.id, is_preview: isPreview,
         recorded_at: recordedAt, duration_ms: durationMs, blob });
     },
     onError,

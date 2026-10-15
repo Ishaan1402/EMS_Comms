@@ -365,3 +365,17 @@ test('a rejected upload stays visible beside a different server clip with the sa
   expect(container.textContent).toContain('Report for patient 1');
   expect(container.textContent).toContain('Upload failed');
 });
+
+test('live draft clips keep their report but do not count toward Send completion', async () => {
+  await startMicrophoneReport();
+  act(() => {
+    mockOnSegment({ blob: new Blob(['draft one']), recordedAt: at(1), durationMs: 8000, isPreview: true });
+    mockOnSegment({ blob: new Blob(['draft two']), recordedAt: at(9), durationMs: 8000, isPreview: true });
+  });
+  await click('Send Report');
+  const entries = mockEnqueue.mock.calls.map(([item]) => item);
+  expect(entries.map((item) => item.is_preview)).toEqual([true, true, false]);
+  expect(new Set(entries.map((item) => item.report_id)).size).toBe(1);
+  expect(entries.map((item) => item.seq)).toEqual([1, 2, 3]);
+  expect(mockPosts.filter((r) => r.url.includes('/reports/')).map((r) => r.body)).toEqual([{ clips: 1 }]);
+});

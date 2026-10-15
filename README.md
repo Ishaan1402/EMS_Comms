@@ -83,7 +83,7 @@ cd client && CI=true npm test -- --watchAll=false --runInBand      # frontend
 ## How it works
 
 1. **The EMT opens a case:** the destination hospital, the unit, an ETA and a short summary.
-2. **The crew talks or types.** The browser records one intact report (up to two minutes). Send uploads it for transcription; the hospital sees the transcript as soon as it is ready. Typed notes, vitals, corrections and ETA changes go in as updates.
+2. **The crew talks or types.** The hospital sees live draft words while the crew records a report (up to two minutes). Send uploads the uninterrupted recording for the completed transcript and AI handoff. Typed notes, vitals, corrections and ETA changes go in as updates.
 3. **Each new piece of patient information gets a version number.** The AI writes a short handoff that compares it with what the hospital last acknowledged. A separate step pulls out vitals, findings and treatments, each quoting the words it came from.
 4. **The hospital** sees its inbound patients in an order set by a stated rule, acknowledges what it has seen, and can message the crew.
 5. **Nothing is overwritten:** a correction is a new row. Case data can be exported to SAS Viya without any free text.
@@ -92,15 +92,18 @@ A real-model run on Oct 11 measured, on the server, about 1 s from a clip arrivi
 
 ### Live case transcription
 
-The EMT records one report at a time (Record Report, then Send Report). A single MediaRecorder keeps the report intact: it is uploaded and transcribed as one complete file (`OPENAI_TRANSCRIPTION_MODEL`). This avoids cutting a spoken number across separate transcription calls. It does not establish speech accuracy; check the transcript and correct it when needed. Each report is timestamped, stored under its case, and pushed to the hospital when uploaded and when its transcript is ready. The two-minute limit stops recording and asks the crew to Send; it never silently begins another cut. Audio awaiting upload is kept in this page's memory, so keep the page open until delivery completes.
+The EMT records one report at a time (Record Report, then Send Report). The hospital sees draft transcripts from roughly eight-second clips as the crew speaks. Those words are labelled **Live draft** and may change on Send. At the same time, one uninterrupted MediaRecorder captures the complete report. Send uploads that recording for a fresh transcription (`OPENAI_TRANSCRIPTION_MODEL`); only this completed transcript enters the AI handoff, extraction, acknowledgment and FHIR export. The completed transcript replaces drafts in the normal view; the earlier drafts remain available for inspection.
+
+This keeps early visibility while avoiding fixed audio cuts in the transcript used by the AI. It does not establish speech accuracy; check the transcript and correct it when needed. The two-minute limit stops recording and asks the crew to Send. Typed updates and crew alerts remain immediate. Complete audio awaiting upload stays in this page's memory: keep the page open until delivery completes. Draft uploads are best effort and cannot block the complete recording.
 
 - **Storage:** the `cases` and `transcript_segments` tables. An EMT can have only one open case at a time.
   - A clip's `seq` is assigned by the client, is unique per case, and sets the order.
   - Its `client_id` identifies the recording. Re-uploading the same clip returns the stored row; a different clip that reuses a taken `seq` gets a 409.
   - `recorded_at` is when the EMT started recording, corrected to the server clock using the upload's `sent_at`.
   - Every row has an `updated_at`, and clients keep the newest version of each row, so a slow fetch never overwrites a newer pushed update.
+  - `is_preview=1` identifies a live draft. It never receives an information version or supplies model inputs. SAS event details identify these as live drafts.
   - Audio is saved under `private_uploads/` with random file names and is never served over HTTP.
-- **Reports** (`case_reports.py`): the clips between Record Report and Send Report form one report, and `POST /api/cases/:id/reports/:report_id/end` with the clip count closes it. Older multi-clip clients and the replay can still show "Reporting…" with unsent words dimmed; new microphone reports appear after Send; the case gets new information (and a new AI handoff) once per sent report, once all its audio is transcribed. A failed Send remains visible and can be retried with the same report id and clip count. The send may arrive before its clips, sending twice is harmless, and closing the case or marking arrival ends an unsent report. A clip uploaded without a report id is a report of its own.
+- **Reports** (`case_reports.py`): the clips between Record Report and Send Report form one report, and `POST /api/cases/:id/reports/:report_id/end` with the non-draft clip count closes it (normally one for a microphone report). The case gets new information and a new AI handoff once the sent report is transcribed. Older multi-clip clients and the replay still show "Reporting…" until their report completes. A failed Send remains visible and can be retried with the same report id and clip count. The send may arrive before its clips, sending twice is harmless, and closing the case or marking arrival ends an unsent report. A clip uploaded without a report id is a report of its own.
 - **Push:** Server-Sent Events at `GET /api/cases/events`, authenticated with the normal `Authorization: Bearer` header.
   - Hospital users receive the cases routed to their hospital; EMTs receive only their own.
   - Each (re)connect starts with a `ready` event, and clients re-fetch state at that point, because events sent while a client is disconnected aren't replayed.
@@ -111,7 +114,7 @@ The EMT records one report at a time (Record Report, then Send Report). A single
   - Timeouts, network errors, rate limits and 5xx responses are retried once on the server. After that, the clip is marked `failed` with a short reason, which both dashboards show. The EMT can retry it, and either side can mark it handled.
   - Clips still pending after 20 s are flagged as delayed. An open case with no audio for 2 minutes stops showing as LIVE.
   - The EMT client retries failed uploads with backoff and keeps the audio in the open page until it's accepted; a page reload loses audio that wasn't uploaded.
-  - If a page refresh leaves a case open, the EMT can resume recording or end the case.
+  - If only drafts reached the server before a refresh, arrival or closure, the case shows that the complete audio is missing. The draft is never silently treated as a completed report; re-record or send a typed update, then mark the failure handled.
 
 ### Cases: one per patient transport
 

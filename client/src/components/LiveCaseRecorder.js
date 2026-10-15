@@ -446,7 +446,7 @@ const LiveCaseRecorder = () => {
           {!busyMessage && recorder.isRecording && (
             <>
               <span className="flex items-center gap-2 text-red-600 animate-pulse">
-                <span className="h-2 w-2 rounded-full bg-red-600" /> Recording report — tap Send when finished (up to 2 minutes)
+                <span className="h-2 w-2 rounded-full bg-red-600" /> Recording — live words are a draft. Send the complete report when finished (up to 2 minutes)
               </span>
               <button
                 onClick={sendReport}
@@ -516,7 +516,7 @@ const LiveCaseRecorder = () => {
             caseStartedAt={activeCase.started_at}
             onRetry={isOpen ? retry : undefined}
             onDismiss={dismissSegment}
-            emptyText={recorder.isRecording ? 'Recording on this device. The hospital receives the transcript after Send.' : 'No transcript yet.'}
+            emptyText={recorder.isRecording ? 'Listening… live draft words arrive as you speak. Send delivers the complete report.' : 'No transcript yet.'}
           />
         </div>
       )}

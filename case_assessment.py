@@ -329,7 +329,7 @@ def get_assessment(assessment_id: int) -> Optional[dict]:
 
 
 def transcription_in_flight(case_id: int) -> bool:
-    return bool(query("SELECT 1 FROM transcript_segments WHERE case_id = ? AND status = 'pending' LIMIT 1",
+    return bool(query("SELECT 1 FROM transcript_segments WHERE case_id = ? AND is_preview = 0 AND status = 'pending' LIMIT 1",
                       (case_id,)))
 
 

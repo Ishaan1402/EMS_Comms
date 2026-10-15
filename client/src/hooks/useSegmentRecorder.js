@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import startLivePreview from '../utils/livePreviewRecorder';
 
 const MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
 export const MAX_REPORT_MS = 120000;
@@ -12,7 +13,8 @@ export const getMicrophone = () =>
  * One uninterrupted MediaRecorder per report. Its timeslice chunks share an encoder and
  * headers, so they are assembled into one complete file and uploaded only on Send.
  * Cutting into independently transcribed files can split a spoken number.
- * onSegment fires once, including when the microphone or the page closes.
+ * A separate preview recorder supplies live draft clips. Only the uninterrupted recording
+ * becomes a complete report for the AI; onSegment marks previews with isPreview.
  */
 export default function useSegmentRecorder({ onSegment, onError }) {
   const [isRecording, setIsRecording] = useState(false);
@@ -24,6 +26,7 @@ export default function useSegmentRecorder({ onSegment, onError }) {
     const current = session.current;
     if (!current) return Promise.resolve();
     clearTimeout(current.timer);
+    current.preview?.stop();
     if (current.recorder.state === 'recording') current.recorder.stop();
     return current.finished;
   };
@@ -44,14 +47,16 @@ export default function useSegmentRecorder({ onSegment, onError }) {
       current.resolve();
     };
     try {
-      const recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 128000 });
+      const options = { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 128000 };
+      const recorder = new MediaRecorder(stream, options);
       current.recorder = recorder;
       recorder.ondataavailable = (event) => {
         if (event.data.size) current.chunks.push(event.data);
       };
       recorder.onerror = () => callbacks.current.onError('Recording error — send the captured audio or record again');
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         try {
+          await current.preview?.stop();
           const blob = new Blob(current.chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });
           if (blob.size) callbacks.current.onSegment({ blob, recordedAt: current.startedAt.toISOString(),
             durationMs: Date.now() - current.startedAt.getTime() });
@@ -61,6 +66,8 @@ export default function useSegmentRecorder({ onSegment, onError }) {
       };
       session.current = current;
       recorder.start(1000);
+      current.preview = startLivePreview(stream, options,
+        (clip) => callbacks.current.onSegment(clip), (message) => callbacks.current.onError(message));
       setIsRecording(true);
       current.timer = setTimeout(() => {
         callbacks.current.onError('Two-minute limit reached. Send this report before recording more.');
@@ -79,6 +86,7 @@ export default function useSegmentRecorder({ onSegment, onError }) {
     const current = session.current;
     if (!current) return;
     clearTimeout(current.timer);
+    current.preview?.stop();
     if (current.recorder.state === 'recording') current.recorder.stop();
     current.stream.getTracks().forEach((track) => track.stop());
   }, []);
