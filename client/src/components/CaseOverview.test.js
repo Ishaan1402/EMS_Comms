@@ -111,10 +111,12 @@ test('in the vitals trend the latest reading stands out, earlier ones are muted,
   };
   act(() => root.render(<CaseOverview liveCase={inbound()} {...readings} markNew />));
   const cell = [...vitalsBody().querySelectorAll('td')].find((td) => td.textContent.includes('118/76'));
-  const [earlier, latest] = [...cell.querySelectorAll(':scope > span[title]')];
-  expect(earlier.textContent).toBe('118/76');
+  const [earlier, latest] = [...cell.querySelectorAll(':scope > span[aria-describedby]')];
+  expect(earlier.firstChild.textContent).toBe('118/76');
   expect(earlier.className).toContain('text-gray-500');
-  expect(latest.textContent).toBe('100/64');
+  expect(latest.firstChild.textContent).toBe('100/64');
+  // Hovering or focusing a reading shows where it came from, right away.
+  expect(document.getElementById(latest.getAttribute('aria-describedby')).textContent).toMatch(/^Typed by the crew at /);
   expect(latest.className).toContain('font-semibold');
   expect(cell.querySelectorAll('svg')).toHaveLength(1);
   expect(latest.querySelector('svg')).not.toBeNull();
@@ -160,9 +162,10 @@ test('the handoff says what changed and what is missing as two plain rows, not a
   expect(row('Change unclear')).toBeDefined();
 });
 
-test('the handoff carries the AI disclosure beside the AI\'s words', () => {
-  act(() => root.render(<CaseOverview liveCase={inbound({ current_assessment: { summary: 'Calm.', completed_at: '2026-10-13T15:00:00Z' } })} />));
-  expect(container.textContent).toContain("AI-written from the crew's reports, not validated on real EMS audio");
+test('no small "AI-written" or "AI-extracted" notes: the handoff says only when it was assessed', () => {
+  act(() => root.render(<CaseOverview liveCase={inbound({ current_assessment: { summary: 'Calm.', completed_at: '2026-10-13T15:00:00Z' } })}
+    {...reported} />));
+  expect(container.textContent).not.toMatch(/AI-written|AI-extracted|not validated/);
   expect(container.textContent).toContain('Assessed at');
 });
 

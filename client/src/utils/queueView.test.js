@@ -21,10 +21,10 @@ test('each filter keeps exactly the cases its count describes', () => {
     c(6),
   ];
   expect(ids(applyQueueView(cases, view('all'), ctx))).toEqual([1, 2, 3, 4, 5, 6]);
+  expect(Object.keys(FILTERS)).not.toContain('prepareNow');   // the AI's label is not a filter
   expect(ids(applyQueueView(cases, view('needsReview'), ctx))).toEqual([1]);
   expect(ids(applyQueueView(cases, view('unacknowledged'), ctx))).toEqual([2]);
   expect(ids(applyQueueView(cases, view('crewAlerts'), ctx))).toEqual([3]);
-  expect(ids(applyQueueView(cases, view('prepareNow'), ctx))).toEqual([4]);
   expect(ids(applyQueueView(cases, view('arrivingSoon'), ctx))).toEqual([5]);
 });
 
@@ -33,7 +33,7 @@ test('the counts are over the whole queue and use the server\'s definitions (cas
   const cases = [c(1, { latest_update_acknowledged: false, preparation_category: 'Prepare now' }),
     c(2, { crew_alerts: { active: [{ alert: 'sepsis' }], unacknowledged: true } }), c(3, { processing: { needs_review: true } })];
   expect(viewCounts(cases, ctx)).toEqual({
-    inbound: 3, needsReview: 1, unacknowledged: 1, crewAlerts: 1, prepareNow: 1, arrivingSoon: 0 });
+    inbound: 3, needsReview: 1, unacknowledged: 1, crewAlerts: 1, arrivingSoon: 0 });
   // A cancelled alert that is still unacknowledged is not an active crew alert.
   expect(FILTERS.crewAlerts(c(4, { crew_alerts: { active: [], unacknowledged: true } }))).toBe(false);
 });
@@ -72,7 +72,7 @@ test('the default view is the server\'s queue order (by position), and applying 
   const before = ids(cases);
   expect(ids(applyQueueView(cases, DEFAULT_VIEW, ctx))).toEqual([1, 2]);
   applyQueueView(cases, view('all', 'eta'), ctx);
-  applyQueueView(cases, view('prepareNow'), ctx);
+  applyQueueView(cases, view('crewAlerts'), ctx);
   expect(ids(cases)).toEqual(before);
   expect(isDefaultView(DEFAULT_VIEW)).toBe(true);
   expect(isDefaultView(view('crewAlerts'))).toBe(false);

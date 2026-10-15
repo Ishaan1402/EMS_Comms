@@ -7,7 +7,7 @@ import Menu from './Menu';
 export const ORDER_OPTIONS = [
   { value: 'standard', label: 'Standard', description: 'Crew alerts and unacknowledged information first, then arrival time.' },
   { value: 'ai_assisted', label: 'AI-assisted', description: "Same, with the AI's category before arrival time. A person's call still comes first." },
-  { value: 'manual', label: 'Manual', description: 'Your team orders the queue with the arrows.' },
+  { value: 'manual', label: 'Manual', description: 'Your team drags the cases into order.' },
 ];
 
 /** How the hospital's queue is ordered: one choice for all its doctors, saved on the server. */

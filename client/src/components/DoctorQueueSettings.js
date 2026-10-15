@@ -1,24 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { GripVertical } from 'lucide-react';
 import { SectionLabel } from './ui';
 
 const errorText = (error, fallback) => error.response?.data?.error || fallback;
 
-/** Up/down arrows beside a queue row while Auto-order is off. */
-export const MoveButtons = ({ onMove, first, last }) => (
-  <div className="flex flex-col justify-center border-b border-gray-100 px-1">
-    <button type="button" onClick={() => onMove(-1)} disabled={first} aria-label="Move up"
-      className="flex h-7 w-7 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:opacity-25">
-      <ChevronUp className="h-4 w-4" />
-    </button>
-    <button type="button" onClick={() => onMove(1)} disabled={last} aria-label="Move down"
-      className="flex h-7 w-7 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:opacity-25">
-      <ChevronDown className="h-4 w-4" />
-    </button>
-  </div>
-);
+/** The grip beside a queue row in Manual order: drag it, or focus it and press the up and down arrows. */
+export const DragHandle = React.forwardRef(({ name, ...props }, ref) => (
+  <button ref={ref} type="button" aria-label={`Move ${name}: drag, or use the up and down arrow keys`}
+    title="Drag to reorder"
+    className="flex w-8 shrink-0 cursor-grab touch-none items-center justify-center border-b border-gray-100 text-gray-400 hover:bg-gray-100 hover:text-gray-700 focus-visible:text-gray-900 active:cursor-grabbing"
+    {...props}>
+    <GripVertical className="h-4 w-4" />
+  </button>
+));
 
 /** The hospital's risk fields on one case, filled in by its doctors. */
 export function CaseRiskFields(props) {

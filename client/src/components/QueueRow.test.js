@@ -45,7 +45,7 @@ test('quiet when normal: an acknowledged case has no acknowledged marker, no pil
   expect(row.textContent).not.toContain('Acknowledged');
   expect(row.textContent).not.toContain('HR');
   expect(row.querySelectorAll('.rounded-full:not([aria-hidden])')).toHaveLength(0);
-  expect(row.textContent).toContain('AI: Can wait');
+  expect(row.textContent).not.toContain('AI:');
 });
 
 test('a case nobody has acknowledged says so, as amber text', () => {
@@ -56,8 +56,13 @@ test('a case nobody has acknowledged says so, as amber text', () => {
   expect(marker.className).not.toMatch(/\bbg-|border-/);
 });
 
-test('the row is who and how soon, the complaint, and the AI label; the reasons are in the tooltip', () => {
-  const row = render(base({ preparation_category: 'Prepare now' }));
+test('the AI\'s label is on the row only when it orders the queue (AI-assisted)', () => {
+  expect(render(base({ preparation_category: 'Prepare now' })).textContent).not.toContain('Prepare now');
+  expect(render(base({ preparation_category: 'Prepare now' }), { showCategory: true }).textContent).toContain('AI: Prepare now');
+});
+
+test('the row is who and how soon and the complaint; the reasons are in the tooltip', () => {
+  const row = render(base({ preparation_category: 'Prepare now' }), { showCategory: true });
   expect(row.textContent).toContain('#1');
   expect(row.textContent).toContain('Medic 10');
   expect(row.textContent).toContain('10 min');

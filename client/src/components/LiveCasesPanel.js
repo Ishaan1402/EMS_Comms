@@ -15,7 +15,8 @@ import { SectionLabel, StatusText } from './ui';
 import CaseChat from './CaseChat';
 import QueueToolbar from './QueueToolbar';
 import { CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
-import { CaseRiskFields, MoveButtons } from './DoctorQueueSettings';
+import { CaseRiskFields, DragHandle } from './DoctorQueueSettings';
+import useDragReorder from '../hooks/useDragReorder';
 
 const OFFLINE_LABELS = {
   connecting: 'Connecting…',
@@ -218,17 +219,26 @@ const LiveCasesPanel = () => {
   const counts = queue.counts ? viewCounts(queued, viewContext) : null;
   const autoOrder = queue.auto_order !== false;
 
-  // Auto-order off: swap a row with its neighbour and save the whole order for the hospital.
-  const moveCase = async (index, step) => {
-    const ids = queued.map((c) => c.id);
-    [ids[index], ids[index + step]] = [ids[index + step], ids[index]];
+  // Manual order: move a row and save the whole order for the hospital. The screen shows the new order
+  // at once (without a "from #" cue, since this doctor made the move) and the server's queue replaces it.
+  const orderIds = queued.map((c) => c.id);
+  const moveCase = async (id, to) => {
+    const ids = orderIds.filter((other) => other !== id);
+    ids.splice(to, 0, id);
+    const position = Object.fromEntries(ids.map((id, index) => [id, index + 1]));
+    positions.current = position;
+    setQueue((current) => ({ ...current, cases: [...current.cases]
+      .map((entry) => ({ ...entry, queue_position: position[entry.id] ?? entry.queue_position }))
+      .sort((a, b) => a.queue_position - b.queue_position) }));
     try {
       await axios.put('/api/hospitals/mine/doctor-order', { case_ids: ids });
-      fetchQueue();
     } catch (error) {
       toast.error(error.response?.data?.error || 'Could not move the case');
     }
+    fetchQueue();
   };
+  const reorder = useDragReorder(orderIds, moveCase);
+  const canReorder = !autoOrder && isDefaultView(view) && queued.length > 1;
 
   const dismissSegment = async (segment) => {
     try {
@@ -282,7 +292,7 @@ const LiveCasesPanel = () => {
           <div className="lg:col-span-2 border-r border-gray-200">
             {!autoOrder && !isDefaultView(view) && (
               <p className="border-b border-gray-100 px-4 py-2 text-xs text-gray-500">
-                Show all cases in queue order to reorder with the arrows.
+                Show all cases in queue order to drag them into a new order.
               </p>
             )}
             <ul className="max-h-[48rem] overflow-y-auto">
@@ -290,9 +300,10 @@ const LiveCasesPanel = () => {
                 <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
                               unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
                               arrivalMinutes={hospital?.arrival_highlight_minutes}
-                              moveButtons={!autoOrder && isDefaultView(view) && (
-                                <MoveButtons first={index === 0} last={index === queued.length - 1}
-                                             onMove={(step) => moveCase(index, step)} />
+                              showCategory={queue.queue_mode === 'ai_assisted'}
+                              rowProps={canReorder ? reorder.rowProps(c.id, index) : undefined}
+                              dragHandle={canReorder && (
+                                <DragHandle name={c.ems_unit || `case #${c.id}`} {...reorder.handleProps(c.id, index)} />
                               )} />
               ))}
               {visible.length === 0 && queued.length > 0 && (
