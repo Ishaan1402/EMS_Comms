@@ -244,4 +244,4 @@ EMTs act on their own cases; hospital users act on cases routed to their hospita
 
 ## License
 
-Not decided yet. Earlier versions of this README said MIT, but the repository has no `LICENSE` file.
+MIT. See [LICENSE](LICENSE).
