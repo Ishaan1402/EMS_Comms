@@ -15,27 +15,67 @@ afterEach(() => act(() => root.unmount()));
 
 const queue = (overrides = {}) => ({
   queue_mode: 'standard', rules: { standard: 'Arrival order rule.', smart: 'Smart rule.' },
-  rule_versions: { standard: 'draft-4', smart: 'smart-1' },
-  counts: { inbound: 3, needs_review: 0, unacknowledged: 1, crew_alerts: 1, prepare_now: 2 }, ...overrides,
+  rule_versions: { standard: 'draft-4', smart: 'smart-1' }, ...overrides,
 });
+const counts = { inbound: 3, needsReview: 0, unacknowledged: 1, crewAlerts: 1, prepareNow: 2, arrivingSoon: 1 };
 const hospital = { id: 1, name: 'General', arrival_highlight_minutes: 5, settings_version: 1 };
 const render = (props = {}) => act(() => root.render(
-  <QueueStrip queue={queue()} hospital={hospital} riskFields={[]} onHospitalChange={() => {}}
+  <QueueStrip queue={queue()} counts={counts} hospital={hospital} riskFields={[]} onHospitalChange={() => {}}
               onModeChange={() => {}} {...props} />,
 ));
 const button = (text) => [...container.querySelectorAll('button')].find((b) => b.textContent.includes(text));
 const click = (node) => act(() => node.click());
-const colourOf = (label) => [...container.querySelectorAll('span')]
-  .find((s) => s.textContent.endsWith(label) && s.className).className;
+const chip = (label) => [...container.querySelectorAll('[aria-pressed]')].find((b) => b.textContent.endsWith(label));
 
 test('counts that are zero fade to gray; the others keep their colour', () => {
   render();
   expect(container.textContent).toContain('3 inbound');
   expect(container.textContent).toContain('1 crew alert');
   expect(container.textContent).not.toContain('1 crew alerts');
-  expect(colourOf('need review')).toContain('text-gray-500');
-  expect(colourOf('not acknowledged')).toContain('text-amber-800');
-  expect(colourOf('AI suggests prepare now')).toContain('text-red-700');
+  expect(chip('need review').className).toContain('text-gray-500');
+  expect(chip('not acknowledged').className).toContain('text-amber-800');
+  expect(chip('AI suggests prepare now').className).toContain('text-red-700');
+});
+
+test('each count is a filter: pressing it narrows the list, pressing it again shows everything', () => {
+  const onFilter = jest.fn();
+  render({ onFilter });
+  expect(container.querySelectorAll('[aria-pressed]')).toHaveLength(6);
+  click(chip('not acknowledged'));
+  expect(onFilter).toHaveBeenLastCalledWith('unacknowledged');
+  click(chip('arriving soon'));
+  expect(onFilter).toHaveBeenLastCalledWith('arrivingSoon');
+  click(chip('crew alert'));
+  expect(onFilter).toHaveBeenLastCalledWith('crewAlerts');
+
+  render({ onFilter, filter: 'unacknowledged' });
+  expect(chip('not acknowledged').getAttribute('aria-pressed')).toBe('true');
+  expect(chip('not acknowledged').className).toContain('bg-blue-50');
+  click(chip('not acknowledged'));
+  expect(onFilter).toHaveBeenLastCalledWith('all');       // pressing the active one clears it
+  click(chip('inbound'));
+  expect(onFilter).toHaveBeenLastCalledWith('all');
+});
+
+test('with nothing filtered "inbound" is pressed but not highlighted; a narrowing filter is highlighted', () => {
+  render();
+  expect(chip('inbound').getAttribute('aria-pressed')).toBe('true');
+  expect(chip('inbound').className).not.toContain('ring-1');
+  render({ filter: 'crewAlerts' });
+  expect(chip('inbound').getAttribute('aria-pressed')).toBe('false');
+  expect(chip('crew alert').className).toContain('ring-1');
+});
+
+test('a count of zero can still be pressed, so an active filter that emptied can be cleared', () => {
+  const onFilter = jest.fn();
+  render({ onFilter, filter: 'needsReview' });
+  click(chip('need review'));
+  expect(onFilter).toHaveBeenLastCalledWith('all');
+});
+
+test('arriving soon is only offered when the screen can count it', () => {
+  render({ counts: { ...counts, arrivingSoon: undefined } });
+  expect(chip('arriving soon')).toBeUndefined();
 });
 
 test('the strip always shows which order is in use, with no draft label and no standing paragraph', () => {
@@ -100,9 +140,9 @@ test('an unsaved arrival-highlight draft survives opening and closing the settin
 });
 
 test('without a linked hospital or counts there is nothing to show; without counts only the order and settings are', () => {
-  render({ hospital: null, queue: queue({ counts: null }) });
+  render({ hospital: null, counts: null });
   expect(container.textContent).toBe('');
-  render({ queue: queue({ counts: null }) });
+  render({ counts: null });
   expect(container.textContent).toContain('Settings');
   expect(container.textContent).not.toContain('inbound');
 });
