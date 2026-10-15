@@ -1,76 +1,10 @@
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { SectionLabel } from './ui';
 
-const KIND_LABELS = { yes_no: 'Yes / no', number: 'Number', text: 'Short text' };
-
 const errorText = (error, fallback) => error.response?.data?.error || fallback;
-
-/** The risk fields this hospital's doctors fill in on each case: add and remove them here. */
-export function RiskFieldSettings({ fields, onChanged }) {
-  const id = useId();
-  const [label, setLabel] = useState('');
-  const [kind, setKind] = useState('yes_no');
-  const [saving, setSaving] = useState(false);
-
-  const add = async (event) => {
-    event.preventDefault();
-    setSaving(true);
-    try {
-      await axios.post('/api/hospitals/mine/risk-fields', { label, kind });
-      setLabel('');  // the other screens update from the live event; this one asks its page to reload
-      if (onChanged) onChanged();
-    } catch (error) {
-      toast.error(errorText(error, 'Could not add the field'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const remove = async (field) => {
-    if (!window.confirm(`Remove "${field.label}"? Values already recorded are kept but no longer shown.`)) return;
-    try {
-      await axios.delete(`/api/hospitals/mine/risk-fields/${field.id}`);
-      if (onChanged) onChanged();
-    } catch (error) {
-      toast.error(errorText(error, 'Could not remove the field'));
-    }
-  };
-
-  return (
-    <section className="space-y-2">
-      <SectionLabel as="h4">Custom risk fields{fields.length > 0 && ` (${fields.length})`}</SectionLabel>
-      <p className="text-gray-600">
-        Your own yes/no, number or short-text fields (up to 10). They show on every case, under the vitals, for your
-        doctors to fill in. They never change the queue order.
-      </p>
-      {fields.length === 0 && <p className="text-gray-500">None yet.</p>}
-      <div className="space-y-1">
-        {fields.map((field) => (
-          <div key={field.id} className="flex items-center gap-2">
-            <span>{field.label}</span>
-            <span className="text-xs text-gray-500">{KIND_LABELS[field.kind]}</span>
-            <button type="button" onClick={() => remove(field)} className="text-xs text-red-700 underline">Remove</button>
-          </div>
-        ))}
-      </div>
-      <form onSubmit={add} className="flex flex-wrap items-center gap-2">
-        <label htmlFor={id} className="sr-only">Field name</label>
-        <input id={id} value={label} onChange={(event) => setLabel(event.target.value)} maxLength={40} required
-          placeholder="e.g. On blood thinners" disabled={saving}
-          className="w-56 px-2 py-1 border border-gray-300 rounded" />
-        <select value={kind} onChange={(event) => setKind(event.target.value)} disabled={saving}
-          aria-label="Field type" className="px-2 py-1 border border-gray-300 rounded">
-          {Object.entries(KIND_LABELS).map(([value, text]) => <option key={value} value={value}>{text}</option>)}
-        </select>
-        <button type="submit" disabled={saving || !label.trim()}
-          className="px-3 py-1 text-white bg-blue-700 rounded disabled:opacity-50">Add field</button>
-      </form>
-    </section>
-  );
-}
 
 /** Up/down arrows beside a queue row while Auto-order is off. */
 export const MoveButtons = ({ onMove, first, last }) => (
