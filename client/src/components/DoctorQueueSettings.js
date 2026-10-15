@@ -136,7 +136,7 @@ export function CaseRiskFields({ caseId, fields, liveValues }) {
   };
 
   return (
-    <div className="mb-4 p-3 border border-gray-200 rounded-lg">
+    <div className="p-3 border border-gray-200 rounded-lg">
       <SectionLabel className="mb-2">Risk fields</SectionLabel>
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
         {fields.map((field) => (
