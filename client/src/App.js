@@ -6,6 +6,7 @@ import Login from './components/Login';
 import Register from './components/Register';
 import EMTDashboard from './components/EMTDashboard';
 import DoctorDashboard from './components/DoctorDashboard';
+import SettingsPage from './components/SettingsPage';
 import LoadingSpinner from './components/LoadingSpinner';
 
 function App() {
@@ -37,6 +38,10 @@ function App() {
               <Navigate to="/login" />
             )
           } 
+        />
+        <Route
+          path="/settings"
+          element={isAuthenticated && user?.role === 'doctor' ? <SettingsPage /> : <Navigate to="/" />}
         />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>

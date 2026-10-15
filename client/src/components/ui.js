@@ -1,29 +1,52 @@
 import React from 'react';
 
-// One meaning per colour, so a glance tells what a pill is asking for:
-//   crew       ink, filled   a person's call (crew alerts): the only filled pill, never an AI label
-//   urgent     red           act now: the AI says Prepare now, or processing failed
-//   attention  amber         someone needs to look: not acknowledged, needs review, Cannot assess
-//   neutral    gray          normal status
-//   info       blue          new, or in progress
+// One look for the whole app. client/src/designRules.test.js keeps these from eroding.
+//   type     system sans only. Sizes: 12 caption, 14 body, 16 reading text, 20 titles. Weights 400, 500, 600.
+//   colour   neutral grays; blue is the one accent (actions, links, selection); red only for urgent;
+//            amber only as text or a dot; the dark chip is reserved for a crew's alert
+//   icons    lucide, 16px; no emoji
+//   quiet    a normal state gets no badge: only exceptions are marked
+
 const TONES = {
-  crew: 'bg-slate-900 text-white border-slate-900',
-  urgent: 'bg-white text-red-700 border-red-300',
-  attention: 'bg-amber-50 text-amber-900 border-amber-300',
-  neutral: 'bg-gray-100 text-gray-700 border-gray-200',
-  info: 'bg-blue-50 text-blue-800 border-blue-200',
+  urgent: { text: 'text-red-600', dot: 'bg-red-500' },
+  attention: { text: 'text-amber-700', dot: 'bg-amber-500' },
+  info: { text: 'text-blue-600', dot: 'bg-blue-500' },
+  ok: { text: 'text-green-700', dot: 'bg-green-500' },
+  neutral: { text: 'text-gray-600', dot: 'bg-gray-400' },
 };
 
-export const Pill = ({ tone = 'neutral', bold = false, pulse = false, className = '', children, ...rest }) => (
-  <span
-    className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border ${bold ? 'font-bold' : 'font-medium'} ${TONES[tone]} ${pulse ? 'animate-pulse' : ''} ${className}`}
-    {...rest}
-  >
+/** A state worth a glance: coloured text with a small dot. Never a filled or outlined pill. */
+export const StatusText = ({ tone = 'neutral', dot = true, pulse = false, className = '', children, ...rest }) => (
+  <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${TONES[tone].text} ${className}`} {...rest}>
+    {dot && <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${TONES[tone].dot} ${pulse ? 'animate-pulse' : ''}`} />}
     {children}
   </span>
 );
 
-// The heading of one block of a case (AI handoff, Vitals, Transcript, ...).
+/** A crew's call: the only filled chip, so it is never mistaken for an AI label. */
+export const CrewChip = ({ className = '', children, ...rest }) => (
+  <span className={`inline-flex items-center rounded-md bg-slate-900 px-2 py-0.5 text-xs font-medium text-white ${className}`} {...rest}>
+    {children}
+  </span>
+);
+
+const BUTTONS = {
+  primary: 'bg-blue-600 text-white hover:bg-blue-700',
+  secondary: 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50',
+  ghost: 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+};
+
+export const Button = ({ variant = 'secondary', type = 'button', className = '', ...rest }) => (
+  <button type={type}
+    className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50 ${BUTTONS[variant]} ${className}`}
+    {...rest} />
+);
+
+// The heading of one block of a screen (AI summary, Vitals, Transcript, ...).
 export const SectionLabel = ({ as: Tag = 'h4', className = '', children }) => (
   <Tag className={`text-sm font-semibold text-gray-900 ${className}`}>{children}</Tag>
+);
+
+export const Caption = ({ as: Tag = 'p', className = '', children }) => (
+  <Tag className={`text-xs text-gray-500 ${className}`}>{children}</Tag>
 );

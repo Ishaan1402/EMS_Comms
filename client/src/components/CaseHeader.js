@@ -32,7 +32,7 @@ const CaseHeader = ({ liveCase: c, inQueue, queueMode = 'standard', onAcknowledg
   return (
     <>
       <div className="sticky top-0 z-10 -mx-6 -mt-6 mb-3 px-6 pt-4 pb-3 bg-white/95 backdrop-blur border-b border-gray-200 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <h3 className="min-w-0 text-lg font-semibold text-gray-900">
+        <h3 className="min-w-0 text-base font-semibold text-gray-900">
           {c.ems_unit || `Case #${c.id}`}
           <span className="font-normal text-gray-600"> · {c.patient_info || 'No patient info provided'}</span>
         </h3>

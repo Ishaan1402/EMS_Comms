@@ -43,6 +43,10 @@ const rowOrder = (container) => {
   return ['Medic 1', 'Medic 2'].sort((a, b) => text.indexOf(a) - text.indexOf(b));
 };
 
+const chip = (label) => [...container.querySelectorAll('[aria-pressed]')].find((b) => b.textContent.startsWith(label));
+const press = (node) => act(() => node.click());
+const orderButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent.startsWith('Order:'));
+
 let container;
 let root;
 beforeEach(() => {
@@ -70,6 +74,8 @@ test('an older queue answer arriving last does not undo a newer order', async ()
 });
 
 test('a delayed hospital fetch cannot undo a newer setting received by the stream', async () => {
+  // The arrival highlight decides which cases count as "arriving soon": 15 minutes (newer, from the stream)
+  // includes a case 10 minutes out; the older fetch's 5 minutes would not.
   await act(async () => root.render(<LiveCasesPanel />));
   await act(() => mockHandler('hospital.updated', { hospital: {
     id: 1, name: 'General', arrival_highlight_minutes: 15, settings_version: 2,
@@ -77,41 +83,38 @@ test('a delayed hospital fetch cannot undo a newer setting received by the strea
   await resolve(pendingFor('/api/hospitals/mine')[0], {
     id: 1, name: 'General', arrival_highlight_minutes: 5, settings_version: 1,
   });
-  expect(container.textContent).toContain('Arrival highlight · 15 min');
+  const soon = { ...inbound(1, 'Medic 1'), eta_at: new Date(Date.now() + 10 * 60000).toISOString() };
+  await resolve(pendingFor('/api/cases')[0], [soon]);
+  await resolve(pendingFor('/api/cases/queue')[0], { ...queue(1, [[1, 'Medic 1']]), cases: [{ ...soon, queue_position: 1, queue_reasons: [] }] });
+  expect(chip('Arriving soon')).toBeDefined();
+  expect(chip('Arriving soon').textContent).toBe('Arriving soon1');
 });
 
-test('queue rows label the AI category as a suggestion, and the order control carries the rule and the disclosure', async () => {
+test('queue rows label the AI category as the AI\'s, and the order menu carries the options and the disclosure', async () => {
   await act(async () => root.render(<LiveCasesPanel />));
   await resolve(pendingFor('/api/hospitals/mine')[0], { id: 1, name: 'General' });
   await resolve(pendingFor('/api/cases')[0], [inbound(1, 'Medic 1')]);
   const body = queue(1, [[1, 'Medic 1']]);
-  await resolve(pendingFor('/api/cases/queue')[0], { ...body, queue_mode: 'standard', counts: { ...body.counts, crew_alerts: 0 },
-    rules: { standard: 'Arrival order rule.', ai_assisted: 'AI rule.' }, rule_versions: { standard: 'draft-4', ai_assisted: 'ai-assisted-1' } });
-  const row = container.querySelector('ul').textContent;
-  expect(row).toContain('AI suggests:Can wait');
-  const help = container.querySelector('#queue-order-help');
-  expect(help.hidden).toBe(true);                       // closed, but in the page
-  expect(help.textContent).toContain('Arrival order rule.');
-  expect(help.textContent).toContain('AI rule.');
-  expect(help.textContent).toContain('not validated on real EMS audio');
-  expect(container.textContent).toContain('0 crew alerts');
-  expect(container.textContent).not.toContain('draft-3');
-  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('Standard');
+  await resolve(pendingFor('/api/cases/queue')[0], { ...body, queue_mode: 'standard', counts: { ...body.counts, crew_alerts: 0 } });
+  expect(container.querySelector('ul').textContent).toContain('AI: Can wait');
+  expect(container.querySelector('[role="listbox"]')).toBeNull();            // closed: nothing in the way
+  expect(orderButton().textContent).toBe('Order: Standard');
+  press(orderButton());
+  const options = [...container.querySelectorAll('[role="option"]')];
+  expect(options.map((o) => o.querySelector('span span').textContent)).toEqual(['Standard', 'AI-assisted', 'Manual']);
+  expect(options[0].getAttribute('aria-selected')).toBe('true');
+  expect(container.textContent).toContain('not validated on real EMS audio');
+  expect(container.textContent).not.toContain('draft-');
 });
 
-test('in Manual the control says so, and only then do the rows get arrows', async () => {
-  await act(async () => root.render(<LiveCasesPanel />));
-  await resolve(pendingFor('/api/hospitals/mine')[0], { id: 1, name: 'General' });
-  await resolve(pendingFor('/api/cases')[0], [inbound(1, 'Medic 1')]);
-  const body = queue(1, [[1, 'Medic 1']]);
-  const manual = { ...body, queue_mode: 'manual', auto_order: false, counts: { ...body.counts, crew_alerts: 0 } };
-  await resolve(pendingFor('/api/cases/queue')[0], manual);
-  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('Manual');
+test('in Manual the order says so, and only then do the rows get arrows', async () => {
+  await loadTwoCases({ queue_mode: 'manual', auto_order: false });
+  expect(orderButton().textContent).toBe('Order: Manual');
   expect(container.querySelector('ul').querySelector('[aria-label="Move up"]')).not.toBeNull();
   await act(() => { mockHandler('queue.reordered', {}); });
   await new Promise((done) => setTimeout(done, 350));    // the panel re-fetches the queue shortly after
-  await resolve(pendingFor('/api/cases/queue')[0], { ...manual, as_of: at(9), queue_mode: 'ai_assisted', auto_order: true });
-  expect(container.querySelector('[aria-checked="true"]').textContent).toBe('AI-assisted');
+  await resolve(pendingFor('/api/cases/queue')[0], { ...queue(9, [[1, 'Medic 1'], [2, 'Medic 2']]), queue_mode: 'ai_assisted', auto_order: true });
+  expect(orderButton().textContent).toBe('Order: AI-assisted');
   expect(container.querySelector('ul').querySelector('[aria-label="Move up"]')).toBeNull();
 });
 
@@ -141,63 +144,64 @@ test('the panel clips its corners without becoming a scroll container, so the ca
 
 // ---- this screen's own filter and sort: never the hospital's order ------------------------------
 
+const WAITING = { ...inbound(2, 'Medic 2'), latest_update_acknowledged: false, operational_status: 'inbound' };
 const loadTwoCases = async (extra = {}) => {
   await act(async () => root.render(<LiveCasesPanel />));
   await resolve(pendingFor('/api/hospitals/mine')[0], { id: 1, name: 'General', arrival_highlight_minutes: 5 });
-  const waiting = { ...inbound(2, 'Medic 2'), latest_update_acknowledged: false, operational_status: 'inbound' };
   const closed = { ...inbound(3, 'Medic 3'), status: 'closed', closed_at: at(5) };
-  await resolve(pendingFor('/api/cases')[0], [inbound(1, 'Medic 1'), waiting, closed]);
+  await resolve(pendingFor('/api/cases')[0], [inbound(1, 'Medic 1'), WAITING, closed]);
   const body = queue(1, [[1, 'Medic 1'], [2, 'Medic 2']]);
   body.cases[1] = { ...body.cases[1], latest_update_acknowledged: false, operational_status: 'inbound' };
   await resolve(pendingFor('/api/cases/queue')[0], { ...body, queue_mode: 'standard', ...extra });
 };
-const chip = (label) => [...container.querySelectorAll('[aria-pressed]')].find((b) => b.textContent.endsWith(label));
-const press = (node) => act(() => node.click());
 const rowUnits = () => [...container.querySelectorAll('ul > li')].map((li) => li.textContent).join('|');
-const chooseSort = (value) => act(() => {
-  const select = [...container.querySelectorAll('label')].find((l) => l.textContent.startsWith('Sort')).querySelector('select');
-  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, value);
-  select.dispatchEvent(new Event('change', { bubbles: true }));
-});
+const chooseSort = (label) => {
+  press([...container.querySelectorAll('button')].find((b) => b.textContent.startsWith('Sort:')));
+  press([...container.querySelectorAll('[role="option"]')].find((o) => o.textContent.startsWith(label)));
+};
 
-test('a filter narrows the list, says how much it shows, hides the closed cases, and never changes the counts', async () => {
+test('a filter narrows the list and hides the closed cases, and the counts stay those of the whole queue', async () => {
   await loadTwoCases();
   expect(rowUnits()).toContain('Medic 1');
   expect(rowUnits()).toContain('Medic 2');
-  expect(container.textContent).toContain('Arrived & closed');
-  expect(container.textContent).toContain('2 inbound');
+  expect(container.textContent).toContain('Arrived and closed');
+  expect(chip('All').textContent).toBe('All2');
 
-  press(chip('not acknowledged'));
+  press(chip('Not acknowledged'));
   expect(rowUnits()).toContain('Medic 2');
   expect(rowUnits()).not.toContain('Medic 1');
-  expect(container.textContent).not.toContain('Arrived & closed');
-  expect(container.textContent).toContain('Showing 1 of 2 (not acknowledged)');
-  expect(container.textContent).toContain('2 inbound');          // the counts stay hospital-wide
-  expect(chip('not acknowledged').textContent).toBe('1 not acknowledged');
+  expect(container.textContent).not.toContain('Arrived and closed');
+  expect(chip('Not acknowledged').getAttribute('aria-pressed')).toBe('true');
+  expect(chip('All').textContent).toBe('All2');                   // the counts stay hospital-wide
 
-  press([...container.querySelectorAll('button')].find((b) => b.textContent === 'Clear filter'));
+  press(chip('Not acknowledged'));                                // pressing it again shows everyone
   expect(rowUnits()).toContain('Medic 1');
-  expect(container.textContent).toContain('Arrived & closed');
-  expect(container.textContent).not.toContain('Showing');
+  expect(container.textContent).toContain('Arrived and closed');
 });
 
-test('a filter that matches nothing says so and can be cleared from the count that is pressed', async () => {
+test('a filter with nothing in it is hidden until it is on; one that empties while on says so and can be cleared', async () => {
   await loadTwoCases();
-  press(chip('crew alerts'));
+  expect(chip('Crew alerts')).toBeUndefined();                    // zero: not offered
+  expect(chip('Needs review')).toBeUndefined();
+  press(chip('Not acknowledged'));
+  // Another doctor acknowledges the case while this screen has the filter on.
+  await act(() => mockHandler('case.updated', { case: {
+    ...WAITING, latest_update_acknowledged: true, operational_status: 'acknowledged', updated_at: at(30) } }));
   expect(container.textContent).toContain('No cases match this filter.');
-  expect(container.textContent).toContain('Showing 0 of 2 (crew alerts)');
-  press(chip('crew alerts'));
+  expect(chip('Not acknowledged')).toBeDefined();                  // still there, pressed, so it can be turned off
+  press([...container.querySelectorAll('button')].find((b) => b.textContent === 'Show all'));
   expect(container.textContent).not.toContain('No cases match');
+  expect(rowUnits()).toContain('Medic 1');
 });
 
-test('sorting is this screen\'s view: the rows reorder, keep their queue numbers, and say so', async () => {
+test('sorting is this screen\'s view: the rows reorder and keep their queue numbers', async () => {
   await loadTwoCases();
   expect(rowUnits().indexOf('Medic 1')).toBeLessThan(rowUnits().indexOf('Medic 2'));
-  chooseSort('waiting');                                              // Medic 2's information is unacknowledged
+  chooseSort('Waiting');                                          // Medic 2's information is unacknowledged
   expect(rowUnits().indexOf('Medic 2')).toBeLessThan(rowUnits().indexOf('Medic 1'));
-  expect(container.textContent).toContain('Your view only: the queue order itself is unchanged.');
   expect(container.querySelector('ul').textContent).toContain('#2');   // still its queue position
-  chooseSort('queue');
+  expect([...container.querySelectorAll('button')].find((b) => b.textContent.startsWith('Sort:')).textContent).toBe('Sort: Waiting');
+  chooseSort('Queue');
   expect(rowUnits().indexOf('Medic 1')).toBeLessThan(rowUnits().indexOf('Medic 2'));
 });
 
@@ -205,12 +209,12 @@ test('the arrows only show in Manual with the plain queue view, and the screen s
   await loadTwoCases({ queue_mode: 'manual', auto_order: false });
   const arrows = () => container.querySelectorAll('ul [aria-label="Move up"]').length;
   expect(arrows()).toBe(2);
-  chooseSort('eta');
+  chooseSort('ETA');
   expect(arrows()).toBe(0);
-  expect(container.textContent).toContain('Clear the filter and sort to reorder with the arrows.');
-  chooseSort('queue');
-  press(chip('not acknowledged'));
+  expect(container.textContent).toContain('Show all cases in queue order to reorder with the arrows.');
+  chooseSort('Queue');
+  press(chip('Not acknowledged'));
   expect(arrows()).toBe(0);
-  press(chip('not acknowledged'));
+  press(chip('Not acknowledged'));
   expect(arrows()).toBe(2);
 });

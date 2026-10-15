@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Radio, WifiOff } from 'lucide-react';
+import { Truck, WifiOff } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import useCaseEvents from '../hooks/useCaseEvents';
@@ -11,10 +11,9 @@ import LiveTranscript from './LiveTranscript';
 import CaseOverview from './CaseOverview';
 import QueueRow from './QueueRow';
 import CaseHeader from './CaseHeader';
-import { SectionLabel } from './ui';
+import { SectionLabel, StatusText } from './ui';
 import CaseChat from './CaseChat';
-import QueueStrip from './QueueStrip';
-import QueueViewBar from './QueueViewBar';
+import QueueToolbar from './QueueToolbar';
 import { CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
 import { CaseRiskFields, MoveButtons } from './DoctorQueueSettings';
 
@@ -22,12 +21,6 @@ const OFFLINE_LABELS = {
   connecting: 'Connecting…',
   reconnecting: 'Reconnecting… transcript may be behind',
   unauthorized: 'Session expired — log in again for live updates',
-};
-
-// Names for the filters in the "Showing 2 of 5 (...)" line.
-const FILTER_LABELS = {
-  needsReview: 'need review', unacknowledged: 'not acknowledged', crewAlerts: 'crew alerts',
-  prepareNow: 'AI suggests prepare now', arrivingSoon: 'arriving soon',
 };
 
 const newestFirst = (cases) => [...cases].sort((a, b) => b.started_at.localeCompare(a.started_at));
@@ -39,13 +32,11 @@ const MOVE_CUE_MS = 30 * 1000;
 
 const ConnectionBadge = ({ status }) =>
   status === 'live' ? (
-    <span className="flex items-center gap-1 text-xs font-medium text-green-700">
-      <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" /> Live updates
-    </span>
+    <StatusText tone="ok">Live</StatusText>
   ) : (
-    <span className="flex items-center gap-1 text-xs font-medium text-amber-800">
-      <WifiOff className="h-3 w-3" /> {OFFLINE_LABELS[status]}
-    </span>
+    <StatusText tone="attention" dot={false}>
+      <WifiOff className="h-3.5 w-3.5" /> {OFFLINE_LABELS[status]}
+    </StatusText>
   );
 
 const LiveCasesPanel = () => {
@@ -197,7 +188,7 @@ const LiveCasesPanel = () => {
       setCases((list) => upsertNewer(list, data.case));
       refreshQueueSoon();
       if (type === 'case.opened') {
-        toast(`New live case from ${data.case.emt_first_name} ${data.case.emt_last_name}`, { icon: '🚑' });
+        toast(`New live case from ${data.case.emt_first_name} ${data.case.emt_last_name}`, { icon: <Truck className="h-4 w-4" /> });
         setSelectedId((current) => current ?? data.case.id);
       }
     } else if (type === 'segment.created' || type === 'segment.updated') {
@@ -264,24 +255,21 @@ const LiveCasesPanel = () => {
   const retryAssessment = () => caseAction('assessments/retry', undefined, 'Could not retry the assessment');
 
   return (
-    <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-clip mb-8">
-      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-3 border-b border-gray-200 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-gradient-to-r from-red-600 to-pink-600 rounded-lg">
-            <Radio className="h-5 w-5 text-white" />
-          </div>
-          <h2 className="text-xl font-semibold text-gray-900">
-            Inbound Cases{hospital ? ` — ${hospital.name}` : ''}
-          </h2>
+    <div className="mb-8 overflow-clip rounded-xl border border-gray-200 bg-white">
+      <div className="flex items-center justify-between px-5 py-3.5">
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-base font-semibold text-gray-900">Inbound cases</h2>
+          {hospital && <span className="text-sm text-gray-500">{hospital.name}</span>}
         </div>
-        <div className="flex items-center gap-4">
-          <CrewAlertSound cases={cases} />
+        <div className="flex items-center gap-2">
           <ConnectionBadge status={connection} />
+          <CrewAlertSound cases={cases} />
         </div>
       </div>
 
-      <QueueStrip queue={queue} counts={counts} filter={view.filter} onFilter={(filter) => setView((v) => ({ ...v, filter }))}
-                  hospital={hospital} riskFields={riskFields} onHospitalChange={applyHospital} onModeChange={fetchQueue} />
+      <QueueToolbar counts={counts} filter={view.filter} onFilter={(filter) => setView((v) => ({ ...v, filter }))}
+                    sort={view.sort} onSort={(sort) => setView((v) => ({ ...v, sort }))}
+                    queueMode={queue.queue_mode} onModeChange={fetchQueue} hasHospital={Boolean(hospital?.id)} />
 
       {cases.length === 0 ? (
         <p className="p-6 text-sm text-gray-500">
@@ -292,10 +280,11 @@ const LiveCasesPanel = () => {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-5">
           <div className="lg:col-span-2 border-r border-gray-200">
-            <QueueViewBar sort={view.sort} onSort={(sort) => setView((v) => ({ ...v, sort }))}
-                          filterLabel={view.filter === 'all' ? null : FILTER_LABELS[view.filter]} shown={visible.length}
-                          total={queued.length} onClear={() => setView(DEFAULT_VIEW)}
-                          reorderBlocked={!autoOrder && !isDefaultView(view)} />
+            {!autoOrder && !isDefaultView(view) && (
+              <p className="border-b border-gray-100 px-4 py-2 text-xs text-gray-500">
+                Show all cases in queue order to reorder with the arrows.
+              </p>
+            )}
             <ul className="max-h-[48rem] overflow-y-auto">
               {visible.map((c, index) => (
                 <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
@@ -307,11 +296,14 @@ const LiveCasesPanel = () => {
                               )} />
               ))}
               {visible.length === 0 && queued.length > 0 && (
-                <li className="px-4 py-6 text-sm text-gray-600">No cases match this filter.</li>
+                <li className="px-4 py-6 text-sm text-gray-600">
+                  No cases match this filter.{' '}
+                  <button type="button" onClick={() => setView(DEFAULT_VIEW)} className="text-blue-600 hover:underline">Show all</button>
+                </li>
               )}
               {view.filter === 'all' && others.length > 0 && (
-                <li className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-100">
-                  Arrived &amp; closed
+                <li className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500">
+                  Arrived and closed
                 </li>
               )}
               {view.filter === 'all' && others.map((c) => (
