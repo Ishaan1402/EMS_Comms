@@ -34,11 +34,11 @@ const MoveCue = ({ move }) => (move.to < move.from
 /**
  * One case in the hospital's queue, in three lines: who and how soon, what is wrong with the patient
  * (the complaint), and only the exceptions that need a person. A normal state, such as acknowledged,
- * gets no marker. Why the case sits here is the tooltip and the top of the case. The AI's category shows
- * only when it orders the queue (AI-assisted); otherwise it is in the case, not on every row.
+ * gets no marker. Why the case sits here is the tooltip and the top of the case. The AI's category is on
+ * the right without its "AI:" prefix; the case shows where it comes from.
  */
-const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, arrivalMinutes, showCategory = false,
-  dragHandle = null, rowProps = {} }) => {
+const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, arrivalMinutes, dragHandle = null,
+  rowProps = {} }) => {
   const open = c.status === 'active' && !c.arrived_at;
   const soon = open && FILTERS.arrivingSoon(c, { serverNow, arrivalMinutes });
   const quietMs = serverNow - Date.parse(c.last_segment_at || c.started_at);
@@ -83,7 +83,7 @@ const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, ar
                 <span className="text-xs text-gray-500">No audio {Math.floor(quietMs / 60000)}m</span>
               )}
             </span>
-            {showCategory && <span className="shrink-0"><CategoryBadge liveCase={c} /></span>}
+            <span className="shrink-0"><CategoryBadge liveCase={c} prefix={false} /></span>
           </div>
         )}
       </button>

@@ -300,7 +300,6 @@ const LiveCasesPanel = () => {
                 <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
                               unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
                               arrivalMinutes={hospital?.arrival_highlight_minutes}
-                              showCategory={queue.queue_mode === 'ai_assisted'}
                               rowProps={canReorder ? reorder.rowProps(c.id, index) : undefined}
                               dragHandle={canReorder && (
                                 <DragHandle name={c.ems_unit || `case #${c.id}`} {...reorder.handleProps(c.id, index)} />

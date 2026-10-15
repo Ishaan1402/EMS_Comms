@@ -98,7 +98,8 @@ test('queue rows label the AI category as the AI\'s, and the order menu carries 
   await resolve(pendingFor('/api/cases')[0], [inbound(1, 'Medic 1')]);
   const body = queue(1, [[1, 'Medic 1']]);
   await resolve(pendingFor('/api/cases/queue')[0], { ...body, queue_mode: 'standard', counts: { ...body.counts, crew_alerts: 0 } });
-  expect(container.querySelector('ul').textContent).not.toContain('AI: Can wait');   // only on rows in AI-assisted
+  expect(container.querySelector('ul').textContent).toContain('Can wait');
+  expect(container.querySelector('ul').textContent).not.toContain('AI:');   // the case says where it comes from
   expect(container.querySelector('[role="listbox"]')).toBeNull();            // closed: nothing in the way
   expect(orderButton().textContent).toBe('Order: Standard');
   press(orderButton());
@@ -118,7 +119,6 @@ test('in Manual the order says so, and only then do the rows get drag handles', 
   await resolve(pendingFor('/api/cases/queue')[0], { ...queue(9, [[1, 'Medic 1'], [2, 'Medic 2']]), queue_mode: 'ai_assisted', auto_order: true });
   expect(orderButton().textContent).toBe('Order: AI-assisted');
   expect(container.querySelector('ul').querySelector('[aria-label^="Move "]')).toBeNull();
-  expect(container.querySelector('ul').textContent).toContain('AI: Can wait');
 });
 
 test('a pushed clip row from a finished report clears its "reporting…" label', async () => {
