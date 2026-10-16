@@ -25,7 +25,7 @@ test('three modes as cards, each with the server\'s own description of its rule,
   expect([...container.querySelectorAll('label')].map((l) => l.querySelector('span span').textContent)).toEqual(['Standard', 'AI-assisted', 'Manual']);
   expect(container.textContent).toContain('Standard rule text.');
   expect(container.textContent).toContain('AI rule text.');
-  expect(container.textContent).toContain('Your team orders the queue with the arrows');
+  expect(container.textContent).toContain('Your team drags the cases into order');
   expect(radio('ai_assisted').checked).toBe(true);
   expect(radio('standard').checked).toBe(false);
 });

@@ -17,7 +17,6 @@ export const FILTERS = {
   needsReview: (c) => Boolean(c.processing?.needs_review),
   unacknowledged: (c) => !c.latest_update_acknowledged,
   crewAlerts: (c) => (c.crew_alerts?.active?.length ?? 0) > 0,
-  prepareNow: (c) => c.preparation_category === 'Prepare now',
   arrivingSoon: arrivesSoon,
 };
 
@@ -58,6 +57,6 @@ export const applyQueueView = (cases, { filter, sort }, context) => (
 export const viewCounts = (cases, context) => Object.fromEntries(
   Object.entries({
     inbound: 'all', needsReview: 'needsReview', unacknowledged: 'unacknowledged', crewAlerts: 'crewAlerts',
-    prepareNow: 'prepareNow', arrivingSoon: 'arrivingSoon',
+    arrivingSoon: 'arrivingSoon',
   }).map(([name, filter]) => [name, cases.filter((c) => FILTERS[filter](c, context)).length]),
 );

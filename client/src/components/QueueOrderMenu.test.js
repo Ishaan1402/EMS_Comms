@@ -35,7 +35,7 @@ test('each mode says what it does in one line; the AI is never said to set the o
   open();
   expect(option('Standard').textContent).toContain('Crew alerts and unacknowledged information first');
   expect(option('AI-assisted').textContent).toContain("A person's call still comes first");
-  expect(option('Manual').textContent).toContain('Your team orders the queue with the arrows');
+  expect(option('Manual').textContent).toContain('Your team drags the cases into order');
 });
 
 test('choosing a mode saves it for the hospital and then asks the screen to refresh the queue', async () => {

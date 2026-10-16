@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle, Keyboard, Loader2, MapPin, Radio, RotateCw } from 'lucide-react';
 import { buildVitalRows, formatValue } from '../utils/vitalsTrend';
 import { CategoryBadge, NewTag, OperationalBadge, ProcessingBadge, ReportingBadge, isReporting } from './CaseBadges';
@@ -27,6 +27,24 @@ const SOURCE_LABELS = { radio: 'Said on the radio', typed: 'Typed by the crew', 
 // Where a value or fact came from, for its tooltip: "Said on the radio at 14:02: “Heart rate 118”".
 const sourceTitle = (source, at, quote) =>
   `${SOURCE_LABELS[source] || 'Typed by the crew'} at ${formatTime(at)}${quote ? `: “${quote}”` : ''}`;
+
+/**
+ * A value or fact the crew reported. Hovering it (or focusing it, or tapping it on a phone) shows where it
+ * came from at once, in the crew's own words, instead of waiting on the browser's slow tooltip.
+ */
+const Sourced = ({ as: Tag = 'span', source, at, quote, className = '', children }) => {
+  const id = useId();
+  return (
+    <Tag tabIndex={0} aria-describedby={id}
+         className={`group relative cursor-help rounded decoration-gray-400 decoration-dotted underline-offset-4 outline-none hover:bg-gray-100 hover:underline focus-visible:bg-gray-100 focus-visible:underline ${className}`}>
+      {children}
+      <span role="tooltip" id={id}
+            className="pointer-events-none invisible absolute left-0 top-full z-20 mt-1 w-max max-w-[min(18rem,80vw)] whitespace-normal rounded-md bg-gray-900 px-2.5 py-1.5 text-xs font-normal leading-snug text-white shadow-lg group-hover:visible group-focus:visible">
+        {sourceTitle(source, at, quote)}
+      </span>
+    </Tag>
+  );
+};
 
 const SourceIcon = ({ source }) => (source === 'radio'
   ? <Radio className="ml-1 inline h-3 w-3 text-gray-500" aria-label="from the radio" />
@@ -64,7 +82,7 @@ const direction = (row) => {
 
 /**
  * Folded to one line: the latest reading of each sign, with which way it moved. Open it for one row per
- * sign, oldest value first, each marked with where it came from (hover for the words).
+ * sign, oldest value first, each marked with where it came from (hover a value for the crew's words).
  */
 const VitalsSection = ({ vitals, spoken, isNew }) => {
   const rows = buildVitalRows(vitals, spoken);
@@ -103,13 +121,13 @@ const VitalsSection = ({ vitals, spoken, isNew }) => {
                     return (
                       <React.Fragment key={r.id}>
                         {index > 0 && <span className="text-gray-400"> → </span>}
-                        <span title={sourceTitle(r.source === 'typed vitals' ? 'typed' : r.source, r.at, r.quote)}
-                              className={isLatest ? 'font-semibold text-gray-900' : 'text-gray-500'}>
+                        <Sourced source={r.source === 'typed vitals' ? 'typed' : r.source} at={r.at} quote={r.quote}
+                                 className={isLatest ? 'font-semibold text-gray-900' : 'text-gray-500'}>
                           {r.value}
                           {r.qualifier && <span className="text-xs font-normal text-gray-500"> ({r.qualifier})</span>}
                           {isLatest && <SourceIcon source={r.source} />}
                           {isNew(r.version) && <NewTag />}
-                        </span>
+                        </Sourced>
                       </React.Fragment>
                     );
                   })}
@@ -131,17 +149,19 @@ const FactList = ({ title, facts, isNew }) => facts.length > 0 && (
     <p className="mb-1 text-xs font-medium text-gray-500">{title}</p>
     <ul className="space-y-1 text-sm">
       {facts.map((fact) => (
-        <li key={fact.id} title={sourceTitle(fact.source.kind, fact.recorded_at, fact.quote)}
-            className={fact.status === 'absent' ? 'text-gray-500' : 'text-gray-900'}>
-          {fact.text}
-          {fact.status && fact.status !== 'present' && (
-            <span className={fact.status === 'not assessed' || fact.status === 'planned' ? ' text-amber-700' : ' text-gray-500'}>
-              {' '}— {FACT_STATUS[fact.status]}
-            </span>
-          )}
-          <SourceIcon source={fact.source.kind} />
-          <span className="text-xs tabular-nums text-gray-500"> {formatTime(fact.recorded_at)}</span>
-          {isNew(fact.source_version) && <NewTag />}
+        <li key={fact.id}>
+          <Sourced source={fact.source.kind} at={fact.recorded_at} quote={fact.quote}
+                   className={fact.status === 'absent' ? 'text-gray-500' : 'text-gray-900'}>
+            {fact.text}
+            {fact.status && fact.status !== 'present' && (
+              <span className={fact.status === 'not assessed' || fact.status === 'planned' ? ' text-amber-700' : ' text-gray-500'}>
+                {' '}— {FACT_STATUS[fact.status]}
+              </span>
+            )}
+            <SourceIcon source={fact.source.kind} />
+            <span className="text-xs tabular-nums text-gray-500"> {formatTime(fact.recorded_at)}</span>
+            {isNew(fact.source_version) && <NewTag />}
+          </Sourced>
         </li>
       ))}
     </ul>
@@ -153,7 +173,7 @@ const PatientInformation = ({ findings, onRetry, isNew }) => {
   if (!findings) return null;
   const empty = !findings.chief_complaint && findings.findings.length === 0 && findings.treatments.length === 0;
   return (
-    <Section title="Patient information" caption="AI-extracted from the crew's reports · hover for their words">
+    <Section title="Patient information">
       <div className="space-y-3">
         {['processing', 'pending'].includes(findings.status) && (
           <StatusText tone="info" dot={false}><Loader2 className="h-3 w-3 animate-spin" /> Reading the latest report…</StatusText>
@@ -165,8 +185,11 @@ const PatientInformation = ({ findings, onRetry, isNew }) => {
           </div>
         )}
         {findings.chief_complaint && (
-          <p className="text-sm" title={sourceTitle(findings.chief_complaint.source.kind, findings.chief_complaint.recorded_at, findings.chief_complaint.quote)}>
-            <span className="font-medium text-gray-700">Chief complaint:</span> {findings.chief_complaint.text}
+          <p className="text-sm">
+            <span className="font-medium text-gray-700">Chief complaint:</span>{' '}
+            <Sourced source={findings.chief_complaint.source.kind} at={findings.chief_complaint.recorded_at} quote={findings.chief_complaint.quote}>
+              {findings.chief_complaint.text}
+            </Sourced>
             {isNew(findings.chief_complaint.first_stated_version) && <NewTag />}
           </p>
         )}
@@ -260,7 +283,7 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
       {assessment?.summary && (
         <Section
           title={<>AI handoff{liveCase.assessment_is_outdated && <span className="ml-2 text-xs font-normal text-amber-700">(based on earlier information or ETA)</span>}</>}
-          caption={`${assessment.completed_at ? `Assessed at ${formatTime(assessment.completed_at)} · current arrival time shown above · ` : ''}AI-written from the crew's reports, not validated on real EMS audio`}>
+          caption={assessment.completed_at ? `Assessed at ${formatTime(assessment.completed_at)} · current arrival time shown above` : null}>
           {isReporting(liveCase) && (
             <StatusText tone="info" className="mb-2">
               The crew is reporting now. This handoff covers the reports they&apos;ve already sent.

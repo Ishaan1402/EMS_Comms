@@ -14,7 +14,7 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 
-const counts = { inbound: 5, unacknowledged: 2, crewAlerts: 0, needsReview: 0, prepareNow: 1, arrivingSoon: 3 };
+const counts = { inbound: 5, unacknowledged: 2, crewAlerts: 0, needsReview: 0, arrivingSoon: 3 };
 const render = (props = {}) => act(() => root.render(
   <QueueToolbar counts={counts} filter="all" onFilter={() => {}} sort="queue" onSort={() => {}} queueMode="standard"
                 onModeChange={() => {}} hasHospital {...props} />,
@@ -24,7 +24,7 @@ const menuButton = (prefix) => [...container.querySelectorAll('[aria-haspopup]')
 
 test('a filter with nothing in it is not offered, and All always is', () => {
   render();
-  expect(buttons()).toEqual(['All5', 'Not acknowledged2', 'AI: Prepare now1', 'Arriving soon3']);
+  expect(buttons()).toEqual(['All5', 'Not acknowledged2', 'Arriving soon3']);
 });
 
 test('a filter that is on stays visible even when it has emptied, so it can be turned off', () => {

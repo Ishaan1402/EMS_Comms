@@ -34,9 +34,11 @@ const MoveCue = ({ move }) => (move.to < move.from
 /**
  * One case in the hospital's queue, in three lines: who and how soon, what is wrong with the patient
  * (the complaint), and only the exceptions that need a person. A normal state, such as acknowledged,
- * gets no marker. Why the case sits here is the tooltip and the top of the case.
+ * gets no marker. Why the case sits here is the tooltip and the top of the case. The AI's category is on
+ * the right without its "AI:" prefix; the case shows where it comes from.
  */
-const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, arrivalMinutes, moveButtons }) => {
+const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, arrivalMinutes, dragHandle = null,
+  rowProps = {} }) => {
   const open = c.status === 'active' && !c.arrived_at;
   const soon = open && FILTERS.arrivingSoon(c, { serverNow, arrivalMinutes });
   const quietMs = serverNow - Date.parse(c.last_segment_at || c.started_at);
@@ -46,12 +48,12 @@ const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, ar
       && `Standard order would put it #${c.suggested_position}`,
   ].filter(Boolean).join('\n');
   return (
-    <li className={`flex border-l-[3px] ${stripeFor(c)}`}>
-      {moveButtons}
+    <li {...rowProps} className={`flex border-l-[3px] bg-white ${stripeFor(c)} ${rowProps['data-dragging'] ? 'shadow-lg' : ''}`}>
+      {dragHandle}
       <button
         onClick={() => onSelect(c.id)}
         title={why || undefined}
-        className={`min-w-0 flex-1 border-b border-gray-100 px-4 py-3 text-left transition-colors hover:bg-gray-50 ${selected ? 'bg-blue-50/70' : ''}`}
+        className={`min-w-0 flex-1 cursor-pointer border-b border-gray-100 px-4 py-3 text-left transition-colors ${selected ? 'bg-blue-50/70 hover:bg-blue-50' : 'hover:bg-gray-100'}`}
       >
         <div className="flex items-baseline justify-between gap-3">
           <span className="flex min-w-0 items-baseline gap-2">
@@ -81,7 +83,7 @@ const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, ar
                 <span className="text-xs text-gray-500">No audio {Math.floor(quietMs / 60000)}m</span>
               )}
             </span>
-            <span className="shrink-0"><CategoryBadge liveCase={c} /></span>
+            <span className="shrink-0"><CategoryBadge liveCase={c} prefix={false} /></span>
           </div>
         )}
       </button>
