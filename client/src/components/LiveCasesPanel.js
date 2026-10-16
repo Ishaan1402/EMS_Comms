@@ -221,11 +221,13 @@ const LiveCasesPanel = () => {
 
   // Manual order: move a row and save the whole order for the hospital. The screen shows the new order
   // at once (without a "from #" cue, since this doctor made the move) and the server's queue replaces it.
+  // If the save fails, the last order the server confirmed comes back, unless a newer one has arrived.
   const orderIds = queued.map((c) => c.id);
   const moveCase = async (id, to) => {
     const ids = orderIds.filter((other) => other !== id);
     ids.splice(to, 0, id);
     const position = Object.fromEntries(ids.map((id, index) => [id, index + 1]));
+    const confirmed = { queue, positions: positions.current, asOf: queueAsOf.current };
     positions.current = position;
     setQueue((current) => ({ ...current, cases: [...current.cases]
       .map((entry) => ({ ...entry, queue_position: position[entry.id] ?? entry.queue_position }))
@@ -233,12 +235,16 @@ const LiveCasesPanel = () => {
     try {
       await axios.put('/api/hospitals/mine/doctor-order', { case_ids: ids });
     } catch (error) {
+      if (queueAsOf.current === confirmed.asOf) {
+        positions.current = confirmed.positions;
+        setQueue(confirmed.queue);
+      }
       toast.error(error.response?.data?.error || 'Could not move the case');
     }
     fetchQueue();
   };
-  const reorder = useDragReorder(orderIds, moveCase);
   const canReorder = !autoOrder && isDefaultView(view) && queued.length > 1;
+  const reorder = useDragReorder(orderIds, moveCase, canReorder);
 
   const dismissSegment = async (segment) => {
     try {

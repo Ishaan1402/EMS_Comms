@@ -218,6 +218,17 @@ test('in Manual, moving a row with the keyboard shows the new order at once and 
   expect(rowUnits()).not.toContain('from #');          // no "moved" cue for this doctor's own move
 });
 
+test('in Manual, a move that fails to save puts back the order the server last confirmed', async () => {
+  mockPut.mockClear();
+  mockPut.mockImplementationOnce(() => Promise.reject(new Error('503')));
+  await loadTwoCases({ queue_mode: 'manual', auto_order: false });
+  const handle = container.querySelector('ul [aria-label^="Move Medic 1"]');
+  await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+  // The recovery GET never answers here (as in an outage); the screen must not keep the unsaved order.
+  expect(pendingFor('/api/cases/queue')).toHaveLength(1);
+  expect(rowUnits().indexOf('Medic 1')).toBeLessThan(rowUnits().indexOf('Medic 2'));
+});
+
 test('the drag handles only show in Manual with the plain queue view, and the screen says why they are gone', async () => {
   await loadTwoCases({ queue_mode: 'manual', auto_order: false });
   const arrows = () => container.querySelectorAll('ul [aria-label^="Move "]').length;

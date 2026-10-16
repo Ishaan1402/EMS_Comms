@@ -12,8 +12,8 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 
 // Three 50 px rows, stacked from the top of the page.
-const List = ({ ids, onReorder }) => {
-  const { rowProps, handleProps } = useDragReorder(ids, onReorder);
+const List = ({ ids, onReorder, enabled }) => {
+  const { rowProps, handleProps } = useDragReorder(ids, onReorder, enabled);
   return (
     <ul>
       {ids.map((id, index) => {
@@ -63,4 +63,36 @@ test('the arrow keys move a row one place, never past either end', () => {
   expect(onReorder).not.toHaveBeenCalled();
   key('b', 'ArrowUp');
   expect(onReorder).toHaveBeenCalledWith('b', 0);
+});
+
+test('a live change of order or a row leaving lets go of the held row, and nothing is saved', () => {
+  const onReorder = jest.fn();
+  const show = (ids, enabled) => act(() => root.render(<List ids={ids} onReorder={onReorder} enabled={enabled} />));
+  const held = () => [...container.querySelectorAll('li')].filter((li) => li.dataset.dragging).length;
+  show(['a', 'b', 'c']);
+  pointer('pointerdown', handle('a'), 25);
+  pointer('pointermove', handle('a'), 110);
+  show(['b', 'a', 'c']);                       // the queue reorders under the pointer
+  expect(held()).toBe(0);
+  pointer('pointerup', handle('a'), 110);
+  expect(onReorder).not.toHaveBeenCalled();
+
+  pointer('pointerdown', handle('a'), 75);
+  show(['b', 'c']);                            // the held case leaves the queue
+  expect(held()).toBe(0);
+  expect(container.querySelector('li').style.transform).toBe('');
+
+  pointer('pointerdown', handle('b'), 25);
+  show(['b', 'c'], false);                     // reordering is turned off
+  expect(held()).toBe(0);
+});
+
+test('the same rows refreshed in the same order keep the drag going', () => {
+  const onReorder = jest.fn();
+  act(() => root.render(<List ids={['a', 'b', 'c']} onReorder={onReorder} />));
+  pointer('pointerdown', handle('a'), 25);
+  act(() => root.render(<List ids={['a', 'b', 'c']} onReorder={onReorder} />));
+  pointer('pointermove', handle('a'), 110);
+  pointer('pointerup', handle('a'), 110);
+  expect(onReorder).toHaveBeenCalledWith('a', 1);
 });

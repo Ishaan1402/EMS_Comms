@@ -5,20 +5,24 @@ import { useEffect, useRef, useState } from 'react';
  * works on a phone), or with the keyboard: on a focused handle, the up and down arrows move the row one
  * place. ids: the rows in their current order. onReorder(id, to) is called once, when the row is dropped:
  * the row's id (the list may change while it is held) and the index it should end up at.
- * Spread rowProps(id, index) on each row and handleProps(id, index) on its handle.
+ * Spread rowProps(id, index) on each row and handleProps(id, index) on its handle. A held row is let go,
+ * without saving, if the rows change order or leave under it, or if reordering is turned off (enabled).
  */
-const useDragReorder = (ids, onReorder) => {
+const useDragReorder = (ids, onReorder, enabled = true) => {
   const [drag, setDrag] = useState(null);   // { from, over, dy, height } while a row is held
   const rows = useRef({});
   const handles = useRef({});
   const start = useRef(null);
   const refocus = useRef(null);
 
+  const order = ids.join(',');
   // A row moved with the keyboard keeps its handle focused, wherever the list puts it.
   useEffect(() => {
     if (refocus.current) handles.current[refocus.current]?.focus();
     refocus.current = null;
-  }, [ids]);
+  }, [order]);
+  // The positions measured when the row was picked up no longer describe the list: let it go.
+  useEffect(() => setDrag(null), [order, enabled]);
 
   const onPointerDown = (index) => (event) => {
     if (event.button !== 0) return;
@@ -41,7 +45,7 @@ const useDragReorder = (ids, onReorder) => {
   };
 
   const onPointerUp = () => {
-    if (drag && drag.over !== drag.from) onReorder(start.current.id, drag.over);
+    if (drag && drag.over !== drag.from && ids[drag.from] === start.current.id) onReorder(start.current.id, drag.over);
     setDrag(null);
   };
 
@@ -83,6 +87,7 @@ const useDragReorder = (ids, onReorder) => {
     onPointerMove,
     onPointerUp,
     onPointerCancel: () => setDrag(null),
+    onLostPointerCapture: () => setDrag(null),
     onKeyDown: onKeyDown(id, index),
   });
 
