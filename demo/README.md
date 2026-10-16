@@ -61,7 +61,8 @@ ASCLEPIUS_DB_PATH=demo-rehearsal-01.db SEED_DEMO_USERS=1 SAS_SYNC_ENABLED=0 NODE
 1. **Doctor:** open http://localhost:5001 and log in as `dr.smith`.
 2. **EMT:** open a **private window or another browser** and log in as `emt.lee` (Medic 8, the patient whose radio drops out and who gets the sepsis alert). Logins are per browser profile, so one window can't be both. The EMT screen picks up the case when the replay opens it.
    On the doctor's screen, press the **bell** (top right of the queue) if you want the chime for crew alerts.
-3. **Run the story:**
+3. **Ask for consent, out loud.** Whoever plays the EMT says to the "patient": *"I'm turning on a secure digital scribe so I can focus on your care instead of typing. Is that okay?"* Wait for a yes, then start the replay. Say it live: the replay's audio clips are the reports themselves, so a line added to them would be transcribed and sent to the doctor as patient information. On a live recording, say it before pressing **Start Case & Record Report** or **Record Report**, for the same reason. It's a spoken step only; the app doesn't ask for or store consent.
+4. **Run the story:**
    ```bash
    .venv/bin/python demo/replay.py --base-url http://localhost:5001 --seconds-per-minute 10
    ```
