@@ -121,3 +121,6 @@ client/build/
 evals/local/
 evals/results/
 analytics/results/
+
+# Git worktrees for parallel sessions and agents (Claude Code's default location)
+.claude/worktrees/
