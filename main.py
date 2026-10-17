@@ -261,4 +261,8 @@ if __name__ == "__main__":
     print(f"🏥 Asclepius EMT System running on port {port}")
     # Auto-reload restarts the server whenever a .py file in the folder changes, which would cut
     # off a running demo (clips in flight are marked failed), so it is for development only.
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=os.getenv("NODE_ENV") != "production")
+    # Other checkouts of this repo live under .claude/worktrees; their edits must not reload this one.
+    # uvicorn ignores a directory only if it is given as an existing path that it can match absolutely.
+    agent_checkouts = [str(path) for path in [pathlib.Path(__file__).resolve().parent / ".claude"] if path.is_dir()]
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=os.getenv("NODE_ENV") != "production",
+                reload_excludes=agent_checkouts)
