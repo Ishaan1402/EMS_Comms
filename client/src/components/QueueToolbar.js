@@ -9,7 +9,6 @@ const FILTERS = [
   { id: 'unacknowledged', label: 'Not acknowledged', count: 'unacknowledged' },
   { id: 'crewAlerts', label: 'Crew alerts', count: 'crewAlerts' },
   { id: 'needsReview', label: 'Needs review', count: 'needsReview' },
-  { id: 'prepareNow', label: 'AI: Prepare now', count: 'prepareNow' },
   { id: 'arrivingSoon', label: 'Arriving soon', count: 'arrivingSoon' },
 ];
 

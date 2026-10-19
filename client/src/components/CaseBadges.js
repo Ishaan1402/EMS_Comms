@@ -40,21 +40,23 @@ export const isReporting = (liveCase) => liveCase.status === 'active' && !liveCa
 
 export const ReportingBadge = ({ liveCase }) => (isReporting(liveCase) ? <StatusText tone="info" pulse>Reporting…</StatusText> : null);
 
-// No assessment yet shows as unavailable, never as a guess.
-export const CategoryBadge = ({ liveCase }) => {
+// No assessment yet shows as unavailable, never as a guess. The case says "AI:" before it; a queue row
+// (prefix={false}) shows the category alone.
+export const CategoryBadge = ({ liveCase, prefix = true }) => {
+  const ai = prefix ? 'AI: ' : '';
   const category = liveCase.preparation_category;
   const assessing = ['pending', 'processing'].includes(liveCase.processing?.assessment?.status);
   if (!category && assessing) {
     return (
       <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-600">
-        <Loader2 className="h-3 w-3 animate-spin" />AI: assessing…
+        <Loader2 className="h-3 w-3 animate-spin" />{prefix ? 'AI: assessing…' : 'Assessing…'}
       </span>
     );
   }
   const tone = CATEGORY_TONES[category] || 'attention';
   return (
     <span className={`text-xs font-medium ${CATEGORY_TEXT[tone]}`}>
-      AI: {category || 'unavailable'}
+      {ai}{category || (prefix ? 'unavailable' : 'Not assessed')}
       {category && liveCase.assessment_is_outdated && ' · earlier info'}
     </span>
   );

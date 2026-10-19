@@ -6,7 +6,7 @@ import React from 'react';
  * must stay chosen, like the kind of update to type). items: [{ id, label, count }].
  */
 const Tabs = ({ label, items, value, onChange, required = false }) => (
-  <div role="group" aria-label={label} className="flex min-w-0 items-end gap-5 overflow-x-auto">
+  <div role="group" aria-label={label} className="flex min-w-0 items-end gap-5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
     {items.map(({ id, label: text, count }) => {
       const pressed = value === id;
       return (

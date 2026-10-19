@@ -5,7 +5,7 @@ import toast from 'react-hot-toast';
 const MODES = [
   { value: 'standard', label: 'Standard', text: (rules) => rules.standard },
   { value: 'ai_assisted', label: 'AI-assisted', text: (rules) => rules.ai_assisted },
-  { value: 'manual', label: 'Manual', text: () => 'Your team orders the queue with the arrows. New cases appear on top.' },
+  { value: 'manual', label: 'Manual', text: () => 'Your team drags the cases into order. New cases appear on top.' },
 ];
 
 /**
