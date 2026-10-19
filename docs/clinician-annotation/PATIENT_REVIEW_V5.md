@@ -39,8 +39,8 @@ and five are **basic** (only key or bystander facts, crew weight estimate: SYN00
 SYN008, SYN010). The case file also carries `age_years`, `sex`, `weight_kg`, `weight_source` and
 `history_detail` for analysis; the model never receives these fields.
 The layout is the v2 sheet's three tabs; Patient review differs only in the preparation labels and a
-Review status row. The importer reads Patient review only; Attention exercise answers (groups A01:
-SYN001/004/007, A02: SYN002/008/010) are read by hand until a parser for that layout is added.
+Review status row. The importer reads Patient review and, with `--queues`, the Attention exercise (A01:
+SYN001/004/007, A02: SYN002/008/010).
 The hidden `Original v2` tab preserves the supplied earlier responses; do not reuse them as labels for v5.
 Report units: pulse in beats/min, respirations in breaths/min, BP in mmHg, oxygen saturation in
 percent, glucose in mg/dL, temperature in Celsius and weight in kg. Reports identify oxygen
@@ -54,8 +54,16 @@ Save a working copy as `evals/local/patient-review-v5.xlsx`. From the repository
 python -m evals import-annotations \
   --workbook evals/local/patient-review-v5.xlsx \
   --cases docs/clinician-annotation/patient_review_v5_cases.json \
+  --queues docs/clinician-annotation/patient_review_v5_queues.json \
+  --approve-complete \
   --out evals/local/patient-review-v5-import-01
 ```
+
+`--approve-complete` approves every case marked Done with a handoff, change, preparation and at
+least one explanation, under the reviewer alias and the dataset version, and prints any case or
+attention group it left unapproved. `--queues` reads the Attention exercise groups (A01, A02);
+"Cannot assess" there is stored as Unsure. Generate the replay with the same `--queues` file so the
+app's queue order is snapshotted for the same groups.
 
 The importer checks the dataset version, case IDs, patient details, report text, report intervals
 and ETAs against the selected fixtures. It reads only `Patient review`, never the archived answers.
@@ -75,6 +83,7 @@ into preparation categories.
 ```bash
 python demo/pilot_scenario.py \
   --pilot docs/clinician-annotation/patient_review_v5_cases.json \
+  --queues docs/clinician-annotation/patient_review_v5_queues.json \
   --out evals/local/patient-review-v5-scenario.json
 ```
 

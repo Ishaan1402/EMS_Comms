@@ -1,0 +1,4 @@
+[
+  {"queue_id": "A01", "case_ids": ["SYN001", "SYN004", "SYN007"]},
+  {"queue_id": "A02", "case_ids": ["SYN002", "SYN008", "SYN010"]}
+]

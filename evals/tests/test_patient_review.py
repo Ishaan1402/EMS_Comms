@@ -162,6 +162,45 @@ class PatientReviewTests(unittest.TestCase):
                     import_workbook(source, self.cases, [])
         self.assertTrue(book.close.called)
 
+    def test_attention_rows_and_complete_answers_are_approved_deterministically(self):
+        from evals.annotations import approve_complete, parse_attention_rows
+        groups = load_json(ROOT / "docs/clinician-annotation/patient_review_v5_queues.json")
+        source = {c["case_id"]: c for c in self.cases}
+        rows = []
+        for number, group in enumerate(groups, 1):
+            rows += [[f"Group {number} / {group['queue_id']}", "Separate scenario."],
+                     ["Is ranking meaningful here?", "Yes"], ["Why / missing context?", "Bed state unknown."]]
+            for rank, case_id in enumerate(group["case_ids"], 1):
+                case = source[case_id]
+                rows += [[case_id, f"ETA {case['eta_minutes']} minutes at latest report"],
+                         ["Age / reported sex / weight", case["patient_details"]],
+                         ["T=0\nEMS Field Report", case["current_transcript"]],
+                         ["Attention order", "Cannot assess" if rank == 3 else str(rank)],
+                         ["Reason for position / tie / limits", f"Reason {rank}."]]
+        queues = parse_attention_rows(rows, groups, self.cases, "Dr Test")
+        self.assertEqual(queues[0]["order"], {"SYN001": 1, "SYN004": 2, "SYN007": "Unsure"})
+        self.assertEqual(queues[0]["status"], "Done")
+        self.assertIn("SYN004: Reason 2.", queues[0]["explanation"])
+        changed = [list(row) for row in rows]
+        changed[5][1] = changed[5][1].replace("46", "47")
+        with self.assertRaisesRegex(ValueError, "Attention source"):
+            parse_attention_rows(changed, groups, self.cases)
+
+        self.rows.insert(0, ["Reviewer alias", "Dr Test"])
+        for label, value in (("EMS to ED Handoff", "Handoff."), ("Meaningful change?", "No earlier report"),
+                             ("Evidence / missing information", "Gaps."), ("Preparation needed?", "Routine"),
+                             ("Review status", "Done")):
+            self.set_answer(label, value)
+        reference = {"dataset_version": "patient_review_v5", "cases": parse_patient_rows(self.rows, self.cases),
+                     "queues": queues}
+        skipped = approve_complete(reference)
+        self.assertTrue(reference["cases"][0]["approved"])
+        self.assertEqual(reference["cases"][0]["reviewer_id"], "Dr Test")
+        self.assertEqual(reference["cases"][0]["rubric_version"], "patient_review_v5")
+        self.assertFalse(reference["cases"][1]["approved"])
+        self.assertTrue(all(q["approved"] for q in queues))
+        self.assertEqual(len(skipped), 9)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .annotations import import_workbook
+from .annotations import approve_complete, import_workbook
 from .contracts import (DEFAULT_CASES, ROOT, blank_reference, case_dataset_version, load_cases,
                         load_json, output_errors, validate_case_dataset_version)
 from .demo import mock_data, raw_report_baseline
@@ -37,6 +37,8 @@ def main(argv=None):
         command.add_argument("--out", type=Path, required=True, help="New output directory (never overwritten)")
         if name == "import-annotations":
             command.add_argument("--workbook", type=Path, required=True)
+            command.add_argument("--approve-complete", action="store_true",
+                                 help="Approve every complete answer marked Done; list the rest")
         if name == "baseline":
             command.add_argument("--dataset-version", help="Defaults to the selected case dataset version")
         if name == "score":
@@ -73,8 +75,12 @@ def main(argv=None):
                                   "rubric_version": None, "approved": False} for q in queues]})
         elif args.command == "import-annotations":
             reference = import_workbook(args.workbook, cases, queues)
+            skipped = approve_complete(reference) if args.approve_complete else None
             args.out.mkdir(parents=True)
             save_json(args.out / "references.json", reference)
+            if skipped is not None:
+                approved = sum(r["approved"] for r in reference["cases"] + reference["queues"])
+                print(f"Approved {approved} complete answers." + "".join(f"\nNot approved: {s}" for s in skipped))
         elif args.command == "baseline":
             baseline_version = args.dataset_version or dataset_version
             validate_case_dataset_version(cases, baseline_version)
