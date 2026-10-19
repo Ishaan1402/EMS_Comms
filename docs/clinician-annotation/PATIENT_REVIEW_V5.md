@@ -33,8 +33,11 @@ There are no extra acknowledgment questions. The existing replay supplies that t
 Known patient details above each report also appear in the report when they become available.
 Case 6's age and estimated weight are supplied after treatment, not in its earlier report.
 Reports state age and sex once, as a crew would; the source of each detail is in the row above
-the report. Fuller histories: SYN001, SYN003, SYN006, SYN007, SYN009. Focused or limited:
-SYN002, SYN004, SYN005, SYN008, SYN010 (useful for comparing results by amount of history).
+the report. Every case gives age, sex and a weight estimate. Five are **detailed** (history,
+medicines, allergies and social habits from the patient: SYN001, SYN003, SYN006, SYN007, SYN009)
+and five are **basic** (only key or bystander facts, crew weight estimate: SYN002, SYN004, SYN005,
+SYN008, SYN010). The case file also carries `age_years`, `sex`, `weight_kg`, `weight_source` and
+`history_detail` for analysis; the model never receives these fields.
 The layout is the v2 sheet's three tabs; Patient review differs only in the preparation labels and a
 Review status row. The importer reads Patient review only; Attention exercise answers (groups A01:
 SYN001/004/007, A02: SYN002/008/010) are read by hand until a parser for that layout is added.
