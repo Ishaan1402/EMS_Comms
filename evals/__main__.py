@@ -5,7 +5,8 @@ import sys
 from pathlib import Path
 
 from .annotations import import_workbook
-from .contracts import DEFAULT_CASES, ROOT, blank_reference, load_cases, load_json, output_errors
+from .contracts import (DEFAULT_CASES, ROOT, blank_reference, case_dataset_version, load_cases,
+                        load_json, output_errors, validate_case_dataset_version)
 from .demo import mock_data, raw_report_baseline
 from .evaluate import evaluate, prediction_hash
 from .experiments import build_plan, execute_plan, score_experiment
@@ -31,12 +32,13 @@ def main(argv=None):
     for name in ("prepare", "import-annotations", "baseline", "demo", "score", "plan", "run"):
         command = sub.add_parser(name)
         command.add_argument("--cases", type=Path, default=DEFAULT_CASES)
-        command.add_argument("--queues", type=Path, default=QUEUES)
+        command.add_argument("--queues", type=Path,
+                             help="Queue definitions; legacy pilot defaults to evals/queues.json")
         command.add_argument("--out", type=Path, required=True, help="New output directory (never overwritten)")
         if name == "import-annotations":
             command.add_argument("--workbook", type=Path, required=True)
         if name == "baseline":
-            command.add_argument("--dataset-version", default="pilot_v1")
+            command.add_argument("--dataset-version", help="Defaults to the selected case dataset version")
         if name == "score":
             command.add_argument("--references", type=Path, required=True)
             command.add_argument("--predictions", type=Path, required=True)
@@ -54,13 +56,17 @@ def main(argv=None):
             command.add_argument("--references", type=Path, help="Optional approved references; otherwise quality scores are N/A")
     args = parser.parse_args(argv)
     try:
-        cases, queues = load_cases(args.cases), load_json(args.queues)
+        cases = load_cases(args.cases)
+        declared_version = case_dataset_version(cases)
+        dataset_version = declared_version or "pilot_v1"
+        # A revised case set never silently inherits the original pilot's queue exercises.
+        queues = load_json(args.queues) if args.queues else ([] if declared_version else load_json(QUEUES))
         if args.out.exists():
             raise ValueError("Output directory already exists; choose a new run directory")
         if args.command == "prepare":
             args.out.mkdir(parents=True)
             save_json(args.out / "cases.json", cases)
-            save_json(args.out / "references.json", {"kind": "clinician_reference", "dataset_version": "pilot_v1",
+            save_json(args.out / "references.json", {"kind": "clinician_reference", "dataset_version": dataset_version,
                       "cases": [blank_reference(c["case_id"]) for c in cases],
                       "queues": [{"queue_id": q["queue_id"], "order": dict.fromkeys(q["case_ids"]),
                                   "explanation": None, "status": "Not started", "reviewer_id": None,
@@ -70,8 +76,10 @@ def main(argv=None):
             args.out.mkdir(parents=True)
             save_json(args.out / "references.json", reference)
         elif args.command == "baseline":
+            baseline_version = args.dataset_version or dataset_version
+            validate_case_dataset_version(cases, baseline_version)
             args.out.mkdir(parents=True)
-            prediction = raw_report_baseline(cases, args.dataset_version)
+            prediction = raw_report_baseline(cases, baseline_version)
             save_json(args.out / "predictions.json", prediction)
             save_json(args.out / "summary_reviews.json", review_template(prediction))
         elif args.command == "demo":

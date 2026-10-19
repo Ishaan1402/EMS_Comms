@@ -37,6 +37,24 @@ def number(value, *, integer=False, minimum=0):
             and (not integer or int(value) == value))
 
 
+def case_dataset_version(cases):
+    """Read an explicit fixture version, leaving legacy unversioned case lists compatible."""
+    versions = [case.get("dataset_version") for case in cases]
+    if not any(version is not None for version in versions):
+        return None
+    if any(not isinstance(version, str) or not version.strip() for version in versions):
+        raise ValueError("Every case must declare the same nonempty dataset_version")
+    if len(set(versions)) != 1:
+        raise ValueError("Case dataset versions differ")
+    return versions[0]
+
+
+def validate_case_dataset_version(cases, version):
+    declared = case_dataset_version(cases)
+    if declared is not None and declared != version:
+        raise ValueError(f"Case dataset version {declared} does not match {version}")
+
+
 def load_cases(path=DEFAULT_CASES):
     raw = load_json(path)
     if not isinstance(raw, list) or not raw:
@@ -57,6 +75,7 @@ def load_cases(path=DEFAULT_CASES):
         cases.append(dict(item))
     if len({c["case_id"] for c in cases}) != len(cases):
         raise ValueError("Duplicate case IDs")
+    case_dataset_version(cases)
     return cases
 
 
