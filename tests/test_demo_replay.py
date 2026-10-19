@@ -328,6 +328,21 @@ def pilot(tmp_path):
 
 
 class TestPilotScenario:
+    def test_patient_review_version_and_information_timing(self):
+        path = Path(__file__).resolve().parents[1] / "docs/clinician-annotation/patient_review_v2_1_cases.json"
+        cases = pilot_scenario.load_cases(path)
+        scenario = pilot_scenario.build(cases, list(cases), [])
+        replay.validate(scenario)
+        assert scenario["dataset_version"] == "patient_review_v2.1"
+        assert not any(event["action"] == "snapshot_queue" for event in scenario["events"])
+        patients = {patient["source_case_id"]: patient for patient in scenario["patients"]}
+        assert "90 kg" in patients["SYN003"]["reports"]["initial"]
+        assert "68 kg" not in patients["SYN006"]["reports"]["initial"]
+        assert "68 kg" in patients["SYN006"]["reports"]["update"]
+        for case_id, case in cases.items():
+            assert patients[case_id]["reports"]["update"] == case["current_transcript"]
+        assert pilot_scenario.earlier_report("Patient states: pain started at home.") == "Patient states: pain started at home."
+
     def test_cases_are_replayed_as_the_dataset_describes_them(self, pilot):
         replay.validate(pilot)
         patients = {p["source_case_id"]: p for p in pilot["patients"]}

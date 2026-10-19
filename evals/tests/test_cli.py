@@ -41,6 +41,28 @@ class CLITests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertEqual((out / "metrics.json").read_bytes(), before)
 
+    def test_patient_review_cases_prepare_and_score_without_old_queue_exercises(self):
+        cases = ROOT / "docs/clinician-annotation/patient_review_v2_1_cases.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            for command in ("prepare", "baseline"):
+                result = self.run_command(command, "--cases", cases, "--out", base / command)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            reference = load_json(base / "prepare/references.json")
+            self.assertEqual(reference["dataset_version"], "patient_review_v2.1")
+            self.assertEqual(reference["queues"], [])
+            result = self.run_command("score", "--cases", cases,
+                                      "--references", base / "prepare/references.json",
+                                      "--predictions", base / "baseline/predictions.json", "--out", base / "score")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = load_json(base / "score/metrics.json")
+            self.assertEqual(report["approved_reference_cases"], 0)
+            self.assertIsNone(report["results"][0]["preparation"]["accuracy"])
+            result = self.run_command("baseline", "--cases", cases, "--dataset-version", "pilot_v1",
+                                      "--out", base / "wrong-version")
+            self.assertEqual(result.returncode, 2)
+            self.assertFalse((base / "wrong-version").exists())
+
     def test_notebook_format_and_python_cells_compile(self):
         notebook = load_json(ROOT / "analytics/ems_evaluation.ipynb")
         self.assertEqual(notebook["nbformat"], 4)

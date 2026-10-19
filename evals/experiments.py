@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .contracts import CASE_FIELDS, ROOT, blank_reference, number, text
+from .contracts import CASE_FIELDS, ROOT, blank_reference, number, text, validate_case_dataset_version
 from .evaluate import evaluate
 from .providers import KEY_ENV, ProviderError, awareness_schema, generate, headers_for, queue_schema, request_spec
 from .report import save_json, save_report
@@ -42,6 +42,7 @@ def build_plan(spec, cases, queues, *, model_ids=None, environ=None):
         raise ValueError("Unknown experiment fields; credentials belong only in environment variables")
     if not text(spec.get("dataset_version")) or spec.get("purpose") not in ("development", "holdout"):
         raise ValueError("Specify dataset_version and purpose=development/holdout")
+    validate_case_dataset_version(cases, spec["dataset_version"])
     for field, maximum in (("repeats", 20), ("max_output_tokens", 8192), ("timeout_seconds", 60), ("max_retries", 2)):
         value = spec.get(field)
         if not isinstance(value, int) or not number(value, integer=True, minimum=0 if field == "max_retries" else 1) or value > maximum:

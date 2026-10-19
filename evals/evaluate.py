@@ -5,7 +5,8 @@ import json
 import re
 from collections import Counter
 
-from .contracts import CHANGE, PREPARATION, number, output_errors, reference_errors, text
+from .contracts import (CHANGE, PREPARATION, number, output_errors, reference_errors, text,
+                        validate_case_dataset_version)
 from .metrics import classification_metrics, pairwise_metrics, percentile, ratio
 
 
@@ -35,6 +36,7 @@ def evaluate(cases, references, predictions, queue_definitions, reviews=None, *,
         raise ValueError("Reference dataset_version is required")
     if predictions.get("dataset_version") != references["dataset_version"]:
         raise ValueError("Prediction/reference dataset versions differ")
+    validate_case_dataset_version(cases, references["dataset_version"])
     known = {c["case_id"] for c in cases}
     refs = unique_index(references.get("cases", []), lambda r: r["case_id"], "reference case")
     if set(refs) - known:

@@ -2,6 +2,11 @@
 
 These are the simplified clinician guide and annotation notebook prepared for the synthetic-data hackathon pilot. Application code is unchanged.
 
+The revised **Patient review v2.1** form uses the application's preparation choices and includes
+demographics in the matching report text. Follow [the v2.1 instructions](PATIENT_REVIEW_V2_1.md) for
+that separately delivered workbook and its [versioned cases](patient_review_v2_1_cases.json).
+The Google links and repository workbook below are the older pilot, not the v2.1 form.
+
 ## Send to the clinician
 
 - [Live one-page guide](https://docs.google.com/document/d/1FxzWt1KcR_4GmbMPvQWKQGFhMikSTUiUNVdnsdMh0p8/edit)
