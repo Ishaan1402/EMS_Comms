@@ -54,6 +54,8 @@ The [simplified clinician guide and annotation notebook](docs/clinician-annotati
 
 The [evaluation pipeline](evals/README.md) and [evaluation notebook](analytics/ems_evaluation.ipynb) import that workbook, compare model outputs with approved clinician references, and export a dashboard plus CSVs for Python/SAS. Mock mode tests the pipeline while annotations are pending; it does not report clinical performance. [Model comparison](evals/MODEL_COMPARISON.md) adds opt-in OpenAI, Claude, Gemini, and local Ollama adapters; planning is offline and does not run inference.
 
+For the separate [v2 clinician form](docs/clinician-annotation/v2/README.md), use [v2 intake/scoring](evals/V2_EVALUATION.md) and the [v2 LLM collector](evals/V2_LLM_RUNS.md). V2 collection has its own prompts/schemas, opt-in execution gates, and offline re-scoring of saved outputs. The original notebook/commands remain v1; no labels or annotations are silently migrated.
+
 ### For EMTs/Paramedics
 - **Audio Recording**: Record patient conversations directly from mobile devices
 - **Patient Information**: Add context and details about the emergency

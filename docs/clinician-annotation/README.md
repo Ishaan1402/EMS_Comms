@@ -2,6 +2,8 @@
 
 These are the simplified clinician guide and annotation notebook prepared for the synthetic-data hackathon pilot. Application code is unchanged.
 
+A separate [v2 form and guide](v2/README.md) are available for a new review round. V2 preserves the original cases, separates workflow feedback from patient answers, and uses a new draft attention rubric. It does not replace the live Sheet or import into the v1 evaluation pipeline automatically. The original materials and annotations remain unchanged.
+
 ## Send to the clinician
 
 - [Live one-page guide](https://docs.google.com/document/d/1FxzWt1KcR_4GmbMPvQWKQGFhMikSTUiUNVdnsdMh0p8/edit)

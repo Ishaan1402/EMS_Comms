@@ -4,6 +4,8 @@ A provider-independent pilot evaluation, **offline by default**. It uses the **s
 
 Start with [the notebook](../analytics/ems_evaluation.ipynb), or run the commands below from the repository root. The application and clinician workbook are unchanged.
 
+For the **v2 form**, use the separate [v2 partial-annotation workflow](V2_EVALUATION.md): `python -m evals.v2 smoke --workbook PATH --out NEWDIR`. It imports and audits partial answers, runs a source-only deterministic baseline, and exports reports without model calls or automatic approvals. [V2 LLM runs](V2_LLM_RUNS.md) add `python -m evals.llm_v2 plan/run/score` for matching schemas, opt-in collection, and offline re-scoring. The original commands below remain v1-only.
+
 ## Run it now
 
 Python 3.10+ is sufficient for scoring, reports, mocks, and tests. XLSX import additionally needs:
