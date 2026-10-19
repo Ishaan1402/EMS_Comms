@@ -1,6 +1,8 @@
 # Patient review v2.1
 
-Use the separately delivered `Annotation_Notebook_v2.1.xlsx` for the revised cases.
+Send the clinician [Annotation_Notebook_v2.1.xlsx](Annotation_Notebook_v2.1.xlsx) (Patient review, Attention exercise and
+Form Feedback tabs, plus a hidden archive of the v2 answers). [The CSV](Annotation_Notebook_v2.1_Patient_review.csv) is the
+Patient review tab only, for reading diffs; import from the xlsx.
 The original `Annotation_Notebook.xlsx`, Google Sheet and `pilot_cases.json` remain the older pilot.
 The matching new source cases are [patient_review_v2_1_cases.json](patient_review_v2_1_cases.json).
 All patients and added details are fictional; clinical answers are blank for independent review.
