@@ -329,11 +329,11 @@ def pilot(tmp_path):
 
 class TestPilotScenario:
     def test_patient_review_version_and_information_timing(self):
-        path = Path(__file__).resolve().parents[1] / "docs/clinician-annotation/patient_review_v5_cases.json"
+        path = Path(__file__).resolve().parents[1] / "docs/clinician-annotation/patient_review_v2_1_cases.json"
         cases = pilot_scenario.load_cases(path)
         scenario = pilot_scenario.build(cases, list(cases), [])
         replay.validate(scenario)
-        assert scenario["dataset_version"] == "patient_review_v5"
+        assert scenario["dataset_version"] == "patient_review_v2.1"
         assert not any(event["action"] == "snapshot_queue" for event in scenario["events"])
         patients = {patient["source_case_id"]: patient for patient in scenario["patients"]}
         assert "90 kg" in patients["SYN003"]["reports"]["initial"]

@@ -42,14 +42,14 @@ class CLITests(unittest.TestCase):
             self.assertEqual((out / "metrics.json").read_bytes(), before)
 
     def test_patient_review_cases_prepare_and_score_without_old_queue_exercises(self):
-        cases = ROOT / "docs/clinician-annotation/patient_review_v5_cases.json"
+        cases = ROOT / "docs/clinician-annotation/patient_review_v2_1_cases.json"
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             for command in ("prepare", "baseline"):
                 result = self.run_command(command, "--cases", cases, "--out", base / command)
                 self.assertEqual(result.returncode, 0, result.stderr)
             reference = load_json(base / "prepare/references.json")
-            self.assertEqual(reference["dataset_version"], "patient_review_v5")
+            self.assertEqual(reference["dataset_version"], "patient_review_v2.1")
             self.assertEqual(reference["queues"], [])
             result = self.run_command("score", "--cases", cases,
                                       "--references", base / "prepare/references.json",

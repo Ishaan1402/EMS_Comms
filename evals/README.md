@@ -4,10 +4,10 @@ A provider-independent pilot evaluation, **offline by default**. It uses the **s
 
 Start with [the notebook](../analytics/ems_evaluation.ipynb), or run the commands below from the repository root. The application and clinician workbook are unchanged.
 
-For the revised **Patient review v5** workbook, use the [v5 import instructions](../docs/clinician-annotation/PATIENT_REVIEW_V5.md)
-and `--cases docs/clinician-annotation/patient_review_v5_cases.json`. Its `Patient review` tab is
+For the revised **Patient review v2.1** workbook, use the [v2.1 import instructions](../docs/clinician-annotation/PATIENT_REVIEW_V2_1.md)
+and `--cases docs/clinician-annotation/patient_review_v2_1_cases.json`. Its `Patient review` tab is
 supported without a queue exercise. The original defaults and examples below remain `pilot_v1`.
-The v5 importer preserves partial answers, maps the displayed `Cannot assess` to `Unsure`, and
+The v2.1 importer preserves partial answers, maps the displayed `Cannot assess` to `Unsure`, and
 leaves every reference unapproved. Versioned cases carry their dataset version into imports,
 prepared references, baselines and generated app scenarios; old predictions cannot score new cases.
 

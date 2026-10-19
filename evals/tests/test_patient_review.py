@@ -11,11 +11,11 @@ from evals.evaluate import evaluate
 from evals.experiments import build_plan, case_input
 
 
-CASES = ROOT / "docs/clinician-annotation/patient_review_v5_cases.json"
+CASES = ROOT / "docs/clinician-annotation/patient_review_v2_1_cases.json"
 
 
 def form_rows(cases):
-    rows = [["Dataset version", "patient_review_v5"]]
+    rows = [["Dataset version", "patient_review_v2.1"]]
     for index, case in enumerate(cases, 1):
         rows += [[f"Case {index} / {case['case_id']}", f"ETA {case['eta_minutes']} minutes at latest report"],
                  ["Age / reported sex / weight", case["patient_details"]]]
@@ -151,7 +151,7 @@ class PatientReviewTests(unittest.TestCase):
             source.write_bytes(b"Mocked reader source for hash, not an authored workbook")
             with patch("openpyxl.load_workbook", return_value=book):
                 reference = import_workbook(source, self.cases, [])
-                self.assertEqual(reference["dataset_version"], "patient_review_v5")
+                self.assertEqual(reference["dataset_version"], "patient_review_v2.1")
                 self.assertEqual(len(reference["cases"]), 10)
                 self.assertEqual(reference["queues"], [])
                 self.assertTrue(all(row["approved"] is False for row in reference["cases"]))
@@ -164,7 +164,7 @@ class PatientReviewTests(unittest.TestCase):
 
     def test_attention_rows_and_complete_answers_are_approved_deterministically(self):
         from evals.annotations import approve_complete, parse_attention_rows
-        groups = load_json(ROOT / "docs/clinician-annotation/patient_review_v5_queues.json")
+        groups = load_json(ROOT / "docs/clinician-annotation/patient_review_v2_1_queues.json")
         source = {c["case_id"]: c for c in self.cases}
         rows = []
         for number, group in enumerate(groups, 1):
@@ -191,12 +191,12 @@ class PatientReviewTests(unittest.TestCase):
                              ("Evidence / missing information", "Gaps."), ("Preparation needed?", "Routine"),
                              ("Review status", "Done")):
             self.set_answer(label, value)
-        reference = {"dataset_version": "patient_review_v5", "cases": parse_patient_rows(self.rows, self.cases),
+        reference = {"dataset_version": "patient_review_v2.1", "cases": parse_patient_rows(self.rows, self.cases),
                      "queues": queues}
         skipped = approve_complete(reference)
         self.assertTrue(reference["cases"][0]["approved"])
         self.assertEqual(reference["cases"][0]["reviewer_id"], "Dr Test")
-        self.assertEqual(reference["cases"][0]["rubric_version"], "patient_review_v5")
+        self.assertEqual(reference["cases"][0]["rubric_version"], "patient_review_v2.1")
         self.assertFalse(reference["cases"][1]["approved"])
         self.assertTrue(all(q["approved"] for q in queues))
         self.assertEqual(len(skipped), 9)

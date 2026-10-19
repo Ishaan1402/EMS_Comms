@@ -1,8 +1,8 @@
-# Patient review v5
+# Patient review v2.1
 
-Use the separately delivered `Annotation_Notebook_v5_clinical_review.xlsx` for the revised cases.
+Use the separately delivered `Annotation_Notebook_v2.1.xlsx` for the revised cases.
 The original `Annotation_Notebook.xlsx`, Google Sheet and `pilot_cases.json` remain the older pilot.
-The matching new source cases are [patient_review_v5_cases.json](patient_review_v5_cases.json).
+The matching new source cases are [patient_review_v2_1_cases.json](patient_review_v2_1_cases.json).
 All patients and added details are fictional; clinical answers are blank for independent review.
 
 ## For the physician
@@ -41,22 +41,22 @@ SYN008, SYN010). The case file also carries `age_years`, `sex`, `weight_kg`, `we
 The layout is the v2 sheet's three tabs; Patient review differs only in the preparation labels and a
 Review status row. The importer reads Patient review and, with `--queues`, the Attention exercise (A01:
 SYN001/004/007, A02: SYN002/008/010).
-The hidden `Original v2` tab preserves the supplied earlier responses; do not reuse them as labels for v5.
+The hidden `Original v2` tab preserves the supplied earlier responses; do not reuse them as labels for v2.1.
 Report units: pulse in beats/min, respirations in breaths/min, BP in mmHg, oxygen saturation in
 percent, glucose in mg/dL, temperature in Celsius and weight in kg. Reports identify oxygen
 device/flow and the source of weight estimates where applicable.
 
 ## Import completed answers
 
-Save a working copy as `evals/local/patient-review-v5.xlsx`. From the repository root:
+Save a working copy as `evals/local/patient-review-v2.1.xlsx`. From the repository root:
 
 ```bash
 python -m evals import-annotations \
-  --workbook evals/local/patient-review-v5.xlsx \
-  --cases docs/clinician-annotation/patient_review_v5_cases.json \
-  --queues docs/clinician-annotation/patient_review_v5_queues.json \
+  --workbook evals/local/patient-review-v2.1.xlsx \
+  --cases docs/clinician-annotation/patient_review_v2_1_cases.json \
+  --queues docs/clinician-annotation/patient_review_v2_1_queues.json \
   --approve-complete \
-  --out evals/local/patient-review-v5-import-01
+  --out evals/local/patient-review-v2.1-import-01
 ```
 
 `--approve-complete` approves every case marked Done with a handoff, change, preparation and at
@@ -72,7 +72,7 @@ explicitly stored as the existing evaluation contract's `Unsure`, with the displ
 separately. `Done` is progress, not approval: every imported `approved` remains false and reviewer
 and rubric verification must still be completed before scoring.
 
-The selected fixtures declare `patient_review_v5`; imported references and prepared files retain
+The selected fixtures declare `patient_review_v2.1`; imported references and prepared files retain
 that version. Versioned case sets do not silently inherit the original pilot's queue exercises.
 An explicit `--queues` file is needed to add a separately agreed queue exercise. Source edits
 require a revised fixture set and version; do not translate the former review-urgency answers
@@ -82,9 +82,9 @@ into preparation categories.
 
 ```bash
 python demo/pilot_scenario.py \
-  --pilot docs/clinician-annotation/patient_review_v5_cases.json \
-  --queues docs/clinician-annotation/patient_review_v5_queues.json \
-  --out evals/local/patient-review-v5-scenario.json
+  --pilot docs/clinician-annotation/patient_review_v2_1_cases.json \
+  --queues docs/clinician-annotation/patient_review_v2_1_queues.json \
+  --out evals/local/patient-review-v2.1-scenario.json
 ```
 
 This generates a scenario without starting the application or calling a model. Current reports
@@ -93,6 +93,6 @@ replay supplies the timing. Its existing earlier-report acknowledgment setup is 
 The old ten-case pilot remains available with the old defaults.
 
 When separately authorized, use this scenario for an application run and score its predictions
-with `--cases docs/clinician-annotation/patient_review_v5_cases.json` and approved v5 references.
+with `--cases docs/clinician-annotation/patient_review_v2_1_cases.json` and approved v2.1 references.
 Do not reuse `pilot_v1` predictions or references. Tests of import and replay preparation establish
 software compatibility, not clinical accuracy or evidence of time saved or patient benefit.
