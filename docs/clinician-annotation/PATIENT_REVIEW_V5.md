@@ -8,9 +8,10 @@ All patients and added details are fictional; clinical answers are blank for ind
 ## For the physician
 
 This is a single review with no follow-up round: complete the yellow fields for all ten cases.
+The Attention exercise and Form Feedback tabs are optional, as in the v2 sheet.
 Read the earlier report, then the latest (T=0). Use only supplied facts and flag important gaps;
 missing information does not mean normal. Answer for the report as written and note anything that
-seems unrealistic for an EMS crew under Evidence / missing information. Judge change separately
+seems unrealistic for an EMS crew on the Form Feedback tab. Judge change separately
 from preparation needs. Improvement can count too. Choose **No earlier report** when none is
 provided; direction is optional. The handoff is 2–3 sentences, what you would want to hear before arrival.
 
@@ -34,7 +35,9 @@ Case 6's age and estimated weight are supplied after treatment, not in its earli
 Reports state age and sex once, as a crew would; the source of each detail is in the row above
 the report. Fuller histories: SYN001, SYN003, SYN006, SYN007, SYN009. Focused or limited:
 SYN002, SYN004, SYN005, SYN008, SYN010 (useful for comparing results by amount of history).
-The layout is the v2 form's; only the preparation labels and a Review status row differ.
+The layout is the v2 sheet's three tabs; Patient review differs only in the preparation labels and a
+Review status row. The importer reads Patient review only; Attention exercise answers (groups A01:
+SYN001/004/007, A02: SYN002/008/010) are read by hand until a parser for that layout is added.
 The hidden `Original v2` tab preserves the supplied earlier responses; do not reuse them as labels for v5.
 Report units: pulse in beats/min, respirations in breaths/min, BP in mmHg, oxygen saturation in
 percent, glucose in mg/dL, temperature in Celsius and weight in kg. Reports identify oxygen
