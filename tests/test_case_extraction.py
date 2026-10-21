@@ -177,6 +177,15 @@ class TestInterpret:
         ]), info)
         assert [(f["vital_name"], f["vital_value"]) for f in facts] == [("dbp", 58), ("temp_c", 39.1), ("hr", 50)]
 
+    def test_a_wrong_number_does_not_block_the_same_vital_quoted_correctly(self):
+        info = {"new": [{"id": "radio-1", "text": "Pulse 90. Rhythm irregular.",
+                         "segment_id": 1, "update_id": None, "time": "t1"}]}
+        facts = case_extraction.interpret(self.output(vitals=[
+            {"name": "hr", "value": 90, "qualifier": "", "item": "radio-1", "quote": "Rhythm irregular"},
+            {"name": "hr", "value": 90, "qualifier": "", "item": "radio-1", "quote": "Pulse 90"},
+        ]), info)
+        assert [(f["vital_value"], f["source_text"]) for f in facts] == [(90, "Pulse 90")]
+
     def test_wrong_shape_is_unreadable_not_empty(self):
         assert case_extraction.interpret(None, self.INFO) is None
         assert case_extraction.interpret({"vitals": []}, self.INFO) is None

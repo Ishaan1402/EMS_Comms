@@ -257,12 +257,13 @@ def interpret(output, info: dict) -> Optional[list]:
         key = (finding_type, item["id"], value.lower(), detail)
         if key in seen:
             return
-        seen.add(key)
         quote = verified_quote(entry.get("quote"), item.get("text"))
-        # A real quote with the wrong number stored ("BP 92 over 58" as systolic 29) is dropped too.
+        # A real quote with the wrong number stored ("BP 92 over 58" as systolic 29) is dropped too,
+        # before it counts as seen, so a correct entry after it is still kept.
         if vital_value is not None and not stated(float(vital_value), numbers_in(quote),
                                                        temperature=vital_name == "temp_c"):
             return
+        seen.add(key)
         facts.append({
             "finding_type": finding_type, "value": value, "detail": detail,
             "vital_name": vital_name, "vital_value": vital_value,

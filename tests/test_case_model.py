@@ -382,12 +382,19 @@ class TestAssessments:
     @pytest.mark.parametrize("summary", [
         "67-year-old, SpO2 92 % on room air, BP 140/90.",
         "Febrile at 39.1 °C, HR one forty.",
+        "GCS 14/15 since 14:30, glucose 1,000, pulse 105.",
     ])
     def test_handoff_numbers_from_the_reports_pass(self, monkeypatch, summary):
         use_scorer(monkeypatch, output(summary=summary))
-        info = "67F, sat ninety two, BP one forty over ninety, temp 102.4"
+        info = "67F, sat ninety two, BP one forty over ninety, temp 102.4, GCS 14 at 1430, sugar 1000, pulse one oh five"
         after = get_case(start_case(patient_info=info)["id"])
         assert after["current_assessment"]["status"] == "completed", after["processing"]["reasons"]
+
+    def test_only_a_temperature_may_be_converted_between_fahrenheit_and_celsius(self, monkeypatch):
+        use_scorer(monkeypatch, output(summary="Temp 37.8 °C, HR 212."))
+        after = get_case(start_case(patient_info="67F, HR 100, temp 100")["id"])
+        assert after["processing"]["reasons"] == [
+            "Handoff mentions 212, not found in the crew's reports. Check before relying on it."]
 
     def test_unsure_with_an_unstated_number_keeps_both_reasons(self, monkeypatch):
         use_scorer(monkeypatch, output(category="Unsure", summary="HR 130."))

@@ -300,21 +300,26 @@ def interpret(output) -> dict:
     return {**fields, "status": "completed", "review_reason": None}
 
 
-# A number written in digits, not part of a name such as SpO2; "120/80" is two numbers.
-DIGITS = re.compile(r"(?<![A-Za-z\d.])\d+(?:\.\d+)?")
+# A number written in digits, not part of a name such as SpO2; "120/80" is two numbers, "1,000" one.
+DIGITS = re.compile(r"(?<![A-Za-z\d.,])\d{1,3}(?:,\d{3})+(?![\d,])|(?<![A-Za-z\d.])\d+(?:\.\d+)?")
+# A handoff number that is a temperature, so it may be the reports' value converted between °F and °C.
+DEGREES_AFTER = re.compile(r"\s*(?:°|º|degrees?\b|deg\b|[CF]\b)", re.IGNORECASE)
+TEMPERATURE_BEFORE = re.compile(r"\b(?:temp\w*|febrile|fever)\W+(?:\w+\W+)?$", re.IGNORECASE)
+# The scale after a GCS score written as "14/15".
+GCS_OUT_OF = re.compile(r"(?<=\d)/15\b")
 NUMBER_WORDS = {word: n for n, word in enumerate(
     "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
     "sixteen seventeen eighteen nineteen".split())}
 NUMBER_WORDS.update({word: 10 * n for n, word in enumerate(
     "twenty thirty forty fifty sixty seventy eighty ninety".split(), start=2)})
-NUMBER_WORDS.update(a=1, an=1)
+NUMBER_WORDS.update(a=1, an=1, oh=0)
 
 
 def spoken_numbers(text: str) -> set:
     """
     Numbers said in words, as radio reports say them: "ninety two" (92), "thirty-nine point one"
-    (39.1), "one hundred and ten" (110), and "one forty" (140). Each word's own value counts too,
-    so an ambiguous phrase allows every reading.
+    (39.1), "one hundred and ten" (110), "one forty" (140) and "one oh five" (105). Each word's own
+    value counts too, so an ambiguous phrase allows every reading.
     """
     found = set()
     numbers, hundred, point = [], False, False
@@ -342,16 +347,19 @@ def spoken_numbers(text: str) -> set:
         else:
             found.update(numbers)
             found.update(a * 100 + b for a, b in zip(numbers, numbers[1:]) if a < 10 and 10 <= b < 100)
+            found.update(a * 100 + b for a, zero, b in zip(numbers, numbers[1:], numbers[2:])
+                         if 0 < a < 10 and zero == 0 and b < 10)
             numbers, hundred, point = [], False, False
     return found
 
 
 def numbers_in(text: str) -> set:
-    """Every number the text states, in digits or in words."""
-    return {float(n) for n in DIGITS.findall(text)} | {float(n) for n in spoken_numbers(text)}
+    """Every number the text states, in digits or in words. A time such as 1430 also states 14 and 30."""
+    numbers = {float(n.replace(",", "")) for n in DIGITS.findall(text)} | {float(n) for n in spoken_numbers(text)}
+    return numbers | {part for n in numbers if n.is_integer() and 100 <= n <= 2359 for part in divmod(n, 100)}
 
 
-def stated(number: float, numbers: set, temperature: bool = True) -> bool:
+def stated(number: float, numbers: set, temperature: bool = False) -> bool:
     """Whether a number is one of these, as given or (for a temperature) converted between °F and °C."""
     return any(number == n or temperature and (abs(number - (n - 32) * 5 / 9) <= 0.5
                                                or abs(number - (n * 9 / 5 + 32)) <= 0.5)
@@ -366,8 +374,13 @@ def unsupported_numbers(fields: dict, inputs: dict) -> list:
     given = inputs["input"]
     numbers = numbers_in(f"{given['prior_information']}\n{given['current_transcript']}")
     numbers |= {float(given[key]) for key in ("eta_minutes", "elapsed_minutes") if given[key] is not None}
-    written = DIGITS.findall(f"{fields['summary']}\n{fields['change_explanation']}")
-    return list(dict.fromkeys(n for n in written if not stated(float(n), numbers)))
+    text = GCS_OUT_OF.sub("", f"{fields['summary']}\n{fields['change_explanation']}")
+    unstated = []
+    for match in DIGITS.finditer(text):
+        is_temperature = bool(DEGREES_AFTER.match(text, match.end()) or TEMPERATURE_BEFORE.search(text[:match.start()]))
+        if not stated(float(match.group().replace(",", "")), numbers, temperature=is_temperature):
+            unstated.append(match.group())
+    return list(dict.fromkeys(unstated))
 
 
 def check_numbers(fields: dict, inputs: dict) -> dict:
