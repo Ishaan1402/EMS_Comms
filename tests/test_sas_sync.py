@@ -139,7 +139,7 @@ class TestTables:
 
     def test_case_assessment_and_vital_rows(self, story):
         [case] = rows_of("CASES", story["id"])
-        assert case["OPERATIONAL_STATUS"] == "closed" and case["PREPARATION_CATEGORY"] == "Prepare now"
+        assert case["OPERATIONAL_STATUS"] == "closed" and case["PREPARATION_CATEGORY"] == "Prepare now"  # from ESI 1
         assert (case["ESI_LEVEL"], case["AI_ESI_LEVEL"], case["ESI_SET_BY_DOCTOR"], case["RISK_SCORE"]) == (1, 2, 1, 7)
         [esi] = [e for e in rows_of("EVENTS", story["id"]) if e["EVENT_TYPE"] == "esi_changed"]
         assert (esi["ACTOR_ROLE"], esi["VALUE"]) == ("doctor", 1)

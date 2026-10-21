@@ -56,6 +56,7 @@ test('Cannot assess and no assessment are amber and never a guessed level', () =
   expect(cannot.className).toContain('text-amber-700');
   expect(cannot.textContent).toBe('ESI: cannot assess · Risk 5/10');
   expect(render(<EsiBadge liveCase={esi(null)} />).textContent).toBe('Not assessed');
+  expect(render(<EsiBadge liveCase={esi(null, { preparation_category: 'Routine' })} />).textContent).toBe('Routine');  // closed before ESI
   expect(render(<EsiBadge liveCase={esi(null, { processing: { assessment: { status: 'processing' } } })} />).textContent)
     .toBe('Assessing…');
 });

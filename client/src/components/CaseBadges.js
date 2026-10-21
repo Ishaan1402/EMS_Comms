@@ -53,8 +53,10 @@ export const EsiBadge = ({ liveCase, detail = true }) => {
     );
   }
   const tone = level === 1 ? 'urgent' : level ? 'neutral' : 'attention';
+  // A case closed before ESI keeps the category it was assessed with.
+  const category = liveCase.preparation_category;
   const label = level ? `ESI ${level}`
-    : liveCase.preparation_category === 'Cannot assess' ? 'ESI: cannot assess' : 'Not assessed';
+    : category === 'Cannot assess' ? 'ESI: cannot assess' : category || 'Not assessed';
   const setBy = change && `set by ${change.user_name}${suggested !== level ? ` (suggested ${suggested ? `ESI ${suggested}` : 'none'})` : ''}`;
   let text = label;
   if (detail && setBy) text = `${label} · ${setBy}`;

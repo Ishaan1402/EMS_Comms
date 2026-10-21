@@ -393,13 +393,12 @@ class TestAssessments:
         from evals import contracts
         assert contracts.PREPARATION_FOR_ESI[esi] == category
 
-    @pytest.mark.parametrize("esi, risk", [("1", 3), ("4", 8), ("5", 10)])
-    def test_a_risk_score_that_disagrees_with_the_level_needs_review(self, monkeypatch, esi, risk):
+    @pytest.mark.parametrize("esi, risk", [("1", 2), ("5", 10)])
+    def test_the_risk_score_never_flags_a_case_for_review(self, monkeypatch, esi, risk):
         use_scorer(monkeypatch, output(esi=esi, risk=risk))
         after = get_case(start_case()["id"])
-        assert after["esi_level"] == int(esi) and after["risk_score"] == risk  # kept, not replaced
-        assert after["current_assessment"]["status"] == "needs_review"
-        assert after["processing"]["reasons"] == ["The ESI level and risk score disagree."]
+        assert after["esi_level"] == int(esi) and after["risk_score"] == risk
+        assert after["current_assessment"]["status"] == "completed" and not after["processing"]["needs_review"]
 
     def test_failure_keeps_the_previous_assessment_and_flags_it_outdated(self, monkeypatch):
         use_scorer(monkeypatch, SCORED, RuntimeError("model outage"))
@@ -666,6 +665,31 @@ class TestAuditFixes:
         finally:
             database.DB_PATH = previous
         assert row == {"status": "failed", "error": "assessed in an earlier format; re-assessing", "summary": "old"}
+
+    def test_upgrade_to_esi_reassesses_open_cases_and_keeps_closed_cases_handoffs(self, tmp_path):
+        old_db = tmp_path / "category.db"
+        previous = database.DB_PATH
+        database.DB_PATH = old_db
+        try:
+            init_database()
+            conn = sqlite3.connect(old_db)
+            for column in ("esi_level", "esi_reason", "risk_score", "risk_reason"):
+                conn.execute(f"ALTER TABLE risk_assessments DROP COLUMN {column}")  # a database from before ESI
+            conn.executescript("""
+                INSERT INTO cases (id, emt_id, status, started_at, updated_at) VALUES (1, 1, 'active', 'x', 'x'),
+                                                                                      (2, 1, 'closed', 'x', 'x');
+                INSERT INTO risk_assessments (case_id, based_on_version, status, preparation_category, summary,
+                    scorer_version, started_at, updated_at) VALUES (1, 1, 'completed', 'Prepare now', 'open', 'v3', 'x', 'x'),
+                                                                   (2, 1, 'completed', 'Routine', 'closed', 'v3', 'x', 'x');
+            """)
+            conn.commit()
+            conn.close()
+            init_database()
+            rows = query("SELECT case_id, status, preparation_category, summary FROM risk_assessments ORDER BY case_id")
+        finally:
+            database.DB_PATH = previous
+        assert rows == [{"case_id": 1, "status": "failed", "preparation_category": "Prepare now", "summary": "open"},
+                        {"case_id": 2, "status": "completed", "preparation_category": "Routine", "summary": "closed"}]
 
     def test_clip_audio_is_not_served(self):
         audio = Path("private_uploads") / "live_segments" / "audit-private-clip.wav"  # where live clips are saved

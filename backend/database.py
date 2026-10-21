@@ -587,13 +587,20 @@ def migrate_existing_tables(conn):
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
                 added.add((table, name))
-    if {("risk_assessments", "preparation_category"), ("risk_assessments", "esi_level")} & added:
-        # Assessments in an earlier format (risk score only, or category without ESI) can't serve
-        # as the current assessment.
+    if ("risk_assessments", "preparation_category") in added:
+        # Assessments in the earlier risk-score format can't serve as the current assessment.
         # Failing them keeps them on record and lets startup recovery re-assess the case.
         conn.execute(
             """UPDATE risk_assessments SET status = 'failed', error = 'assessed in an earlier format; re-assessing'
                WHERE status IN ('completed', 'needs_review')"""
+        )
+    elif ("risk_assessments", "esi_level") in added:
+        # Open cases' category-only assessments are re-assessed for an ESI level. Closed cases keep
+        # theirs (handoff and category), since nothing would re-assess them.
+        conn.execute(
+            """UPDATE risk_assessments SET status = 'failed', error = 'assessed in an earlier format; re-assessing'
+               WHERE status IN ('completed', 'needs_review')
+                 AND case_id IN (SELECT id FROM cases WHERE status = 'active')"""
         )
     if case_columns and "info_version" not in case_columns:
         # Older cases already hold information; give them a version so acknowledgments can refer to it.

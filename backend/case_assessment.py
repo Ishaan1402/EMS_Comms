@@ -66,13 +66,6 @@ CANNOT_ASSESS_REASON = "Insufficient information to suggest an ESI level."
 # The project's own mapping from ESI to the earlier category (evals/contracts.PREPARATION_FOR_ESI uses
 # "Unsure" for Cannot assess). Not clinically validated.
 PREPARATION_FOR_ESI = {1: "Prepare now", 2: "Prepare now", 3: "Can wait", 4: "Routine", 5: "Routine"}
-# A risk score this far from its level is kept but sent to a person to look at.
-MISMATCH_REASON = "The ESI level and risk score disagree."
-
-
-def risk_mismatch(esi_level: Optional[int], risk_score: int) -> bool:
-    return (esi_level == 1 and risk_score <= 3) or (esi_level in (4, 5) and risk_score >= 8)
-
 UNREADABLE_ERROR = "the AI's answer didn't follow the expected format"
 
 # List prices in USD per million tokens (input, output), checked 2026-10-07. A model missing
@@ -322,8 +315,7 @@ def interpret(output) -> dict:
         return {**fields, "status": "needs_review", "review_reason": CANNOT_ASSESS_REASON}
     fields["esi_level"] = int(output["esi_level"])
     fields["preparation_category"] = PREPARATION_FOR_ESI[fields["esi_level"]]
-    if risk_mismatch(fields["esi_level"], fields["risk_score"]):
-        return {**fields, "status": "needs_review", "review_reason": MISMATCH_REASON}
+    # The risk score is only shown and breaks ties in AI-assisted, so it never flags a case for review.
     return {**fields, "status": "completed", "review_reason": None}
 
 

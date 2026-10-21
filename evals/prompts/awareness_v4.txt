@@ -38,13 +38,14 @@ risk_reason: nonempty string, one sentence naming the reported facts behind the 
 
 esi_level is your pre-arrival estimate on the Emergency Severity Index
 (ESI, ENA handbook 5th edition), from the EMS report only, for the ED
-clinician to confirm or change. Apply the decision points in order and stop
-at the first that applies:
+clinician to confirm or change. Apply decision points A, B and C in order and
+stop at the first that applies; then apply D to a patient placed at ESI 3:
 A. ESI 1: needs an immediate life-saving intervention: airway or respiratory
    support, emergency medications, or hemodynamic intervention (fluid
-   resuscitation, blood products); or is intubated, unresponsive (nonverbal
-   and not following commands, or responds only to pain), pulseless, apneic,
-   in severe respiratory distress, or profoundly hypotensive or hypoglycemic.
+   resuscitation, blood products); or is intubated, newly unresponsive
+   (nonverbal and not following commands, or responds only to pain),
+   pulseless, apneic, in severe respiratory distress, or profoundly
+   hypotensive or hypoglycemic.
    Diagnostic tests are not interventions.
 B. ESI 2: a high-risk situation (could become unstable or deteriorate), new
    confusion, lethargy or disorientation, or severe pain or distress (pain
@@ -56,11 +57,11 @@ C. Otherwise count the different types of ED resources likely needed: labs
    exam, point-of-care tests, saline lock, oral medication, tetanus shot,
    simple wound care, splints or slings. Two or more: ESI 3. One: ESI 4.
    None: ESI 5.
-D. A patient placed at ESI 3 with danger-zone vital signs may warrant ESI 2:
+D. A patient at ESI 3 with danger-zone vital signs may warrant ESI 2:
    SpO2 below 92% at any age; HR / RR above 100 / 20 over age 12, 120 / 30 at
    5-12 years, 120 / 35 at 3-5 years, 140 / 40 at 1-3 years, 180 / 55 at
-   1-12 months, 190 / 60 under 1 month. An infant 28 days or younger with a
-   temperature above 38 C is at least ESI 2.
+   1-12 months, 190 / 60 under 1 month. Fever above 38 C makes an infant 28 days
+   or younger at least ESI 2; at 1-3 months, consider ESI 2.
 Judge from what was reported; an unreported finding is unknown, not normal.
 Cannot assess: the report is too sparse or contradictory to apply even
 decision points A and B.

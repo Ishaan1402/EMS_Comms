@@ -484,7 +484,7 @@ def test_a_doctors_esi_level_replaces_the_suggestion_holds_through_new_reports_a
     body = changed.json()
     assert (body["esi_level"], body["ai_esi_level"], body["risk_score"]) == (1, 4, 2)
     assert body["esi_change"]["esi_level"] == 1 and body["esi_change"]["user_name"]
-    assert body["preparation_category"] == "Routine"  # still the AI's, derived from its own level
+    assert body["preparation_category"] == "Prepare now"  # derived from the level in use
 
     client.post(f"/api/cases/{case_id}/updates", json={"kind": "note", "body": "worse after a new report"},
                 headers=auth("emt.wilson"))
@@ -492,7 +492,7 @@ def test_a_doctors_esi_level_replaces_the_suggestion_holds_through_new_reports_a
     assert (after["esi_level"], after["ai_esi_level"]) == (1, 3)  # the doctor's level holds
 
     undone = set_esi(case_id, None).json()
-    assert undone["esi_change"] is None and undone["esi_level"] == 3
+    assert undone["esi_change"] is None and undone["esi_level"] == 3 and undone["preparation_category"] == "Can wait"
     assert [r["esi_level"] for r in query("SELECT esi_level FROM case_esi_changes WHERE case_id = ? ORDER BY id",
                                           (case_id,))] == [1, None]
 

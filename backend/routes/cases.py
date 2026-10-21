@@ -292,6 +292,7 @@ def describe_cases(rows: list) -> list:
         assessment = current.get(case["id"])
         case["current_assessment"] = assessment
         # None until an assessment says otherwise; "Cannot assess" when it couldn't decide.
+        # Derived from the ESI level (case_assessment.PREPARATION_FOR_ESI): the doctor's when they set one.
         case["preparation_category"] = assessment["preparation_category"] if assessment else None
         # The AI's suggested ESI and risk score; a doctor's ESI (the newest change, unless it went back
         # to the suggestion) replaces the suggestion in esi_level, which the queue and screens use.
@@ -304,6 +305,8 @@ def describe_cases(rows: list) -> list:
             "user_name": f"{change['first_name']} {change['last_name']}",
         } or None
         case["esi_level"] = case["esi_change"]["esi_level"] if case["esi_change"] else case["ai_esi_level"]
+        if case["esi_change"]:  # the derived category follows the level in use
+            case["preparation_category"] = case_assessment.PREPARATION_FOR_ESI[case["esi_level"]]
         case["assessment_is_outdated"] = bool(assessment) and not case_assessment.covers(
             assessment, case["info_version"], case["baseline_version"], case["eta_at"])
         case["processing"] = processing_summary(case, latest.get(case["id"]))
