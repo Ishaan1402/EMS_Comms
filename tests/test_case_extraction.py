@@ -24,7 +24,7 @@ DOCTOR = "dr.smith"          # General Hospital
 OTHER_DOCTOR = "dr.jones"    # Northside
 USAGE = {"input_tokens": 400, "output_tokens": 120, "latency_ms": 900}
 SCORED = {"summary": "s", "meaningful_change": "No earlier report", "change_explanation": "-",
-          "missing_information": "None identified", "preparation_category": "Can wait"}
+          "missing_information": "None identified", "esi_level": "3", "esi_reason": "-", "risk_score": 4, "risk_reason": "-"}
 
 
 @pytest.fixture(scope="module", autouse=True)

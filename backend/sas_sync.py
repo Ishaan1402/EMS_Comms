@@ -123,7 +123,11 @@ TABLES = {
         ("OPERATIONAL_STATUS", "char", "Transport status"),
         ("PROCESSING_STATUS", "char", "AI processing status"),
         ("NEEDS_REVIEW", "num", "Needs review (1/0)"),
-        ("PREPARATION_CATEGORY", "char", "Current preparation category"),
+        ("PREPARATION_CATEGORY", "char", "Current preparation category (derived from the AI's ESI)"),
+        ("ESI_LEVEL", "num", "Current ESI level (doctor's if set, else AI's)"),
+        ("AI_ESI_LEVEL", "num", "AI's suggested ESI level"),
+        ("ESI_SET_BY_DOCTOR", "num", "ESI level set by a doctor (1/0)"),
+        ("RISK_SCORE", "num", "AI's risk score (1-10)"),
         ("MEANINGFUL_CHANGE", "char", "Current meaningful change"),
         ("ASSESSMENT_OUTDATED", "num", "Assessment based on earlier info (1/0)"),
         ("INFO_VERSION", "num", "Information version"),
@@ -146,7 +150,9 @@ TABLES = {
         ("BASED_ON_VERSION", "num", "Information version assessed"),
         ("BASELINE_VERSION", "num", "Acknowledged version treated as earlier"),
         ("STATUS", "char", "Assessment status"),
-        ("PREPARATION_CATEGORY", "char", "Preparation category"),
+        ("PREPARATION_CATEGORY", "char", "Preparation category (derived from the ESI level)"),
+        ("ESI_LEVEL", "num", "Suggested ESI level"),
+        ("RISK_SCORE", "num", "Risk score (1-10)"),
         ("MEANINGFUL_CHANGE", "char", "Meaningful change"),
         ("REVIEW_REASON", "char", "Review reason"),
         ("ERROR", "char", "Error"),
@@ -165,7 +171,8 @@ TABLES = {
         ("CAUSE", "char", "What committed the change"),
         ("CAUSE_CASE_ID", "num", "Case whose change caused it"),
         ("INFO_VERSION", "num", "Information version then"),
-        ("PREPARATION_CATEGORY", "char", "Preparation category then"),
+        ("PREPARATION_CATEGORY", "char", "Preparation category then (derived from the AI's ESI)"),
+        ("ESI_LEVEL", "num", "ESI level then (doctor's if set, else AI's)"),
         ("NEEDS_ATTENTION", "num", "Needed attention then (1/0)"),
         ("RULE_VERSION", "char", "Queue rule"),
     ] + _time_columns("OCCURRED", "Occurred"),
@@ -238,6 +245,10 @@ def _cases_table(keys: dict, cases: list) -> list:
             "PROCESSING_STATUS": case["processing"]["status"],
             "NEEDS_REVIEW": _bool(case["processing"]["needs_review"]),
             "PREPARATION_CATEGORY": case["preparation_category"],
+            "ESI_LEVEL": case["esi_level"],
+            "AI_ESI_LEVEL": case["ai_esi_level"],
+            "ESI_SET_BY_DOCTOR": _bool(case["esi_change"]),
+            "RISK_SCORE": case["risk_score"],
             "MEANINGFUL_CHANGE": assessment.get("meaningful_change"),
             "ASSESSMENT_OUTDATED": _bool(case["assessment_is_outdated"]),
             "INFO_VERSION": case["info_version"],
@@ -305,6 +316,11 @@ def _events_table(keys: dict, cases: list, queue_events: list) -> list:
     for row in query("""SELECT a.id, a.case_id, a.info_version, a.acknowledged_at, u.role
                         FROM case_acknowledgments a JOIN users u ON u.id = a.user_id"""):
         event(f"ack:{row['id']}", row["case_id"], "acknowledged", row["acknowledged_at"], row["info_version"], row["role"])
+    # A doctor setting the ESI level; VALUE is the level, empty when they went back to the AI's suggestion.
+    for row in query("""SELECT e.id, e.case_id, e.esi_level, e.created_at, u.role
+                        FROM case_esi_changes e JOIN users u ON u.id = e.user_id"""):
+        event(f"esi:{row['id']}", row["case_id"], "esi_changed", row["created_at"], actor_role=row["role"],
+              value=row["esi_level"])
     # Crew alerts (case_alerts.py), which order the queue under rule draft-4. DETAIL is the alert
     # (stroke / stemi / trauma / sepsis, never free text); its key time is an event of its own, at that time.
     for row in query("SELECT id, case_id, alert, action, key_time, created_at FROM case_alerts"):
@@ -340,6 +356,8 @@ def _assessments_table(keys: dict) -> list:
         "BASELINE_VERSION": row["baseline_version"],
         "STATUS": row["status"],
         "PREPARATION_CATEGORY": row["preparation_category"],
+        "ESI_LEVEL": row["esi_level"],
+        "RISK_SCORE": row["risk_score"],
         "MEANINGFUL_CHANGE": row["meaningful_change"],
         "REVIEW_REASON": row["review_reason"],
         "ERROR": row["error"],
@@ -359,7 +377,8 @@ def _queue_table(keys: dict, queue_events: list) -> list:
         "REVISION": row["revision"], "CHANGE": row["change"],
         "FROM_POSITION": row["from_position"], "TO_POSITION": row["to_position"],
         "CAUSE": row["cause"], "CAUSE_CASE_ID": row["cause_case_id"], "INFO_VERSION": row["info_version"],
-        "PREPARATION_CATEGORY": row["preparation_category"], "NEEDS_ATTENTION": row["needs_attention"],
+        "PREPARATION_CATEGORY": row["preparation_category"], "ESI_LEVEL": row["esi_level"],
+        "NEEDS_ATTENTION": row["needs_attention"],
         "RULE_VERSION": row["rule_version"],
     }, occurred=row["created_at"]) for row in queue_events if row["case_id"] in keys]
 

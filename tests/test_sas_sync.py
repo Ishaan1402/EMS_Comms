@@ -29,7 +29,7 @@ client = TestClient(app, raise_server_exceptions=False)
 SETTINGS = sas_sync.Settings(url="https://viya.test", client_id="app.test", client_secret="s3cret",
                              interval=10, enabled=True)
 SCORED = {"summary": "s", "meaningful_change": "No earlier report", "change_explanation": "-",
-          "missing_information": "None identified", "preparation_category": "Prepare now"}
+          "missing_information": "None identified", "esi_level": "2", "esi_reason": "-", "risk_score": 7, "risk_reason": "-"}
 
 
 @pytest.fixture(autouse=True)
@@ -94,6 +94,7 @@ def story():
     client.post(f"/api/cases/{case['id']}/updates",
                 json={"kind": "vitals", "vitals": {"spo2": 89, "hr": 126}, "body": "on room air"}, headers=emt)
     client.post(f"/api/cases/{case['id']}/acknowledge", headers=doctor)
+    client.post(f"/api/cases/{case['id']}/esi", json={"esi_level": 1}, headers=doctor)
     client.post(f"/api/cases/{case['id']}/messages", json={"body": "Bay 2 is ready for you"}, headers=doctor)
 
     def broken(path, prompt):
@@ -139,10 +140,14 @@ class TestTables:
     def test_case_assessment_and_vital_rows(self, story):
         [case] = rows_of("CASES", story["id"])
         assert case["OPERATIONAL_STATUS"] == "closed" and case["PREPARATION_CATEGORY"] == "Prepare now"
+        assert (case["ESI_LEVEL"], case["AI_ESI_LEVEL"], case["ESI_SET_BY_DOCTOR"], case["RISK_SCORE"]) == (1, 2, 1, 7)
+        [esi] = [e for e in rows_of("EVENTS", story["id"]) if e["EVENT_TYPE"] == "esi_changed"]
+        assert (esi["ACTOR_ROLE"], esi["VALUE"]) == ("doctor", 1)
         assert case["FAILED_SEGMENT_COUNT"] == 0 and case["NEEDS_REVIEW"] in (0, 1)
         assert case["ARRIVED_DT"] is not None and case["CLOSED_DT"] >= case["ARRIVED_DT"]
         assessments = rows_of("ASSESSMENTS", story["id"])
         assert assessments and assessments[-1]["INPUT_TOKENS"] == 1000 and assessments[-1]["COST_USD"] is not None
+        assert (assessments[-1]["ESI_LEVEL"], assessments[-1]["RISK_SCORE"]) == (2, 7)
         snapshots = query("SELECT input_eta_at FROM risk_assessments WHERE case_id = ? ORDER BY id", (story["id"],))
         assert [a["INPUT_ETA_AT"] for a in assessments] == [r["input_eta_at"] or "" for r in snapshots]
         assert all(a["INPUT_ETA_DT"] is not None for a in assessments if a["INPUT_ETA_AT"])
@@ -157,6 +162,7 @@ class TestTables:
     def test_queue_changes_are_exported_with_their_cause(self, story):
         [entered, *rest] = rows_of("QUEUE", story["id"])
         assert (entered["CHANGE"], entered["TO_POSITION"], entered["CAUSE"]) == ("entered", 1, "case_opened")
+        assert "ESI_LEVEL" in entered
         assert rest[-1]["CHANGE"] == "left" and rest[-1]["CAUSE"] == "arrived"
         assert all(r["RULE_VERSION"] and r["OCCURRED_DT"] is not None for r in [entered, *rest])
         timeline = [e for e in rows_of("EVENTS", story["id"]) if e["EVENT_TYPE"].startswith("queue_")]

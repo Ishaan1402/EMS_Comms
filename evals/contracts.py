@@ -13,6 +13,27 @@ CASE_FIELDS = ("case_id", "encounter_id", "update_number", "elapsed_minutes",
                "eta_minutes", "prior_information", "current_transcript")
 OUTPUT_FIELDS = ("summary", "meaningful_change", "change_explanation",
                  "missing_information", "preparation_category")
+# awareness_v4 and later suggest an ESI level and a risk score in place of the category.
+ESI = ("1", "2", "3", "4", "5", "Cannot assess")
+RISK_SCORES = range(1, 11)
+ESI_OUTPUT_FIELDS = ("summary", "meaningful_change", "change_explanation", "missing_information",
+                     "esi_level", "esi_reason", "risk_score", "risk_reason")
+ESI_PROMPT_VERSIONS = ("awareness_v4",)
+# The project's own mapping from ESI to the earlier category, so category metrics and references
+# still apply to ESI outputs. Not clinically validated.
+PREPARATION_FOR_ESI = {"1": "Prepare now", "2": "Prepare now", "3": "Can wait", "4": "Routine", "5": "Routine",
+                       "Cannot assess": "Unsure"}
+
+
+def output_fields(prompt_version=None):
+    return ESI_OUTPUT_FIELDS if prompt_version in ESI_PROMPT_VERSIONS else OUTPUT_FIELDS
+
+
+def preparation_of(output):
+    """The output's category: its own, or the one its ESI maps to. None when it has neither."""
+    if "esi_level" in output:
+        return PREPARATION_FOR_ESI.get(output["esi_level"])
+    return output.get("preparation_category")
 
 
 def load_json(path):
@@ -103,16 +124,24 @@ def reference_errors(row):
 
 
 def output_errors(output):
+    """Checks an output against whichever contract its fields claim: the category one or the ESI one."""
     if not isinstance(output, dict):
         return ["output must be an object"]
+    esi = "esi_level" in output
     errors = []
-    if set(output) != set(OUTPUT_FIELDS):
+    if set(output) != set(ESI_OUTPUT_FIELDS if esi else OUTPUT_FIELDS):
         errors.append("output fields do not match the contract")
-    for key in ("summary", "change_explanation", "missing_information"):
+    for key in ("summary", "change_explanation", "missing_information") + (("esi_reason", "risk_reason") if esi else ()):
         if not isinstance(output.get(key), str) or not output[key].strip():
             errors.append(f"missing/invalid {key}")
     if output.get("meaningful_change") not in CHANGE:
         errors.append("invalid meaningful_change")
-    if output.get("preparation_category") not in PREPARATION:
+    if esi:
+        if output.get("esi_level") not in ESI:
+            errors.append("invalid esi_level")
+        risk = output.get("risk_score")
+        if isinstance(risk, bool) or risk not in RISK_SCORES:
+            errors.append("invalid risk_score")
+    elif output.get("preparation_category") not in PREPARATION:
         errors.append("invalid preparation_category")
     return errors

@@ -51,8 +51,8 @@ DEMO_PASSWORD = "password123"
 TRANSCRIPTION_USD_PER_MINUTE = {"gpt-transcribe": 0.0045}
 ACTIONS = {"start_case", "audio_report", "typed_report", "garbled_audio", "dismiss_failed", "eta", "message",
            "acknowledge", "acknowledge_all", "finish_case", "snapshot_queue"}
-# The app stores "Cannot assess" for the evaluation contract's "Unsure".
-CATEGORY_FOR_EVALS = {"Cannot assess": "Unsure"}
+# The app stores no ESI level (NULL) for the evaluation contract's "Cannot assess".
+CANNOT_ASSESS = "Cannot assess"
 FAILURE_STATUS = {"timed out": "timeout", "the AI declined to assess this case": "refusal"}
 
 
@@ -524,13 +524,15 @@ class Replay:
             if final is None or not final["is_current"]:  # the server's definition (case_assessment.covers)
                 record["status"] = "error"  # the final information was never assessed
             elif final["status"] in ("completed", "needs_review"):
-                category = final["preparation_category"]
                 record.update(status="ok", output={
                     "summary": final["summary"],
                     "meaningful_change": final["meaningful_change"],
                     "change_explanation": final["change_explanation"],
                     "missing_information": final["missing_information"],
-                    "preparation_category": CATEGORY_FOR_EVALS.get(category, category),
+                    "esi_level": CANNOT_ASSESS if final["esi_level"] is None else str(final["esi_level"]),
+                    "esi_reason": final["esi_reason"],
+                    "risk_score": final["risk_score"],
+                    "risk_reason": final["risk_reason"],
                 })
             else:
                 record["status"] = FAILURE_STATUS.get(final["error"], "error")
@@ -590,11 +592,11 @@ class Replay:
 
 
 def print_summary(cases: list, usage: dict) -> None:
-    print(f"\n{'source':<8} {'case':>5}  {'status':<13} {'preparation':<14} {'change':<8} {'processing':<13} acked  notes")
+    print(f"\n{'source':<8} {'case':>5}  {'status':<13} {'ESI':<4} {'risk':<5} {'change':<8} {'processing':<13} acked  notes")
     for c in cases:
         assessment = c["current_assessment"] or {}
         print(f"{c['source_case_id'] or '-':<8} {c['id']:>5}  {c['operational_status']:<13} "
-              f"{c['preparation_category'] or 'unavailable':<14} {assessment.get('meaningful_change') or '-':<8} "
+              f"{c['esi_level'] or '-':<4} {c['risk_score'] or '-':<5} {assessment.get('meaningful_change') or '-':<8} "
               f"{c['processing']['status']:<13} {'yes' if c['latest_update_acknowledged'] else 'no':<6} "
               f"{'; '.join(c['processing']['reasons'])}")
     cost = "unknown" if usage["cost_usd"] is None else f"${usage['cost_usd']:.4f}"

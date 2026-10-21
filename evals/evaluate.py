@@ -5,7 +5,7 @@ import json
 import re
 from collections import Counter
 
-from .contracts import (CHANGE, PREPARATION, number, output_errors, reference_errors, text,
+from .contracts import (CHANGE, ESI, PREPARATION, number, output_errors, preparation_of, reference_errors, text,
                         validate_case_dataset_version)
 from .metrics import classification_metrics, pairwise_metrics, percentile, ratio
 
@@ -135,6 +135,7 @@ def evaluate(cases, references, predictions, queue_definitions, reviews=None, *,
     results = []
     for config_id, config in configs.items():
         attempts, detail, prep_truth, prep_pred, change_truth, change_pred = [], [], [], [], [], []
+        esi_truth, esi_pred, risk_differences = [], [], []
         for cid in sorted(known):
             for repeat in range(1, config["repeats"] + 1):
                 record = records.get((config_id, cid, repeat))
@@ -147,7 +148,14 @@ def evaluate(cases, references, predictions, queue_definitions, reviews=None, *,
                 ref = eligible.get(cid)
                 if ref:
                     prep_truth.append(ref["preparation_category"])
-                    prep_pred.append(pred.get("preparation_category", sentinel))
+                    prep_pred.append(preparation_of(pred) or sentinel)
+                    # ESI and risk score are scored only where the reference gives them.
+                    ref_esi = None if ref.get("esi_level") is None else str(ref["esi_level"])
+                    if ref_esi in ESI:
+                        esi_truth.append(ref_esi)
+                        esi_pred.append(pred.get("esi_level", sentinel))
+                    if number(ref.get("risk_score"), integer=True) and number(pred.get("risk_score"), integer=True):
+                        risk_differences.append(abs(pred["risk_score"] - ref["risk_score"]))
                     if ref["meaningful_change"] in ("Yes", "No"):
                         change_truth.append(ref["meaningful_change"])
                         change_pred.append(pred.get("meaningful_change", sentinel))
@@ -156,7 +164,9 @@ def evaluate(cases, references, predictions, queue_definitions, reviews=None, *,
                                "reference_change": ref.get("meaningful_change") if ref else None,
                                "predicted_change": pred.get("meaningful_change"),
                                "reference_preparation": ref.get("preparation_category") if ref else None,
-                               "predicted_preparation": pred.get("preparation_category"),
+                               "predicted_preparation": preparation_of(pred),
+                               "predicted_esi": pred.get("esi_level"),
+                               "predicted_risk_score": pred.get("risk_score"),
                                "latency_ms": record.get("latency_ms") if record else None,
                                "summary": pred.get("summary"),
                                "reference_summary": ref.get("reference_summary") if ref else None})
@@ -202,6 +212,9 @@ def evaluate(cases, references, predictions, queue_definitions, reviews=None, *,
                         "retries": sum(telemetry["retry_count"]) if telemetry["retry_count"] else None,
                         "change": classification_metrics(change_truth, change_pred, ("Yes", "No")),
                         "preparation": classification_metrics(prep_truth, prep_pred, PREPARATION),
+                        "esi": classification_metrics(esi_truth, esi_pred, ESI),
+                        "risk_score": {"n": len(risk_differences),
+                                       "mean_absolute_difference": ratio(sum(risk_differences), len(risk_differences))},
                         "summary": summary,
                         "queue": {"independent_reference_queues": len(eligible_queues),
                                   "pairwise_accuracy": ratio(correct, ordered), "correct_pairs": correct,

@@ -254,6 +254,15 @@ def describe_cases(rows: list) -> list:
         ids,
     )
 
+    esi_changes = _newest_per_case(
+        """SELECT case_id, esi_level, created_at, first_name, last_name FROM (
+               SELECT e.*, u.first_name, u.last_name,
+                      ROW_NUMBER() OVER (PARTITION BY e.case_id ORDER BY e.id DESC) AS rn
+               FROM case_esi_changes e JOIN users u ON u.id = e.user_id WHERE e.case_id IN ({ids})
+           ) WHERE rn = 1""",
+        ids,
+    )
+
     open_rows = [row["open_report_row"] for row in rows if row["open_report_row"]]
     open_reports = {}
     if open_rows:
@@ -284,6 +293,17 @@ def describe_cases(rows: list) -> list:
         case["current_assessment"] = assessment
         # None until an assessment says otherwise; "Cannot assess" when it couldn't decide.
         case["preparation_category"] = assessment["preparation_category"] if assessment else None
+        # The AI's suggested ESI and risk score; a doctor's ESI (the newest change, unless it went back
+        # to the suggestion) replaces the suggestion in esi_level, which the queue and screens use.
+        case["ai_esi_level"] = assessment["esi_level"] if assessment else None
+        case["risk_score"] = assessment["risk_score"] if assessment else None
+        change = esi_changes.get(case["id"])
+        case["esi_change"] = change and change["esi_level"] is not None and {
+            "esi_level": change["esi_level"],
+            "set_at": change["created_at"],
+            "user_name": f"{change['first_name']} {change['last_name']}",
+        } or None
+        case["esi_level"] = case["esi_change"]["esi_level"] if case["esi_change"] else case["ai_esi_level"]
         case["assessment_is_outdated"] = bool(assessment) and not case_assessment.covers(
             assessment, case["info_version"], case["baseline_version"], case["eta_at"])
         case["processing"] = processing_summary(case, latest.get(case["id"]))
@@ -735,6 +755,27 @@ async def acknowledge_case(
     if version < case["info_version"]:
         # The AI compares newer information against this acknowledgment now; re-assess.
         background_tasks.add_task(case_assessment.runner.request, case["id"])
+    return case
+
+
+@router.post("/{case_id}/esi")
+async def set_esi(case_id: str, request: Request, current_user: dict = Depends(require_role(["doctor"]))):
+    """
+    A hospital doctor sets the case's ESI level. Body: {"esi_level": 1-5}, or null to go back to the
+    AI's suggestion. It holds through new information until changed again; the risk score stays the AI's.
+    """
+    case = get_case_for_user(case_id, current_user)
+    body = await read_json_body(request)
+    level = body.get("esi_level")
+    if level is not None and (isinstance(level, bool) or level not in range(1, 6)):
+        raise APIError(400, "esi_level must be 1 to 5, or null for the AI's suggestion")
+    current = case["esi_change"]["esi_level"] if case["esi_change"] else None
+    if level == current:
+        return case
+    run("INSERT INTO case_esi_changes (case_id, user_id, esi_level, created_at) VALUES (?, ?, ?, ?)",
+        (case["id"], current_user["id"], level, utc_now_iso()))
+    case = touch_case(case["id"])
+    publish_case("case.updated", case, "esi_changed")
     return case
 
 

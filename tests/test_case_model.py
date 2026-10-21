@@ -95,11 +95,12 @@ def use_scorer(monkeypatch, *results):
     return calls
 
 
-def output(category="Prepare now", change="No earlier report", **fields):
-    """A valid answer in the evaluation contract's five fields."""
+def output(esi="2", risk=7, change="No earlier report", **fields):
+    """A valid answer in the evaluation contract's ESI fields (awareness_v4)."""
     return {"summary": "Adult short of breath, SpO2 falling.", "meaningful_change": change,
             "change_explanation": "No earlier report to compare.", "missing_information": "None identified",
-            "preparation_category": category, **fields}
+            "esi_level": esi, "esi_reason": "Falling saturation is a high-risk situation.",
+            "risk_score": risk, "risk_reason": "SpO2 falling on oxygen.", **fields}
 
 
 SCORED = output()
@@ -307,11 +308,14 @@ class TestAssessments:
         case = start_case()
         after = get_case(case["id"])
         assessment = after["current_assessment"]
-        assert after["preparation_category"] == "Prepare now"
+        assert after["preparation_category"] == "Prepare now"  # derived from ESI 2
+        assert (after["esi_level"], after["ai_esi_level"], after["risk_score"], after["esi_change"]) == (2, 2, 7, None)
+        assert assessment["esi_reason"] == "Falling saturation is a high-risk situation."
+        assert assessment["risk_reason"] == "SpO2 falling on oxygen."
         assert assessment["meaningful_change"] == "No earlier report"
         assert assessment["summary"] == "Adult short of breath, SpO2 falling."
         assert assessment["based_on_version"] == 1 and assessment["baseline_version"] is None
-        assert assessment["scorer_version"] == f"{openai_config.SCORING_MODEL}/awareness_v3"
+        assert assessment["scorer_version"] == f"{openai_config.SCORING_MODEL}/awareness_v4"
         assert (assessment["input_tokens"], assessment["output_tokens"], assessment["latency_ms"]) == (1200, 300, 1500)
         assert assessment["cost_usd"] == pytest.approx((1200 * 0.10 + 300 * 0.50) / 1_000_000)
         assert after["processing"]["status"] == "completed"
@@ -340,7 +344,15 @@ class TestAssessments:
         None,                                              # unparseable JSON
         "not an object",
         {k: v for k, v in SCORED.items() if k != "summary"},
-        output(category="Urgent"),                         # not one of the categories
+        output(esi="6"),                                   # not an ESI level
+        output(esi=2),                                     # a level is one of the contract's strings
+        output(risk=0),                                    # risk score outside 1 to 10
+        output(risk=11),
+        output(risk=7.5),
+        output(risk="7"),
+        output(risk=True),
+        output(esi_reason=" "),
+        {k: v for k, v in SCORED.items() if k != "risk_reason"},
         output(change="Maybe"),
         output(summary="   "),
         output(extra="field"),
@@ -364,12 +376,30 @@ class TestAssessments:
         assert client.post(f"/api/cases/{case['id']}/assessments/retry", headers=auth(DOCTOR)).status_code == 202
         assert get_case(case["id"])["current_assessment"]["based_on_version"] == 2
 
-    def test_unsure_is_stored_as_cannot_assess_and_needs_review(self, monkeypatch):
-        use_scorer(monkeypatch, output(category="Unsure"))
+    def test_cannot_assess_has_no_level_and_needs_review(self, monkeypatch):
+        use_scorer(monkeypatch, output(esi="Cannot assess", risk=5))
         after = get_case(start_case()["id"])
         assert after["preparation_category"] == "Cannot assess"
+        assert after["esi_level"] is None and after["risk_score"] == 5
         assert after["current_assessment"]["status"] == "needs_review"
-        assert after["processing"]["reasons"] == ["Insufficient information to assess preparation needs."]
+        assert after["processing"]["reasons"] == ["Insufficient information to suggest an ESI level."]
+
+    @pytest.mark.parametrize("esi, category", [("1", "Prepare now"), ("2", "Prepare now"), ("3", "Can wait"),
+                                                ("4", "Routine"), ("5", "Routine")])
+    def test_the_earlier_category_is_derived_from_the_esi_level(self, monkeypatch, esi, category):
+        use_scorer(monkeypatch, output(esi=esi, risk=5))
+        after = get_case(start_case()["id"])
+        assert (after["esi_level"], after["preparation_category"]) == (int(esi), category)
+        from evals import contracts
+        assert contracts.PREPARATION_FOR_ESI[esi] == category
+
+    @pytest.mark.parametrize("esi, risk", [("1", 3), ("4", 8), ("5", 10)])
+    def test_a_risk_score_that_disagrees_with_the_level_needs_review(self, monkeypatch, esi, risk):
+        use_scorer(monkeypatch, output(esi=esi, risk=risk))
+        after = get_case(start_case()["id"])
+        assert after["esi_level"] == int(esi) and after["risk_score"] == risk  # kept, not replaced
+        assert after["current_assessment"]["status"] == "needs_review"
+        assert after["processing"]["reasons"] == ["The ESI level and risk score disagree."]
 
     def test_failure_keeps_the_previous_assessment_and_flags_it_outdated(self, monkeypatch):
         use_scorer(monkeypatch, SCORED, RuntimeError("model outage"))
@@ -500,11 +530,13 @@ class TestModelInput:
         from evals import contracts
         assert case_assessment.CHANGE == contracts.CHANGE
         assert case_assessment.PREPARATION == contracts.PREPARATION
-        assert case_assessment.OUTPUT_FIELDS == contracts.OUTPUT_FIELDS
+        assert case_assessment.ESI == contracts.ESI
+        assert case_assessment.OUTPUT_FIELDS == contracts.ESI_OUTPUT_FIELDS == contracts.output_fields("awareness_v4")
+        assert case_assessment.PROMPT_VERSION in contracts.ESI_PROMPT_VERSIONS
 
     def test_prompt_is_the_evaluation_prompt(self):
         assert case_assessment.PROMPT.startswith("You organize fictional EMS reports")
-        assert case_assessment.PROMPT_VERSION == "awareness_v3"
+        assert case_assessment.PROMPT_VERSION == "awareness_v4"
         assert "use that value for the handoff's ETA" in case_assessment.PROMPT
 
 
