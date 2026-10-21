@@ -68,7 +68,11 @@ const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, ar
                 {etaText(c.eta_at, serverNow)}
               </span>
             )
-            : <span className="shrink-0 text-xs text-gray-500">{c.status === 'active' ? 'Arrived' : 'Closed'}</span>}
+            : (
+              <span className="shrink-0 text-xs tabular-nums text-gray-500">
+                {c.status === 'closed' ? `Closed ${clockTime(c.closed_at)}` : `Arrived ${clockTime(c.arrived_at)}`}
+              </span>
+            )}
         </div>
         <p className="mt-0.5 truncate text-sm text-gray-600">{c.patient_info || 'No patient info'}</p>
         {open && (

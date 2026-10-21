@@ -14,6 +14,7 @@ import CaseHeader from './CaseHeader';
 import { SectionLabel, StatusText } from './ui';
 import CaseChat from './CaseChat';
 import QueueToolbar from './QueueToolbar';
+import Disclosure from './Disclosure';
 import { CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
 import { CaseRiskFields, DragHandle } from './DoctorQueueSettings';
 import useDragReorder from '../hooks/useDragReorder';
@@ -50,6 +51,8 @@ const LiveCasesPanel = () => {
   const [segments, setSegments] = useState([]);
   const [riskRefresh, setRiskRefresh] = useState(0);
   const [unseen, setUnseen] = useState({});
+  // The arrived and closed cases stay folded under the queue until the doctor opens them.
+  const [showDone, setShowDone] = useState(false);
   // Server clock minus local clock, so idle times aren't skewed by a wrong local clock.
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -215,6 +218,9 @@ const LiveCasesPanel = () => {
   const others = newestFirst(cases.filter((c) => !queuedIds.has(c.id)));
   const selectedInQueue = queued.find((c) => c.id === selectedId);
   const selected = byId.get(selectedId) || selectedInQueue;
+  // A selected case that leaves the queue (arrived or closed) stays in sight: its folder opens.
+  const selectedIsDone = others.some((c) => c.id === selectedId);
+  useEffect(() => { if (selectedIsDone) setShowDone(true); }, [selectedIsDone]);
   const serverNow = now + clockOffsetMs;
   // This screen's own view of the queue (a filter and a sort); it resets on reload and never changes the order.
   const [view, setView] = useState(DEFAULT_VIEW);
@@ -327,33 +333,41 @@ const LiveCasesPanel = () => {
                 Show all cases in queue order to drag them into a new order.
               </p>
             )}
-            <ul className="max-h-[48rem] overflow-y-auto">
-              {visible.map((c, index) => (
-                <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
-                              unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
-                              arrivalMinutes={hospital?.arrival_highlight_minutes}
-                              rowProps={canReorder ? reorder.rowProps(c.id, index) : undefined}
-                              dragHandle={canReorder && (movable(c)
-                                ? <DragHandle name={c.ems_unit || `case #${c.id}`} {...reorder.handleProps(c.id, index)} />
-                                : <span className="w-8 shrink-0 border-b border-gray-100" title="Stays on top: needs acknowledging or has a crew alert" />
-                              )} />
-              ))}
-              {visible.length === 0 && queued.length > 0 && (
-                <li className="px-4 py-6 text-sm text-gray-600">
-                  No cases match this filter.{' '}
-                  <button type="button" onClick={() => setView(DEFAULT_VIEW)} className="text-blue-600 hover:underline">Show all</button>
-                </li>
-              )}
+            <div className="max-h-[48rem] overflow-y-auto">
+              <ul>
+                {visible.map((c, index) => (
+                  <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
+                                unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
+                                arrivalMinutes={hospital?.arrival_highlight_minutes}
+                                rowProps={canReorder ? reorder.rowProps(c.id, index) : undefined}
+                                dragHandle={canReorder && (movable(c)
+                                  ? <DragHandle name={c.ems_unit || `case #${c.id}`} {...reorder.handleProps(c.id, index)} />
+                                  : <span className="w-8 shrink-0 border-b border-gray-100" title="Stays on top: needs acknowledging or has a crew alert" />
+                                )} />
+                ))}
+                {visible.length === 0 && queued.length > 0 && (
+                  <li className="px-4 py-6 text-sm text-gray-600">
+                    No cases match this filter.{' '}
+                    <button type="button" onClick={() => setView(DEFAULT_VIEW)} className="text-blue-600 hover:underline">Show all</button>
+                  </li>
+                )}
+                {queued.length === 0 && (
+                  <li className="border-b border-gray-100 px-4 py-6 text-sm text-gray-600">No patients inbound right now.</li>
+                )}
+              </ul>
+              {/* Off the queue: the patient is here (arrived) or the crew ended the case (closed). */}
               {view.filter === 'all' && others.length > 0 && (
-                <li className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500">
-                  Arrived and closed
-                </li>
+                <Disclosure title="Arrived and closed" summary={`${others.length}`} open={showDone} onToggle={setShowDone}
+                            className="bg-gray-50 px-4 py-2">
+                  <ul className="-mb-2 -ml-10 -mr-4 border-t border-gray-100">
+                    {others.map((c) => (
+                      <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
+                                    unseen={unseen[c.id]} serverNow={serverNow} />
+                    ))}
+                  </ul>
+                </Disclosure>
               )}
-              {view.filter === 'all' && others.map((c) => (
-                <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
-                              unseen={unseen[c.id]} serverNow={serverNow} />
-              ))}
-            </ul>
+            </div>
           </div>
 
           <div className="lg:col-span-3 p-6">
