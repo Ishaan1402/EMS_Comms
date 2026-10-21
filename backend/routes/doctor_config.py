@@ -1,6 +1,6 @@
 """
 A hospital's doctors' own queue settings: the order mode (Standard, AI-assisted or Manual), the
-order they set by hand in Manual, and the risk fields they add and fill in on each case. None of
+order they set by hand in Manual, the cases they pinned in AI-assisted, and the risk fields they add and fill in on each case. None of
 this changes the queue rule (case_queue.py), queue history, the AI assessment or the exports.
 """
 import json
@@ -35,16 +35,17 @@ def own_hospital(user: dict) -> int:
 
 def queue_settings(hospital_id: Optional[int]) -> dict:
     """
-    {queue_mode, auto_order, doctor_order}. The mode is Standard until a doctor chooses AI-assisted or
-    Manual; auto_order is false only in Manual (the old on/off setting).
+    {queue_mode, auto_order, doctor_order, ai_pins}. The mode is Standard until a doctor chooses
+    AI-assisted or Manual; auto_order is false only in Manual (the old on/off setting).
     """
-    rows = query("SELECT auto_order, ai_ranking, doctor_order FROM hospital_queue_settings WHERE hospital_id = ?",
-                 (hospital_id,)) if hospital_id is not None else []
+    rows = query("""SELECT auto_order, ai_ranking, doctor_order, ai_pins FROM hospital_queue_settings
+                    WHERE hospital_id = ?""", (hospital_id,)) if hospital_id is not None else []
     if not rows:
-        return {"queue_mode": "standard", "auto_order": True, "doctor_order": []}
+        return {"queue_mode": "standard", "auto_order": True, "doctor_order": [], "ai_pins": []}
     row = rows[0]
     mode = "manual" if not row["auto_order"] else "ai_assisted" if row["ai_ranking"] else "standard"
-    return {"queue_mode": mode, "auto_order": mode != "manual", "doctor_order": json.loads(row["doctor_order"])}
+    return {"queue_mode": mode, "auto_order": mode != "manual", "doctor_order": json.loads(row["doctor_order"]),
+            "ai_pins": json.loads(row["ai_pins"])}
 
 
 def risk_fields(hospital_id: int) -> list:
@@ -64,7 +65,8 @@ def save_queue_mode(hospital_id: int, mode: str) -> None:
     auto_order, ai_ranking = {"standard": (1, 0), "ai_assisted": (1, 1), "manual": (0, 0)}[mode]
     with get_db() as conn:
         conn.execute("INSERT OR IGNORE INTO hospital_queue_settings (hospital_id) VALUES (?)", (hospital_id,))
-        conn.execute("""UPDATE hospital_queue_settings SET auto_order = ?, ai_ranking = ?, updated_at = ?
+        # A new mode ends the AI-assisted pins: they were placed against that order.
+        conn.execute("""UPDATE hospital_queue_settings SET auto_order = ?, ai_ranking = ?, ai_pins = '[]', updated_at = ?
                         WHERE hospital_id = ?""", (auto_order, ai_ranking, utc_now_iso(), hospital_id))
     broker.publish("queue.reordered", {}, hospital_id=hospital_id)
 
@@ -110,6 +112,33 @@ async def set_doctor_order(request: Request, current_user: dict = Depends(requir
         raise APIError(400, "case_ids must be a list of distinct case ids")
     save_queue_settings(hospital_id, "doctor_order", json.dumps(case_ids))
     return {"case_ids": case_ids}
+
+
+@hospital_router.put("/mine/ai-pins")
+async def set_ai_pins(request: Request, current_user: dict = Depends(require_role(["doctor"]))):
+    """
+    AI-assisted: {case_ids, moved}, the queue top to bottom as the doctor left it and the case they moved.
+    The moved case is pinned to its spot; cases already pinned keep the spots they now show.
+    """
+    from backend.routes.cases import hospital_queue_cases
+    hospital_id = own_hospital(current_user)
+    body = await read_json_body(request)
+    case_ids, moved = body.get("case_ids"), body.get("moved")
+    if (not isinstance(case_ids, list) or len(case_ids) > MAX_ORDERED_CASES
+            or any(type(case_id) is not int for case_id in case_ids) or len(set(case_ids)) != len(case_ids)):
+        raise APIError(400, "case_ids must be a list of distinct case ids")
+    if type(moved) is not int or moved not in case_ids:
+        raise APIError(400, "moved must be one of case_ids")
+    pins = case_queue.pins_for(hospital_queue_cases(hospital_id), case_ids, moved,
+                               queue_settings(hospital_id)["ai_pins"])
+    save_queue_settings(hospital_id, "ai_pins", json.dumps(pins))
+    return {"pins": pins}
+
+
+@hospital_router.delete("/mine/ai-pins", status_code=204)
+async def clear_ai_pins(current_user: dict = Depends(require_role(["doctor"]))):
+    """Back to AI order: every pin goes."""
+    save_queue_settings(own_hospital(current_user), "ai_pins", "[]")
 
 
 @hospital_router.post("/mine/risk-fields", status_code=201)

@@ -57,7 +57,7 @@ def fakes(temp_database, tmp_path_factory):
 
     async def fake_extract(info):
         """A vital from the opening summary, with free text that must not be exported."""
-        opened = [{"name": "rr", "value": 28, "qualifier": "on room air", "item": "case-opened", "quote": "lives alone"}]
+        opened = [{"name": "rr", "value": 28, "qualifier": "on room air", "item": "case-opened", "quote": "RR 28"}]
         found = [{"text": "lives alone", "status": "present", "item": "case-opened", "quote": "lives alone"}]
         is_first = any(item["id"] == "case-opened" for item in info["new"])
         return {"chief_complaint": [], "vitals": opened if is_first else [], "findings": found if is_first else [],
@@ -87,7 +87,7 @@ def story():
     """One case with every kind of event, made through the API."""
     run("UPDATE cases SET status = 'closed' WHERE status = 'active'")
     emt, doctor = auth("emt.wilson"), auth("dr.smith")
-    case = client.post("/api/cases", json={"patient_info": "67F short of breath, lives alone",
+    case = client.post("/api/cases", json={"patient_info": "67F short of breath, RR 28, lives alone",
                                             "destination_hospital_id": gen_id(), "ems_unit": "Medic 12",
                                             "eta_minutes": 15, "source_case_id": "SYN002",
                                             "source_run_id": "run1"}, headers=emt).json()

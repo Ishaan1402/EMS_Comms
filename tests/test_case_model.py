@@ -400,6 +400,46 @@ class TestAssessments:
         assert after["esi_level"] == int(esi) and after["risk_score"] == risk
         assert after["current_assessment"]["status"] == "completed" and not after["processing"]["needs_review"]
 
+    def test_a_handoff_number_the_reports_dont_state_needs_review(self, monkeypatch):
+        use_scorer(monkeypatch, output(summary="67-year-old short of breath, SpO2 88 %."))
+        after = get_case(start_case(patient_info="67F short of breath, SpO2 ninety two")["id"])
+        assert after["preparation_category"] == "Prepare now"
+        assert after["current_assessment"]["status"] == "needs_review"
+        assert after["processing"]["reasons"] == [
+            "Handoff mentions 88, not found in the crew's reports. Check before relying on it."]
+
+    @pytest.mark.parametrize("summary", [
+        "67-year-old, SpO2 92 % on room air, BP 140/90.",
+        "Febrile at 39.1 °C, HR one forty.",
+        "GCS 14/15 since 14:30, glucose 1,000, pulse 105.",
+    ])
+    def test_handoff_numbers_from_the_reports_pass(self, monkeypatch, summary):
+        use_scorer(monkeypatch, output(summary=summary))
+        info = "67F, sat ninety two, BP one forty over ninety, temp 102.4, GCS 14 at 1430, sugar 1000, pulse one oh five"
+        after = get_case(start_case(patient_info=info)["id"])
+        assert after["current_assessment"]["status"] == "completed", after["processing"]["reasons"]
+
+    def test_only_a_temperature_may_be_converted_between_fahrenheit_and_celsius(self, monkeypatch):
+        use_scorer(monkeypatch, output(summary="Temp 37.8 °C, HR 212."))
+        after = get_case(start_case(patient_info="67F, HR 100, temp 100")["id"])
+        assert after["processing"]["reasons"] == [
+            "Handoff mentions 212, not found in the crew's reports. Check before relying on it."]
+
+    def test_unsure_with_an_unstated_number_keeps_both_reasons(self, monkeypatch):
+        use_scorer(monkeypatch, output(esi="Cannot assess", summary="HR 130."))
+        after = get_case(start_case()["id"])
+        assert after["processing"]["reasons"] == [
+            f"{case_assessment.CANNOT_ASSESS_REASON} Handoff mentions 130, not found in the crew's reports. "
+            "Check before relying on it."]
+
+    def test_numbers_in_the_esi_and_risk_reasons_are_checked_but_the_esi_scale_is_not(self, monkeypatch):
+        use_scorer(monkeypatch, output(esi="3", risk=6,
+                                       esi_reason="ESI 3: two or more resources; SpO2 below 92 would make it ESI 2.",
+                                       risk_reason="Risk 6/10 with HR 165."))
+        after = get_case(start_case()["id"])
+        assert after["processing"]["reasons"] == [
+            "Handoff mentions 165, not found in the crew's reports. Check before relying on it."]
+
     def test_failure_keeps_the_previous_assessment_and_flags_it_outdated(self, monkeypatch):
         use_scorer(monkeypatch, SCORED, RuntimeError("model outage"))
         case = start_case()

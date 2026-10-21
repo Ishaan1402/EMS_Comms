@@ -64,7 +64,7 @@ async def fake_scorer(inputs):
     text = inputs["input"]["current_transcript"]
     worse = any(phrase in text for phrase in ("Still weak", "few words", "worse"))
     has_prior = inputs["input"]["prior_information"] != "No earlier report provided."
-    return {"summary": f"version {inputs['version']}", "change_explanation": "-", "missing_information": "None identified",
+    return {"summary": text[:120], "change_explanation": "-", "missing_information": "None identified",
             "meaningful_change": ("Yes" if worse else "No") if has_prior else "No earlier report",
             "esi_level": "2" if worse else "3", "esi_reason": "-", "risk_score": 7 if worse else 4,
             "risk_reason": "-"}, \

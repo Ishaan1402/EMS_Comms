@@ -16,7 +16,8 @@ shown ("AI suggests") and exported for evaluation, but only people's declaration
 the communication and the arrival time move a patient. The one exception is AI-assisted, an
 opt-in display mode a hospital's doctors can choose (ai_assisted_ordered, AI_ASSISTED_RULE_VERSION): the same
 tiers 1 and 2, then the AI's category, then arrival. It is never the default, a person's call
-still outranks it, and queue history keeps recording this Standard order in every mode. Software that ranks patients by its own
+still outranks it, and queue history keeps recording this Standard order in every mode. In
+AI-assisted a doctor can also drag a case to a spot and pin it there (pinned_ordered). Software that ranks patients by its own
 urgency estimate in a time-critical setting is what FDA's January 2026 clinical decision support
 guidance treats as device-like; a crew's call and an arrival time are inputs a clinician can check
 at a glance. draft-3 ranked by the AI's category between steps 1 and 3.
@@ -165,3 +166,65 @@ def doctor_ordered(ordered: list, doctor_order: list) -> list:
     for position, case in enumerate(result, start=1):
         case["queue_position"] = position
     return result
+
+
+def stays_on_top(case: dict) -> bool:
+    """In AI-assisted, above every pin: a case that needs a person now or has an active crew alert."""
+    return needs_attention(case) or has_crew_alert(case)
+
+
+def pin_still_holds(case: dict, pin: dict) -> bool:
+    """
+    A doctor's pin (AI-assisted) holds until anything new about the patient: new information (a report or
+    a typed update raises info_version), a new ETA, a crew alert change or a new ESI level (a doctor's or the
+    AI's). The move was made on the old
+    picture. A case that stays on top (stays_on_top) does so regardless, so its pin is set aside meanwhile.
+    """
+    return not stays_on_top(case) and pin == pin_for(case, pin["position"])
+
+
+def pin_for(case: dict, position: int) -> dict:
+    """A pin holding the case at position, with what the doctor knew of the patient when they moved it."""
+    return {"case_id": case["id"], "position": position, "info_version": case["info_version"],
+            "eta_at": case["eta_at"], "alert_change_id": crew_alerts(case).get("latest_change_id"),
+            "esi_level": case.get("esi_level")}
+
+
+def pinned_ordered(ordered: list, pins: list) -> list:
+    """
+    The AI-assisted queue (ai_assisted_ordered) with the doctors' moves kept. Each pin holds its case at a
+    spot, counted below the cases that need a person now or have an active crew alert: those stay on top in
+    AI-assisted order, so nothing new is buried and a crew's call outranks a move. Everything else fills
+    the free spots in AI-assisted order, so a new patient slots in around the pins. Pinned cases are marked
+    pinned; queue history still records Standard.
+    """
+    by_id = {case["id"]: case for case in ordered}
+    urgent = [case for case in ordered if stays_on_top(case)]
+    calm = [case for case in ordered if not stays_on_top(case)]
+    holding = [pin for pin in pins if pin["case_id"] in by_id and pin_still_holds(by_id[pin["case_id"]], pin)]
+    slots = [None] * len(calm)
+    # Lowest spot first, so when cases have left and pins crowd the bottom they keep their order.
+    for pin in sorted(holding, key=lambda pin: pin["position"], reverse=True):
+        wanted = min(pin["position"], len(calm)) - 1
+        free = [index for index in range(len(calm)) if slots[index] is None]
+        spot = next((index for index in reversed(free) if index <= wanted), free[0])
+        slots[spot] = by_id[pin["case_id"]]
+    pinned_ids = {pin["case_id"] for pin in holding}
+    rest = iter(case for case in calm if case["id"] not in pinned_ids)
+    result = urgent + [case or next(rest) for case in slots]
+    for position, case in enumerate(result, start=1):
+        case["queue_position"] = position
+        case["pinned"] = case["id"] in pinned_ids
+    return result
+
+
+def pins_for(ordered: list, case_ids: list, moved_id: int, pins: list) -> list:
+    """
+    The pins to store after a doctor drops moved_id, given the order now on their screen (case_ids):
+    the moved case and every case whose pin still holds, each at its spot among the calm cases.
+    """
+    by_id = {case["id"]: case for case in ordered}
+    holding = {pin["case_id"] for pin in pins if pin["case_id"] in by_id and pin_still_holds(by_id[pin["case_id"]], pin)}
+    calm = [case_id for case_id in case_ids if case_id in by_id and not stays_on_top(by_id[case_id])]
+    return [pin_for(by_id[case_id], index) for index, case_id in enumerate(calm, start=1)
+            if case_id == moved_id or case_id in holding]
