@@ -24,6 +24,10 @@ const OFFLINE_LABELS = {
   unauthorized: 'Session expired — log in again for live updates',
 };
 
+// The queue rule's first tier (case_queue.needs_attention): unacknowledged information or crew alert, or a failure.
+const needsPerson = (c) => Boolean(c.processing?.needs_review || c.latest_update_acknowledged === false
+  || c.crew_alerts?.unacknowledged);
+
 const newestFirst = (cases) => [...cases].sort((a, b) => b.started_at.localeCompare(a.started_at));
 
 // Wait this long after a change before re-fetching the queue, so a burst of events is one request.
@@ -218,8 +222,10 @@ const LiveCasesPanel = () => {
   const visible = applyQueueView(queued, view, viewContext);
   const counts = queue.counts ? viewCounts(queued, viewContext) : null;
   const autoOrder = queue.auto_order !== false;
+  const aiAssisted = queue.queue_mode === 'ai_assisted';
 
-  // Manual order: move a row and save the whole order for the hospital. The screen shows the new order
+  // Manual order: move a row and save the whole order for the hospital. In AI-assisted the move pins the
+  // row to its spot instead (case_queue.pinned_ordered) and the AI orders the rest around it. The screen shows the new order
   // at once (without a "from #" cue, since this doctor made the move) and the server's queue replaces it.
   // If the save fails, the last order the server confirmed comes back, unless a newer one has arrived.
   const orderIds = queued.map((c) => c.id);
@@ -233,7 +239,8 @@ const LiveCasesPanel = () => {
       .map((entry) => ({ ...entry, queue_position: position[entry.id] ?? entry.queue_position }))
       .sort((a, b) => a.queue_position - b.queue_position) }));
     try {
-      await axios.put('/api/hospitals/mine/doctor-order', { case_ids: ids });
+      if (aiAssisted) await axios.put('/api/hospitals/mine/ai-pins', { case_ids: ids, moved: id });
+      else await axios.put('/api/hospitals/mine/doctor-order', { case_ids: ids });
     } catch (error) {
       if (queueAsOf.current === confirmed.asOf) {
         positions.current = confirmed.positions;
@@ -243,8 +250,19 @@ const LiveCasesPanel = () => {
     }
     fetchQueue();
   };
-  const canReorder = !autoOrder && isDefaultView(view) && queued.length > 1;
+  const canReorder = (!autoOrder || aiAssisted) && isDefaultView(view) && queued.length > 1;
   const reorder = useDragReorder(orderIds, moveCase, canReorder);
+  // In AI-assisted a case that needs a person now stays on top, so it has no handle.
+  const movable = (c) => !aiAssisted || !needsPerson(c);
+  const anyPinned = aiAssisted && queued.some((c) => c.pinned);
+  const backToAiOrder = async () => {
+    try {
+      await axios.delete('/api/hospitals/mine/ai-pins');
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Could not reset the order');
+    }
+    fetchQueue();
+  };
 
   const dismissSegment = async (segment) => {
     try {
@@ -296,7 +314,15 @@ const LiveCasesPanel = () => {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-5">
           <div className="lg:col-span-2 border-r border-gray-200">
-            {!autoOrder && !isDefaultView(view) && (
+            {anyPinned && isDefaultView(view) && (
+              <p className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-2 text-xs text-gray-500">
+                Cases your team moved stay in place; the AI orders the rest around them.
+                <button type="button" onClick={backToAiOrder} className="shrink-0 font-medium text-blue-600 hover:underline">
+                  Back to AI order
+                </button>
+              </p>
+            )}
+            {(!autoOrder || aiAssisted) && !isDefaultView(view) && (
               <p className="border-b border-gray-100 px-4 py-2 text-xs text-gray-500">
                 Show all cases in queue order to drag them into a new order.
               </p>
@@ -307,8 +333,9 @@ const LiveCasesPanel = () => {
                               unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
                               arrivalMinutes={hospital?.arrival_highlight_minutes}
                               rowProps={canReorder ? reorder.rowProps(c.id, index) : undefined}
-                              dragHandle={canReorder && (
-                                <DragHandle name={c.ems_unit || `case #${c.id}`} {...reorder.handleProps(c.id, index)} />
+                              dragHandle={canReorder && (movable(c)
+                                ? <DragHandle name={c.ems_unit || `case #${c.id}`} {...reorder.handleProps(c.id, index)} />
+                                : <span className="w-8 shrink-0 border-b border-gray-100" title="Stays on top until acknowledged" />
                               )} />
               ))}
               {visible.length === 0 && queued.length > 0 && (

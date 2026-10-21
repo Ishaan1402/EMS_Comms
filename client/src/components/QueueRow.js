@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, Pin } from 'lucide-react';
 import { CategoryBadge, ProcessingBadge, ReportingBadge, isReporting } from './CaseBadges';
 import { CrewAlertBadges } from './CrewAlerts';
 import { StatusText } from './ui';
@@ -78,6 +78,9 @@ const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, ar
               <ReportingBadge liveCase={c} />
               {c.processing?.needs_review && <ProcessingBadge processing={c.processing} />}
               {c.operational_status === 'inbound' && <StatusText tone="attention">Not acknowledged</StatusText>}
+              {c.pinned && (
+                <span className="inline-flex items-center gap-1 text-xs text-gray-500"><Pin className="h-3 w-3" />Moved by your team</span>
+              )}
               {unseen > 0 && <span className="text-xs font-medium text-blue-600">{unseen} new</span>}
               {!isReporting(c) && quietMs > QUIET_AFTER_MS && (
                 <span className="text-xs text-gray-500">No audio {Math.floor(quietMs / 60000)}m</span>

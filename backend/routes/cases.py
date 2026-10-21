@@ -579,10 +579,11 @@ async def hospital_queue(current_user: dict = Depends(require_role(["doctor"])))
     for case in ordered:
         case["vital_changes"] = changes[case["id"]]
     # The hospital's chosen mode (routes/doctor_config.py): Standard is the rule as computed, AI-assisted
-    # adds the AI's category, Manual is the doctors' own order. Queue history keeps the Standard order.
+    # adds the AI's category around any cases the doctors pinned, Manual is the doctors' own order.
+    # Queue history keeps the Standard order.
     settings = doctor_config.queue_settings(hospital_id)
     if settings["queue_mode"] == "ai_assisted":
-        ordered = case_queue.ai_assisted_ordered(ordered)
+        ordered = case_queue.pinned_ordered(case_queue.ai_assisted_ordered(ordered), settings["ai_pins"])
     elif settings["queue_mode"] == "manual":
         ordered = case_queue.doctor_ordered(ordered, settings["doctor_order"])
     return {
