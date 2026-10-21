@@ -6,7 +6,7 @@ import Menu from './Menu';
 // One short line per mode, for the menu. Settings has the rule text itself.
 export const ORDER_OPTIONS = [
   { value: 'standard', label: 'Standard', description: 'Crew alerts and unacknowledged information first, then arrival time.' },
-  { value: 'ai_assisted', label: 'AI-assisted', description: "Same, with the AI's category before arrival time. A person's call still comes first." },
+  { value: 'ai_assisted', label: 'AI-assisted', description: "Same, with the ESI level before arrival time (a doctor's level if set), and the risk score breaking ties. A person's call still comes first." },
   { value: 'manual', label: 'Manual', description: 'Your team drags the cases into order.' },
 ];
 

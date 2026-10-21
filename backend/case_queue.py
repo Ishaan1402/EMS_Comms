@@ -36,14 +36,15 @@ QUEUE_RULE = ("Unacknowledged information, an unacknowledged crew alert or a pro
               "then active crew alerts, then earlier expected arrival. The AI's suggestion is shown but never "
               "changes the order.")
 
-# The AI category's tier in AI-assisted: draft-3's ranking. No assessment yet and Cannot assess share
-# the "unknown" tier, as the evaluation harness maps Cannot assess to Unsure.
-AI_ASSISTED_RULE_VERSION = "ai-assisted-1"
+# The ESI level's tier in AI-assisted (a doctor's level when they set one, else the AI's suggestion).
+# Not yet known (no assessment, or Cannot assess) sits between ESI 2 and ESI 3, where "not yet known"
+# sat between Prepare now and Can wait in ai-assisted-1. The AI's risk score only breaks ties within a level.
+AI_ASSISTED_RULE_VERSION = "ai-assisted-2"
 AI_ASSISTED_RULE = ("Unacknowledged information, an unacknowledged crew alert or a processing failure first, "
-              "then active crew alerts. Among cases tied on both priorities, the AI's suggested category "
-              "comes before arrival time: Prepare now, then not yet known (including Cannot assess), "
-              "Can wait, Routine.")
-CATEGORY_RANK = {"Prepare now": 0, None: 1, "Cannot assess": 1, "Can wait": 2, "Routine": 3}
+              "then active crew alerts. Among cases tied on both priorities, the ESI level comes before "
+              "arrival time: ESI 1, ESI 2, then not yet known (including Cannot assess), ESI 3, 4, 5. "
+              "Within a level, the higher risk score first.")
+ESI_RANK = {1: 0, 2: 1, None: 2, 3: 3, 4: 4, 5: 5}
 
 NO_ALERTS = {"active": [], "unacknowledged": False}
 
@@ -102,12 +103,12 @@ def standard_key(case: dict) -> tuple:
 
 def ai_assisted_key(case: dict) -> tuple:
     """
-    Sort key of AI-assisted, ai-assisted-1: the Standard tiers with the AI's category between the crew
-    alert tier and arrival time. Pure like standard_key (it reads only the case's stored fields), so
+    Sort key of AI-assisted, ai-assisted-2: the Standard tiers with the ESI level, then the risk score,
+    between the crew alert tier and arrival time. Pure like standard_key (it reads only the case's stored fields), so
     the evaluation harness or SAS can apply it to exported cases.
     """
     needs, alert, *arrival = standard_key(case)
-    return (needs, alert, CATEGORY_RANK.get(case["preparation_category"], 1), *arrival)
+    return (needs, alert, ESI_RANK.get(case["esi_level"], 2), -(case["risk_score"] or 0), *arrival)
 
 
 def order(cases: list, now) -> list:
@@ -126,22 +127,24 @@ def counts(ordered: list) -> dict:
         "needs_review": sum(case["processing"]["needs_review"] for case in ordered),
         "unacknowledged": sum(not case["latest_update_acknowledged"] for case in ordered),
         "crew_alerts": sum(has_crew_alert(case) for case in ordered),
-        # Information only: how many the AI suggests preparing for now (it doesn't set the order).
-        "prepare_now": sum(case["preparation_category"] == "Prepare now" for case in ordered),
+        # Information only: how many are ESI 1 or 2 (it doesn't set the Standard order).
+        "esi_1_2": sum(case["esi_level"] in (1, 2) for case in ordered),
     }
 
 
 def ai_assisted_ordered(ordered: list) -> list:
     """
     The same queue in AI-assisted order (ai_assisted_key). Each case keeps its Standard position as
-    suggested_position, so a screen can say where the Standard order would put it, and gets the
-    AI's category as one more reason. Queue history still records the Standard order.
+    suggested_position, so a screen can say where the Standard order would put it, and gets its
+    ESI level and risk score as one more reason. Queue history still records the Standard order.
     """
     for case in ordered:
         case["suggested_position"] = case["queue_position"]
-        if case["preparation_category"]:
+        if case["esi_level"]:
             *why, eta = case["queue_reasons"]
-            case["queue_reasons"] = [*why, f"AI suggests {case['preparation_category']}", eta]
+            source = "set by a doctor" if case.get("esi_change") else "suggested"
+            risk = f", risk {case['risk_score']}/10" if case["risk_score"] else ""
+            case["queue_reasons"] = [*why, f"ESI {case['esi_level']} ({source}){risk}", eta]
     result = sorted(ordered, key=ai_assisted_key)
     for position, case in enumerate(result, start=1):
         case["queue_position"] = position
@@ -173,7 +176,8 @@ def stays_on_top(case: dict) -> bool:
 def pin_still_holds(case: dict, pin: dict) -> bool:
     """
     A doctor's pin (AI-assisted) holds until anything new about the patient: new information (a report or
-    a typed update raises info_version), a new ETA or a crew alert change. The move was made on the old
+    a typed update raises info_version), a new ETA, a crew alert change or a new ESI level (a doctor's or the
+    AI's). The move was made on the old
     picture. A case that stays on top (stays_on_top) does so regardless, so its pin is set aside meanwhile.
     """
     return not stays_on_top(case) and pin == pin_for(case, pin["position"])
@@ -182,7 +186,8 @@ def pin_still_holds(case: dict, pin: dict) -> bool:
 def pin_for(case: dict, position: int) -> dict:
     """A pin holding the case at position, with what the doctor knew of the patient when they moved it."""
     return {"case_id": case["id"], "position": position, "info_version": case["info_version"],
-            "eta_at": case["eta_at"], "alert_change_id": crew_alerts(case).get("latest_change_id")}
+            "eta_at": case["eta_at"], "alert_change_id": crew_alerts(case).get("latest_change_id"),
+            "esi_level": case.get("esi_level")}
 
 
 def pinned_ordered(ordered: list, pins: list) -> list:

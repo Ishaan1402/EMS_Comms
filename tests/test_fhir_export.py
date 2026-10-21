@@ -34,7 +34,7 @@ def no_models(monkeypatch):
     async def fake_score(inputs):
         return {"summary": "Adult short of breath, SpO2 falling.", "meaningful_change": "No earlier report",
                 "change_explanation": "-", "missing_information": "Temperature not given.",
-                "preparation_category": "Prepare now"}, {}
+                "esi_level": "2", "esi_reason": "-", "risk_score": 7, "risk_reason": "-"}, {}
 
     async def fake_extract(info):
         return {"chief_complaint": [], "vitals": [], "findings": [], "treatments": []}, {}

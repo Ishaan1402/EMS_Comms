@@ -18,7 +18,7 @@ const at = (minutes) => new Date(NOW + minutes * 60000).toISOString();
 const base = (overrides = {}) => ({
   id: 7, ems_unit: 'Medic 10', status: 'active', arrived_at: null, patient_info: 'Chest pain',
   started_at: at(-20), last_segment_at: at(-1), eta_at: at(10), queue_position: 1,
-  queue_reasons: ['ETA 10 min'], vital_changes: [{ label: 'HR', from: 100, to: 130 }], preparation_category: 'Can wait',
+  queue_reasons: ['ETA 10 min'], vital_changes: [{ label: 'HR', from: 100, to: 130 }], esi_level: 3, ai_esi_level: 3, risk_score: 4,
   operational_status: 'acknowledged', acknowledgment: { user_name: 'John Smith', acknowledged_at: at(-5) },
   processing: { status: 'completed', needs_review: false }, crew_alerts: { active: [], unacknowledged: false },
   ...overrides,
@@ -30,11 +30,11 @@ const render = (liveCase, props = {}) => {
 
 test('the left edge asks for attention only for a crew alert or a failure', () => {
   const alert = { active: [{ alert: 'stroke', label: 'Stroke', key_time: null }], unacknowledged: false };
-  expect(render(base({ crew_alerts: alert, preparation_category: 'Prepare now' })).className).toContain('border-l-slate-900');
+  expect(render(base({ crew_alerts: alert, esi_level: 1 })).className).toContain('border-l-slate-900');
   expect(render(base({ processing: { status: 'failed', needs_review: true } })).className).toContain('border-l-red-600');
-  // Prepare now, a case nobody has acknowledged and Cannot assess are marked in the row's text, not by colour at the edge.
-  ['Prepare now', 'Cannot assess'].forEach((category) => {
-    expect(render(base({ preparation_category: category })).className).toContain('border-l-transparent');
+  // ESI 1, a case nobody has acknowledged and Cannot assess are marked in the row's text, not by colour at the edge.
+  [{ esi_level: 1 }, { esi_level: null, preparation_category: 'Cannot assess' }].forEach((overrides) => {
+    expect(render(base(overrides)).className).toContain('border-l-transparent');
   });
   expect(render(base({ operational_status: 'inbound' })).className).toContain('border-l-transparent');
   expect(render(base({ status: 'closed', crew_alerts: alert })).className).toContain('border-l-transparent');
@@ -45,7 +45,7 @@ test('quiet when normal: an acknowledged case has no acknowledged marker, no pil
   expect(row.textContent).not.toContain('Acknowledged');
   expect(row.textContent).not.toContain('HR');
   expect(row.querySelectorAll('.rounded-full:not([aria-hidden])')).toHaveLength(0);
-  expect(row.textContent).toContain('Can wait');
+  expect(row.textContent).toContain('ESI 3 · Risk 4/10');
   expect(row.textContent).not.toContain('AI:');
 });
 
@@ -57,20 +57,21 @@ test('a case nobody has acknowledged says so, as amber text', () => {
   expect(marker.className).not.toMatch(/\bbg-|border-/);
 });
 
-test('the row shows the AI\'s category without an "AI:" prefix, in red only for Prepare now', () => {
-  const label = render(base({ preparation_category: 'Prepare now' })).querySelector('span.text-red-600');
-  expect(label.textContent).toBe('Prepare now');
-  expect(render(base({ preparation_category: null, processing: { status: 'pending', needs_review: false, assessment: { status: 'pending' } } }))
+test('the row shows the ESI level and risk score without an "AI:" prefix, in red only for ESI 1', () => {
+  const label = render(base({ esi_level: 1, risk_score: 9 })).querySelector('span.text-red-600');
+  expect(label.textContent).toBe('ESI 1 · Risk 9/10');
+  expect(render(base({ esi_level: 2 })).querySelector('span.text-red-600')).toBeNull();
+  expect(render(base({ esi_level: null, risk_score: null, processing: { status: 'pending', needs_review: false, assessment: { status: 'pending' } } }))
     .textContent).toContain('Assessing…');
 });
 
 test('the row is who and how soon and the complaint; the reasons are in the tooltip', () => {
-  const row = render(base({ preparation_category: 'Prepare now' }));
+  const row = render(base({ esi_level: 2 }));
   expect(row.textContent).toContain('#1');
   expect(row.textContent).toContain('Medic 10');
   expect(row.textContent).toContain('10 min');
   expect(row.textContent).toContain('Chest pain');
-  expect(row.textContent).toContain('Prepare now');
+  expect(row.textContent).toContain('ESI 2');
   expect(row.textContent).not.toContain('Why here');
   expect(row.querySelector('button').title).toBe('Why here: ETA 10 min');
 });

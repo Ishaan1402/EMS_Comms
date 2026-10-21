@@ -11,7 +11,7 @@ came from:
 - the AI-written summary, change since the hospital's acknowledgment and missing items, as a
   DocumentReference labelled AI-drafted, with its own Provenance naming the model version.
 
-Deliberately left out: the AI's preparation category. The record gets facts with their sources,
+Deliberately left out: the AI's suggested ESI level, risk score and preparation category. The record gets facts with their sources,
 not an AI urgency label (see case_queue.py and FDA's 2026 CDS guidance). Free text in the Bundle
 is fine: it is the clinical record, unlike the SAS exports.
 

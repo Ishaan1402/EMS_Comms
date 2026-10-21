@@ -1,6 +1,6 @@
 import React from 'react';
 import { ArrowDown, ArrowUp, Pin } from 'lucide-react';
-import { CategoryBadge, ProcessingBadge, ReportingBadge, isReporting } from './CaseBadges';
+import { EsiBadge, ProcessingBadge, ReportingBadge, isReporting } from './CaseBadges';
 import { CrewAlertBadges } from './CrewAlerts';
 import { StatusText } from './ui';
 import { FILTERS } from '../utils/queueView';
@@ -34,8 +34,8 @@ const MoveCue = ({ move }) => (move.to < move.from
 /**
  * One case in the hospital's queue, in three lines: who and how soon, what is wrong with the patient
  * (the complaint), and only the exceptions that need a person. A normal state, such as acknowledged,
- * gets no marker. Why the case sits here is the tooltip and the top of the case. The AI's category is on
- * the right without its "AI:" prefix; the case shows where it comes from.
+ * gets no marker. Why the case sits here is the tooltip and the top of the case. The ESI level and risk
+ * score are on the right; the case pane (and the row's hover) says whether the level is suggested or a doctor's.
  */
 const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, arrivalMinutes, dragHandle = null,
   rowProps = {} }) => {
@@ -90,7 +90,7 @@ const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, ar
                 <span className="text-xs text-gray-500">No audio {Math.floor(quietMs / 60000)}m</span>
               )}
             </span>
-            <span className="shrink-0"><CategoryBadge liveCase={c} prefix={false} /></span>
+            <span className="shrink-0"><EsiBadge liveCase={c} detail={false} /></span>
           </div>
         )}
       </button>

@@ -17,12 +17,13 @@ from backend.database import get_db, query, utc_now_iso
 CAUSES = {
     "case_opened", "update_added", "eta_changed", "clip_received", "transcript_added", "transcription_failed",
     "transcription_retried", "failure_handled", "assessment_updated", "acknowledged", "arrived", "closed",
-    "report_sent", "report_completed", "alert_called", "alert_cancelled", "alert_acknowledged", "server_started",
+    "report_sent", "report_completed", "alert_called", "alert_cancelled", "alert_acknowledged", "esi_changed",
+    "server_started",
 }
 
 EVENT_COLUMNS = ("e.id, e.hospital_id, e.revision, e.case_id, c.source_case_id, c.ems_unit, e.change, "
                  "e.from_position, e.to_position, e.cause, e.cause_case_id, e.info_version, "
-                 "e.preparation_category, e.needs_attention, e.rule_version, e.created_at")
+                 "e.preparation_category, e.esi_level, e.needs_attention, e.rule_version, e.created_at")
 
 
 def record(hospital_id: int, ordered: list, cause: str, cause_case_id: Optional[int]) -> list:
@@ -53,15 +54,15 @@ def record(hospital_id: int, ordered: list, cause: str, cause_case_id: Optional[
             case = by_id.get(case_id)
             rows.append((
                 hospital_id, revision, case_id, change, from_position, to_position, cause, cause_case_id,
-                case and case["info_version"], case and case["preparation_category"],
+                case and case["info_version"], case and case["preparation_category"], case and case["esi_level"],
                 None if case is None else int(case_queue.needs_attention(case)),
                 case_queue.QUEUE_RULE_VERSION, now,
             ))
         conn.executemany(
             """INSERT INTO queue_events (hospital_id, revision, case_id, change, from_position, to_position, cause,
-                                         cause_case_id, info_version, preparation_category, needs_attention,
-                                         rule_version, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                         cause_case_id, info_version, preparation_category, esi_level,
+                                         needs_attention, rule_version, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             rows,
         )
         conn.execute(

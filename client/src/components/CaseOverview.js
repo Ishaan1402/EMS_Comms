@@ -1,12 +1,12 @@
 import React, { useId } from 'react';
 import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle, Keyboard, Loader2, MapPin, Radio, RotateCw } from 'lucide-react';
 import { buildVitalRows, formatValue } from '../utils/vitalsTrend';
-import { CategoryBadge, NewTag, OperationalBadge, ProcessingBadge, ReportingBadge, isReporting } from './CaseBadges';
+import { EsiBadge, NewTag, OperationalBadge, ProcessingBadge, ReportingBadge, isReporting } from './CaseBadges';
 import Disclosure from './Disclosure';
 import { Button, Caption, SectionLabel, StatusText } from './ui';
 
 // The badges used to live here; other files still import them from this module.
-export { CategoryBadge, NewTag, OperationalBadge, ProcessingBadge, ReportingBadge };
+export { EsiBadge, NewTag, OperationalBadge, ProcessingBadge, ReportingBadge };
 
 const UPDATE_LABELS = { note: 'Update', vitals: 'Vitals', correction: 'Correction', eta: 'ETA change' };
 
@@ -224,13 +224,45 @@ const UpdatesTimeline = ({ updates, isNew }) => (
 const CHANGE_LABELS = { Yes: 'Changed', No: 'No change', Unclear: 'Change unclear' };
 
 /**
+ * The hospital doctor's ESI level for the case, 1 to 5, in place of the AI's suggestion. It holds through
+ * new reports until changed; "Use suggestion" goes back to the AI's level. The risk score stays the AI's.
+ */
+const EsiPicker = ({ liveCase, onSetEsi }) => {
+  const change = liveCase.esi_change;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+      <span id={`esi-${liveCase.id}`} className="font-medium text-gray-700">ESI</span>
+      <div role="group" aria-labelledby={`esi-${liveCase.id}`} className="inline-flex gap-1">
+        {[1, 2, 3, 4, 5].map((level) => {
+          const current = liveCase.esi_level === level;
+          return (
+            <button key={level} type="button" aria-pressed={current} onClick={() => onSetEsi(level)}
+                    title={level === liveCase.ai_esi_level ? 'Suggested level' : undefined}
+                    className={`h-8 w-8 rounded-lg border text-sm font-medium tabular-nums transition-colors ${current
+                      ? 'border-blue-600 bg-blue-50 text-blue-700'
+                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}>
+              {level}
+            </button>
+          );
+        })}
+      </div>
+      {change && (
+        <button type="button" onClick={() => onSetEsi(null)} className="text-xs font-medium text-blue-600 hover:underline">
+          Use suggestion{liveCase.ai_esi_level ? ` (ESI ${liveCase.ai_esi_level})` : ''}
+        </button>
+      )}
+    </div>
+  );
+};
+
+/**
  * The case as the EMT and the hospital both see it: where it stands, the AI's handoff, vitals (folded
  * to one line), what was extracted, and typed updates. markNew (hospital view) tags what arrived since
  * the last acknowledgment, so the clinician sees exactly what they are acknowledging. `children` go
  * after the patient information (the hospital's custom fields).
  */
 const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, onRetryAssessment, onRetryFindings,
-  markNew = false, children = null }) => {
+  onSetEsi, markNew = false, children = null }) => {
   const { processing } = liveCase;
   const assessment = liveCase.current_assessment;
   const isNew = newSince(liveCase, markNew);
@@ -239,7 +271,7 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
     <div className="divide-y divide-gray-100">
       <Section>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-gray-600">
-          <CategoryBadge liveCase={liveCase} />
+          <EsiBadge liveCase={liveCase} />
           <ReportingBadge liveCase={liveCase} />
           {/* Nothing left to do is the normal state; only a state that needs a person is marked. */}
           {processing?.status !== 'completed' && <ProcessingBadge processing={processing} />}
@@ -265,6 +297,8 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
             )
           )}
         </div>
+
+        {onSetEsi && liveCase.status === 'active' && <EsiPicker liveCase={liveCase} onSetEsi={onSetEsi} />}
 
         {processing?.needs_review && (
           <div className="mt-3 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
@@ -298,6 +332,18 @@ const CaseOverview = ({ liveCase, updates = [], vitals = [], findings = null, on
                   {CHANGE_LABELS[assessment.meaningful_change] || 'Change unclear'}
                 </dt>
                 <dd className="text-gray-800">{assessment.change_explanation}</dd>
+              </div>
+            )}
+            {assessment.esi_reason && (
+              <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
+                <dt className="font-medium text-gray-500">ESI {assessment.esi_level || ''}</dt>
+                <dd className="text-gray-800">{assessment.esi_reason}</dd>
+              </div>
+            )}
+            {assessment.risk_reason && (
+              <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
+                <dt className="font-medium text-gray-500">Risk {assessment.risk_score}/10</dt>
+                <dd className="text-gray-800">{assessment.risk_reason}</dd>
               </div>
             )}
             {assessment.missing_information && assessment.missing_information !== 'None identified' && (

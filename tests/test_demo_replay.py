@@ -66,7 +66,8 @@ async def fake_scorer(inputs):
     has_prior = inputs["input"]["prior_information"] != "No earlier report provided."
     return {"summary": text[:120], "change_explanation": "-", "missing_information": "None identified",
             "meaningful_change": ("Yes" if worse else "No") if has_prior else "No earlier report",
-            "preparation_category": "Prepare now" if worse else "Can wait"}, \
+            "esi_level": "2" if worse else "3", "esi_reason": "-", "risk_score": 7 if worse else 4,
+            "risk_reason": "-"}, \
         {"input_tokens": 1000, "output_tokens": 200, "latency_ms": 900}
 
 
@@ -365,11 +366,13 @@ class TestPilotScenario:
         assert predictions["kind"] == "model_predictions" and predictions["dataset_version"] == "pilot_v1"
         [config] = predictions["configs"]
         assert config["config_id"] == f"app-replay-{run.run_id}" and config["repeats"] == 1
-        assert config["prompt_version"] == "awareness_v3" and config["input_contract_version"] == "app_replay_typed"
+        assert config["prompt_version"] == "awareness_v4" and config["input_contract_version"] == "app_replay_typed"
         records = {r["case_id"]: r for r in predictions["records"]}
         assert set(records) == {"SYN001", "SYN002", "SYN004", "SYN007"}
         assert all(r["status"] == "ok" and set(r["output"]) == set(case_assessment.OUTPUT_FIELDS)
                    for r in records.values())
+        from evals import contracts
+        assert not any(contracts.output_errors(r["output"]) for r in records.values())
         assert records["SYN001"]["output"]["meaningful_change"] == "No earlier report"
         assert records["SYN002"]["output"]["meaningful_change"] == "Yes"   # compared with the acknowledged report
         assert predictions["app_run"]["cases"]["SYN002"]["baseline_version"] is not None
@@ -382,11 +385,11 @@ class TestPilotScenario:
             if "SYN004" in inputs["input"]["case_id"]:
                 raise openai.APITimeoutError(request=None)
             return {"summary": "s", "meaningful_change": "No earlier report", "change_explanation": "-",
-                    "missing_information": "Vital signs", "preparation_category": "Unsure"}, {}
+                    "missing_information": "Vital signs", "esi_level": "Cannot assess", "esi_reason": "-", "risk_score": 5, "risk_reason": "-"}, {}
         monkeypatch.setattr(case_assessment, "score", unsure_or_timeout)
         run, _ = run_replay(pilot, None, typed=True)
         records = {r["case_id"]: r for r in run.predictions()["records"]}
-        assert records["SYN001"]["output"]["preparation_category"] == "Unsure"
+        assert records["SYN001"]["output"]["esi_level"] == "Cannot assess"
         assert records["SYN004"]["status"] == "timeout" and "output" not in records["SYN004"]
 
 

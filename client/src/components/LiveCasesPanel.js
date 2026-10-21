@@ -293,6 +293,7 @@ const LiveCasesPanel = () => {
   const acknowledge = () => caseAction('acknowledge', { info_version: selected.info_version }, 'Could not acknowledge');
   const markArrived = () => caseAction('arrive', undefined, 'Could not mark as arrived');
   const retryAssessment = () => caseAction('assessments/retry', undefined, 'Could not retry the assessment');
+  const setEsi = (level) => caseAction('esi', { esi_level: level }, 'Could not change the ESI level');
 
   return (
     <div className="mb-8 overflow-clip rounded-xl border border-gray-200 bg-white">
@@ -385,6 +386,7 @@ const LiveCasesPanel = () => {
                     vitals={details.vitals}
                     findings={extracted.findings}
                     onRetryAssessment={retryAssessment}
+                    onSetEsi={setEsi}
                     onRetryFindings={extracted.retry}
                     markNew
                   >

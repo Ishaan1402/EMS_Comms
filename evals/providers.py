@@ -11,16 +11,21 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-from .contracts import CHANGE, PREPARATION, OUTPUT_FIELDS, number
+from .contracts import CHANGE, ESI, PREPARATION, number, output_fields
 
 KEY_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY"}
 
 
-def awareness_schema():
-    properties = {key: {"type": "string"} for key in OUTPUT_FIELDS}
+def awareness_schema(prompt_version=None):
+    fields = output_fields(prompt_version)
+    properties = {key: {"type": "string"} for key in fields}
     properties["meaningful_change"]["enum"] = list(CHANGE)
-    properties["preparation_category"]["enum"] = list(PREPARATION)
-    return {"type": "object", "properties": properties, "required": list(OUTPUT_FIELDS),
+    if "esi_level" in properties:
+        properties["esi_level"]["enum"] = list(ESI)
+        properties["risk_score"] = {"type": "integer"}  # 1 to 10, checked by output_errors
+    else:
+        properties["preparation_category"]["enum"] = list(PREPARATION)
+    return {"type": "object", "properties": properties, "required": list(fields),
             "additionalProperties": False}
 
 

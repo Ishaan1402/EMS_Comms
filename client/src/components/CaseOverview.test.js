@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import CaseOverview, { CategoryBadge } from './CaseOverview';
+import CaseOverview, { EsiBadge } from './CaseOverview';
 
 let container;
 let root;
@@ -12,7 +12,7 @@ afterEach(() => act(() => root.unmount()));
 
 const inbound = (overrides = {}) => ({
   status: 'active', operational_status: 'inbound', segment_count: 1,
-  last_segment_at: '2020-01-01T00:00:00Z', preparation_category: 'Can wait',
+  last_segment_at: '2020-01-01T00:00:00Z', preparation_category: 'Can wait', esi_level: 3, ai_esi_level: 3, risk_score: 4,
   processing: { status: 'completed' }, open_report: null,
   current_assessment: { summary: 'Patient awake.' }, ...overrides,
 });
@@ -24,8 +24,8 @@ test('while the crew is reporting, the handoff says it covers the reports alread
   expect(container.textContent).toContain('Reporting…');
   expect(container.textContent).toContain("covers the reports they've already sent");
   expect(container.textContent).toContain('Patient awake.');
-  act(() => root.render(<CategoryBadge liveCase={inbound(reporting)} />));
-  expect(container.textContent).toBe('AI: Can wait');
+  act(() => root.render(<EsiBadge liveCase={inbound(reporting)} />));
+  expect(container.textContent).toBe('Suggested ESI 3 · Risk 4/10');
 });
 
 test.each([
@@ -38,7 +38,7 @@ test.each([
 
 test('an ETA refresh keeps the earlier result visibly outdated', () => {
   act(() => root.render(<CaseOverview liveCase={inbound({ assessment_is_outdated: true })} />));
-  expect(container.textContent).toContain('Can wait · earlier info');
+  expect(container.textContent).toContain('ESI 3 · Risk 4/10 · earlier info');
   expect(container.textContent).toContain('based on earlier information or ETA');
 });
 
@@ -50,13 +50,46 @@ test('the handoff identifies its assessment time separately from the live arriva
   expect(container.textContent).toContain('current arrival time shown above');
 });
 
-test('a report with no assessment never invents a category', () => {
+test('a report with no assessment never invents a level', () => {
   act(() => root.render(<CaseOverview liveCase={inbound({
-    current_assessment: null, preparation_category: null,
+    current_assessment: null, preparation_category: null, esi_level: null, ai_esi_level: null, risk_score: null,
     processing: { status: 'pending', assessment: { status: 'pending' } },
   })} />));
-  expect(container.textContent).toContain('assessing…');
-  expect(container.textContent).not.toContain('Can wait');
+  expect(container.textContent).toContain('Assessing…');
+  expect(container.textContent).not.toContain('ESI');
+});
+
+test('the handoff gives the reasons for the suggested level and the risk score', () => {
+  act(() => root.render(<CaseOverview liveCase={inbound({
+    current_assessment: { summary: 'Patient awake.', esi_level: 3, esi_reason: 'Needs labs and imaging.',
+                          risk_score: 4, risk_reason: 'Stable vitals.' },
+  })} />));
+  expect(container.textContent).toContain('ESI 3Needs labs and imaging.');
+  expect(container.textContent).toContain('Risk 4/10Stable vitals.');
+});
+
+test('a doctor sets the ESI level, and can go back to the suggestion', () => {
+  const onSetEsi = jest.fn();
+  act(() => root.render(<CaseOverview liveCase={inbound({ id: 4 })} onSetEsi={onSetEsi} />));
+  const buttons = [...container.querySelectorAll('[role="group"] button')];
+  expect(buttons.map((b) => b.textContent)).toEqual(['1', '2', '3', '4', '5']);
+  expect(buttons.map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'true', 'false', 'false']);
+  expect(container.textContent).not.toContain('Use suggestion');
+  act(() => buttons[0].click());
+  expect(onSetEsi).toHaveBeenLastCalledWith(1);
+
+  act(() => root.render(<CaseOverview liveCase={inbound({ id: 4, esi_level: 1, esi_change: { esi_level: 1, user_name: 'John Smith' } })}
+                                      onSetEsi={onSetEsi} />));
+  const back = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Use suggestion (ESI 3)');
+  act(() => back.click());
+  expect(onSetEsi).toHaveBeenLastCalledWith(null);
+});
+
+test('the crew and closed cases see the level but cannot change it', () => {
+  act(() => root.render(<CaseOverview liveCase={inbound()} />));
+  expect(container.querySelector('[role="group"]')).toBeNull();
+  act(() => root.render(<CaseOverview liveCase={inbound({ status: 'closed' })} onSetEsi={() => {}} />));
+  expect(container.querySelector('[role="group"]')).toBeNull();
 });
 
 // Vitals as the API returns them: typed readings, and those extracted from the crew's reports.

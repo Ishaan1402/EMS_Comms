@@ -233,6 +233,10 @@ def init_database():
       baseline_version INTEGER,
       input_eta_at TEXT DEFAULT '',
       preparation_category TEXT,
+      esi_level INTEGER,
+      esi_reason TEXT,
+      risk_score INTEGER,
+      risk_reason TEXT,
       meaningful_change TEXT,
       change_explanation TEXT,
       missing_information TEXT,
@@ -250,6 +254,18 @@ def init_database():
       user_id INTEGER NOT NULL,
       info_version INTEGER NOT NULL,
       acknowledged_at TEXT NOT NULL,
+      FOREIGN KEY (case_id) REFERENCES cases (id),
+      FOREIGN KEY (user_id) REFERENCES users (id)
+    );
+
+    -- A hospital doctor setting the case's ESI level in place of the AI's suggestion. The newest row
+    -- counts; esi_level NULL goes back to the suggestion. Kept as a history, never updated in place.
+    CREATE TABLE IF NOT EXISTS case_esi_changes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      esi_level INTEGER CHECK (esi_level BETWEEN 1 AND 5),
+      created_at TEXT NOT NULL,
       FOREIGN KEY (case_id) REFERENCES cases (id),
       FOREIGN KEY (user_id) REFERENCES users (id)
     );
@@ -342,6 +358,7 @@ def init_database():
       cause_case_id INTEGER,
       info_version INTEGER,
       preparation_category TEXT,
+      esi_level INTEGER,
       needs_attention INTEGER,
       rule_version TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -504,6 +521,7 @@ ADDED_COLUMNS = {
     "users": [("hospital_id", "INTEGER REFERENCES hospitals (id)")],
     "hospital_queue_settings": [("ai_ranking", "INTEGER NOT NULL DEFAULT 0"),
                                 ("ai_pins", "TEXT NOT NULL DEFAULT '[]'")],
+    "queue_events": [("esi_level", "INTEGER")],
     "hospitals": [
         ("arrival_highlight_minutes", "INTEGER NOT NULL DEFAULT 5"),
         ("settings_version", "INTEGER NOT NULL DEFAULT 1"),
@@ -541,6 +559,10 @@ ADDED_COLUMNS = {
         # Empty means an older attempt did not record its ETA input; NULL means ETA was absent.
         ("input_eta_at", "TEXT DEFAULT ''"),
         ("preparation_category", "TEXT"),
+        ("esi_level", "INTEGER"),
+        ("esi_reason", "TEXT"),
+        ("risk_score", "INTEGER"),
+        ("risk_reason", "TEXT"),
         ("meaningful_change", "TEXT"),
         ("change_explanation", "TEXT"),
         ("missing_information", "TEXT"),
@@ -574,6 +596,14 @@ def migrate_existing_tables(conn):
         conn.execute(
             """UPDATE risk_assessments SET status = 'failed', error = 'assessed in an earlier format; re-assessing'
                WHERE status IN ('completed', 'needs_review')"""
+        )
+    elif ("risk_assessments", "esi_level") in added:
+        # Open cases' category-only assessments are re-assessed for an ESI level. Closed cases keep
+        # theirs (handoff and category), since nothing would re-assess them.
+        conn.execute(
+            """UPDATE risk_assessments SET status = 'failed', error = 'assessed in an earlier format; re-assessing'
+               WHERE status IN ('completed', 'needs_review')
+                 AND case_id IN (SELECT id FROM cases WHERE status = 'active')"""
         )
     if case_columns and "info_version" not in case_columns:
         # Older cases already hold information; give them a version so acknowledgments can refer to it.

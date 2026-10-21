@@ -1,9 +1,13 @@
 """AI assessment of EMS cases, on the evaluation contract (evals/contracts.py).
 
-The model gets a versioned system prompt (evals/prompts/awareness_v3.txt) and the same input
+The model gets a versioned system prompt (evals/prompts/awareness_v4.txt) and the same input
 and output fields as the evaluation harness. Compare runs using the recorded prompt version;
-v3 retains v2's clinical wording and clarifies which ETA input is current. Output fields:
-    summary, meaningful_change, change_explanation, missing_information, preparation_category
+v4 keeps v3's wording and replaces its preparation category with a suggested ESI level and a
+risk score. Output fields:
+    summary, meaningful_change, change_explanation, missing_information,
+    esi_level, esi_reason, risk_score, risk_reason
+The category the app showed before v4 is still stored, derived from the ESI level
+(PREPARATION_FOR_ESI), so evaluations, queue history and SAS exports keep their column.
 
 "Earlier" information is what the hospital had acknowledged before this assessment, so
 meaningful_change answers "what changed since the hospital last looked". Before any
@@ -32,19 +36,24 @@ from backend import case_reports
 from backend.database import get_db, query, run, utc_now_iso
 from backend import openai_config
 
-PROMPT_VERSION = "awareness_v3"
+PROMPT_VERSION = "awareness_v4"
 PROMPT = (Path(__file__).parent.parent / "evals" / "prompts" / f"{PROMPT_VERSION}.txt").read_text(encoding="utf-8")
 
 # The evaluation contract, kept identical to evals/contracts.py (test_case_model checks this).
 CHANGE = ("Yes", "No", "Unclear", "No earlier report")
 PREPARATION = ("Prepare now", "Can wait", "Routine", "Unsure")
-OUTPUT_FIELDS = ("summary", "meaningful_change", "change_explanation", "missing_information", "preparation_category")
+ESI = ("1", "2", "3", "4", "5", "Cannot assess")
+RISK_SCORES = range(1, 11)
+OUTPUT_FIELDS = ("summary", "meaningful_change", "change_explanation", "missing_information",
+                 "esi_level", "esi_reason", "risk_score", "risk_reason")
+TEXT_FIELDS = ("summary", "change_explanation", "missing_information", "esi_reason", "risk_reason")
 OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
         **{field: {"type": "string"} for field in OUTPUT_FIELDS},
         "meaningful_change": {"type": "string", "enum": list(CHANGE)},
-        "preparation_category": {"type": "string", "enum": list(PREPARATION)},
+        "esi_level": {"type": "string", "enum": list(ESI)},
+        "risk_score": {"type": "integer"},  # 1 to 10, checked by output_errors
     },
     "required": list(OUTPUT_FIELDS),
     "additionalProperties": False,
@@ -54,7 +63,10 @@ NO_EARLIER_REPORT = "No earlier report provided."
 
 # The prompt's "Unsure" is the older wording; the app stores and shows "Cannot assess".
 CANNOT_ASSESS = "Cannot assess"
-CANNOT_ASSESS_REASON = "Insufficient information to assess preparation needs."
+CANNOT_ASSESS_REASON = "Insufficient information to suggest an ESI level."
+# The project's own mapping from ESI to the earlier category (evals/contracts.PREPARATION_FOR_ESI uses
+# "Unsure" for Cannot assess). Not clinically validated.
+PREPARATION_FOR_ESI = {1: "Prepare now", 2: "Prepare now", 3: "Can wait", 4: "Routine", 5: "Routine"}
 UNREADABLE_ERROR = "the AI's answer didn't follow the expected format"
 
 # List prices in USD per million tokens (input, output), checked 2026-10-07. A model missing
@@ -77,7 +89,7 @@ TRANSCRIPTION_POLL_SECONDS = 0.25
 
 ASSESSMENT_COLUMNS = (
     "id, case_id, based_on_version, baseline_version, input_eta_at, status, preparation_category, meaningful_change, "
-    "summary, change_explanation, missing_information, review_reason, error, scorer_version, "
+    "esi_level, esi_reason, risk_score, risk_reason, summary, change_explanation, missing_information, review_reason, error, scorer_version, "
     "input_tokens, output_tokens, latency_ms, cost_usd, started_at, completed_at, updated_at"
 )
 
@@ -276,13 +288,16 @@ def output_errors(output) -> list:
     errors = []
     if set(output) != set(OUTPUT_FIELDS):
         errors.append("output fields do not match the contract")
-    for key in ("summary", "change_explanation", "missing_information"):
+    for key in TEXT_FIELDS:
         if not isinstance(output.get(key), str) or not output[key].strip():
             errors.append(f"missing/invalid {key}")
     if output.get("meaningful_change") not in CHANGE:
         errors.append("invalid meaningful_change")
-    if output.get("preparation_category") not in PREPARATION:
-        errors.append("invalid preparation_category")
+    if output.get("esi_level") not in ESI:
+        errors.append("invalid esi_level")
+    risk = output.get("risk_score")
+    if isinstance(risk, bool) or risk not in RISK_SCORES:
+        errors.append("invalid risk_score")
     return errors
 
 
@@ -293,10 +308,15 @@ def interpret(output) -> dict:
     """
     if output_errors(output):
         return {"status": "failed", "error": UNREADABLE_ERROR}
-    fields = {field: output[field].strip() for field in OUTPUT_FIELDS}
-    if fields["preparation_category"] == "Unsure":
-        fields["preparation_category"] = CANNOT_ASSESS
+    fields = {field: output[field].strip() for field in TEXT_FIELDS}
+    fields["meaningful_change"] = output["meaningful_change"]
+    fields["risk_score"] = output["risk_score"]
+    if output["esi_level"] == CANNOT_ASSESS:
+        fields.update(esi_level=None, preparation_category=CANNOT_ASSESS)
         return {**fields, "status": "needs_review", "review_reason": CANNOT_ASSESS_REASON}
+    fields["esi_level"] = int(output["esi_level"])
+    fields["preparation_category"] = PREPARATION_FOR_ESI[fields["esi_level"]]
+    # The risk score is only shown and breaks ties in AI-assisted, so it never flags a case for review.
     return {**fields, "status": "completed", "review_reason": None}
 
 
@@ -366,21 +386,35 @@ def stated(number: float, numbers: set, temperature: bool = False) -> bool:
                for n in numbers)
 
 
+# The ESI reasons may also cite the ESI scale itself: a level, a count of resources, a score out of 10,
+# or a danger-zone threshold (the prompt's decision points), none of which the crew states.
+ESI_REFERENCE = re.compile(r"\bESI\s*[1-5]\b|\b(?:[1-9]|10)\s*/\s*10\b", re.IGNORECASE)
+ESI_THRESHOLDS = {1.0, 2.0, 3.0, 4.0, 5.0, 7.0, 20.0, 30.0, 35.0, 38.0, 40.0, 55.0, 60.0, 92.0, 100.0, 120.0, 140.0,
+                  180.0, 190.0}
+
+
 def unsupported_numbers(fields: dict, inputs: dict) -> list:
     """
-    Numbers in the handoff that nothing the model read states: not the reports, typed vitals,
-    ETA or elapsed time. A wrong vital in a handoff looks as trustworthy as a right one.
+    Numbers in the handoff and the ESI and risk reasons that nothing the model read states: not the
+    reports, typed vitals, ETA or elapsed time. A wrong vital in a handoff looks as trustworthy as a right one.
     """
     given = inputs["input"]
     numbers = numbers_in(f"{given['prior_information']}\n{given['current_transcript']}")
     numbers |= {float(given[key]) for key in ("eta_minutes", "elapsed_minutes") if given[key] is not None}
-    text = GCS_OUT_OF.sub("", f"{fields['summary']}\n{fields['change_explanation']}")
+    unstated = _unstated(f"{fields['summary']}\n{fields['change_explanation']}", numbers)
+    reasons = ESI_REFERENCE.sub("", f"{fields.get('esi_reason') or ''}\n{fields.get('risk_reason') or ''}")
+    unstated += _unstated(reasons, numbers | ESI_THRESHOLDS)
+    return list(dict.fromkeys(unstated))
+
+
+def _unstated(text: str, numbers: set) -> list:
+    text = GCS_OUT_OF.sub("", text)
     unstated = []
     for match in DIGITS.finditer(text):
         is_temperature = bool(DEGREES_AFTER.match(text, match.end()) or TEMPERATURE_BEFORE.search(text[:match.start()]))
         if not stated(float(match.group().replace(",", "")), numbers, temperature=is_temperature):
             unstated.append(match.group())
-    return list(dict.fromkeys(unstated))
+    return unstated
 
 
 def check_numbers(fields: dict, inputs: dict) -> dict:
@@ -538,12 +572,14 @@ class AssessmentRunner(CaseRunner):
         now = utc_now_iso()
         run(
             """UPDATE risk_assessments
-               SET status = ?, preparation_category = ?, meaningful_change = ?, summary = ?,
+               SET status = ?, preparation_category = ?, esi_level = ?, esi_reason = ?, risk_score = ?,
+                   risk_reason = ?, meaningful_change = ?, summary = ?,
                    change_explanation = ?, missing_information = ?, review_reason = ?, error = ?,
                    input_tokens = ?, output_tokens = ?, latency_ms = ?, cost_usd = ?,
                    completed_at = ?, updated_at = ?
                WHERE id = ?""",
-            (fields["status"], fields.get("preparation_category"), fields.get("meaningful_change"),
+            (fields["status"], fields.get("preparation_category"), fields.get("esi_level"), fields.get("esi_reason"),
+             fields.get("risk_score"), fields.get("risk_reason"), fields.get("meaningful_change"),
              fields.get("summary"), fields.get("change_explanation"), fields.get("missing_information"),
              fields.get("review_reason"), error, usage.get("input_tokens"), usage.get("output_tokens"),
              usage.get("latency_ms"), estimate_cost(openai_config.SCORING_MODEL, usage), now, now, assessment_id),

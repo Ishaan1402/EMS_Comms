@@ -114,7 +114,7 @@ def build_plan(spec, cases, queues, *, model_ids=None, environ=None):
                 for case in cases:
                     jobs.append({"config_id": config["config_id"], "repeat_id": repeat,
                                  "case_id": case["case_id"], "task": "awareness", "model": model,
-                                 "system": prompts[version], "input": case_input(case), "schema": awareness_schema()})
+                                 "system": prompts[version], "input": case_input(case), "schema": awareness_schema(version)})
                 for queue in queues:
                     jobs.append({"config_id": config["config_id"], "repeat_id": repeat,
                                  "queue_id": queue["queue_id"], "task": "queue", "model": model,

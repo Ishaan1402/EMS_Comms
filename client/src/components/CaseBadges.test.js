@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { CategoryBadge, NewTag, OperationalBadge, ProcessingBadge, ReportingBadge } from './CaseBadges';
+import { EsiBadge, NewTag, OperationalBadge, ProcessingBadge, ReportingBadge } from './CaseBadges';
 import { CrewAlertBadges } from './CrewAlerts';
 
 jest.mock('axios', () => ({ __esModule: true, default: { post: jest.fn() } }));
@@ -18,26 +18,47 @@ const render = (element) => {
   act(() => root.render(element));
   return container.firstChild;
 };
-const category = (preparation_category, extra = {}) => ({ preparation_category, processing: { status: 'completed' }, ...extra });
+const esi = (esi_level, extra = {}) => ({
+  esi_level, ai_esi_level: esi_level, risk_score: esi_level ? 6 : null, esi_change: null,
+  preparation_category: esi_level ? 'derived' : null, processing: { status: 'completed' }, ...extra,
+});
 
 // One meaning per colour: red asks for action, amber asks someone to look, gray is normal. Nothing is a pill.
-test('only Prepare now is red, and Can wait is never a warning colour', () => {
-  expect(render(<CategoryBadge liveCase={category('Prepare now')} />).className).toContain('text-red-600');
-  ['Can wait', 'Routine'].forEach((label) => {
-    const classes = render(<CategoryBadge liveCase={category(label)} />).className;
+test('only ESI 1 is red, and no other level is a warning colour', () => {
+  expect(render(<EsiBadge liveCase={esi(1)} />).className).toContain('text-red-600');
+  [2, 3, 4, 5].forEach((level) => {
+    const classes = render(<EsiBadge liveCase={esi(level)} />).className;
     expect(classes).toContain('text-gray-600');
     expect(classes).not.toMatch(/red|amber|orange|purple/);
   });
 });
 
-test('the AI category says it is the AI\'s, and an unknown label or Cannot assess is amber', () => {
-  expect(render(<CategoryBadge liveCase={category('Prepare now')} />).textContent).toBe('AI: Prepare now');
-  expect(render(<CategoryBadge liveCase={category('Cannot assess')} />).className).toContain('text-amber-700');
-  expect(render(<CategoryBadge liveCase={category(null)} />).textContent).toBe('AI: unavailable');
-  expect(render(<CategoryBadge liveCase={category('Can wait', { assessment_is_outdated: true })} />).textContent)
-    .toBe('AI: Can wait · earlier info');
-  expect(render(<CategoryBadge liveCase={category(null, { processing: { assessment: { status: 'processing' } } })} />).textContent)
-    .toBe('AI: assessing…');
+test('the case pane says whether the level is suggested or a doctor\'s, with the risk score', () => {
+  expect(render(<EsiBadge liveCase={esi(2)} />).textContent).toBe('Suggested ESI 2 · Risk 6/10');
+  const changed = esi(1, { ai_esi_level: 3, esi_change: { esi_level: 1, user_name: 'John Smith' } });
+  expect(render(<EsiBadge liveCase={changed} />).textContent).toBe('ESI 1 · set by John Smith (suggested ESI 3) · Risk 6/10');
+  const agreed = esi(3, { esi_change: { esi_level: 3, user_name: 'John Smith' } });
+  expect(render(<EsiBadge liveCase={agreed} />).textContent).toBe('ESI 3 · set by John Smith · Risk 6/10');
+  expect(render(<EsiBadge liveCase={esi(3, { assessment_is_outdated: true })} />).textContent)
+    .toBe('Suggested ESI 3 · Risk 6/10 · earlier info');
+});
+
+test('a queue row shows the level and score alone, with where the level came from on hover', () => {
+  const row = render(<EsiBadge liveCase={esi(2)} detail={false} />);
+  expect(row.textContent).toBe('ESI 2 · Risk 6/10');
+  expect(row.title).toBe('Suggested ESI');
+  const changed = esi(1, { ai_esi_level: 3, esi_change: { esi_level: 1, user_name: 'John Smith' } });
+  expect(render(<EsiBadge liveCase={changed} detail={false} />).title).toBe('ESI set by John Smith (suggested ESI 3)');
+});
+
+test('Cannot assess and no assessment are amber and never a guessed level', () => {
+  const cannot = render(<EsiBadge liveCase={esi(null, { preparation_category: 'Cannot assess', risk_score: 5 })} />);
+  expect(cannot.className).toContain('text-amber-700');
+  expect(cannot.textContent).toBe('ESI: cannot assess · Risk 5/10');
+  expect(render(<EsiBadge liveCase={esi(null)} />).textContent).toBe('Not assessed');
+  expect(render(<EsiBadge liveCase={esi(null, { preparation_category: 'Routine' })} />).textContent).toBe('Routine');  // closed before ESI
+  expect(render(<EsiBadge liveCase={esi(null, { processing: { assessment: { status: 'processing' } } })} />).textContent)
+    .toBe('Assessing…');
 });
 
 test('a processing failure is red, a review need is amber, and a finished assessment gets no marker at all', () => {
@@ -73,7 +94,7 @@ test('a crew alert is the only filled chip, so it is never mistaken for an AI la
   const alerts = { active: [{ alert: 'stroke', label: 'Stroke', key_time: null }], unacknowledged: false };
   act(() => root.render(<CrewAlertBadges liveCase={{ crew_alerts: alerts }} serverNow={0} />));
   expect(container.querySelector('span').className).toContain('bg-slate-900');
-  ['Prepare now', 'Can wait', 'Routine', 'Cannot assess'].forEach((label) => {
-    expect(render(<CategoryBadge liveCase={category(label)} />).className).not.toContain('bg-');
+  [1, 3, null].forEach((level) => {
+    expect(render(<EsiBadge liveCase={esi(level)} />).className).not.toContain('bg-');
   });
 });

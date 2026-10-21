@@ -51,13 +51,19 @@ def hospital(code):
     return query("SELECT id FROM hospitals WHERE code = ?", (code,))[0]["id"]
 
 
+# A category's ESI level and risk score in these tests, so the app derives that category back.
+ESI_FOR = {"Prepare now": ("2", 7), "Can wait": ("3", 4), "Routine": ("4", 2), "Unsure": ("Cannot assess", 5)}
+
+
 def score_as(monkeypatch, categories):
-    """Each case's assessment returns the category listed for its patient_info."""
+    """Each case's assessment returns the category (or (ESI, risk score)) listed for its patient_info."""
     async def fake_score(inputs):
         text = inputs["input"]["current_transcript"]
         category = next(c for key, c in categories.items() if key in text)
+        esi, risk = ESI_FOR.get(category, category)
         return {"summary": "s", "meaningful_change": "No earlier report", "change_explanation": "-",
-                "missing_information": "None identified", "preparation_category": category}, {}
+                "missing_information": "None identified", "esi_level": esi, "esi_reason": "-",
+                "risk_score": risk, "risk_reason": "-"}, {}
     monkeypatch.setattr(case_assessment, "score", fake_score)
 
 
@@ -104,7 +110,7 @@ def test_the_ai_category_is_shown_but_does_not_set_the_order(monkeypatch):
     assert [c["preparation_category"] for c in body["cases"]] == ["Routine", "Can wait", "Prepare now"]
     # "Why here" names only what the rule used.
     assert body["cases"][2]["queue_reasons"] == ["ETA 30 min"]
-    assert body["counts"]["prepare_now"] == 1 and body["counts"]["crew_alerts"] == 0
+    assert body["counts"]["esi_1_2"] == 1 and body["counts"]["crew_alerts"] == 0
     assert body["rule_version"] == "draft-4"
 
 
@@ -117,7 +123,7 @@ def test_unacknowledged_information_comes_first(monkeypatch):
     assert [c["id"] for c in body["cases"]] == [routine, now]
     assert body["cases"][0]["queue_reasons"][0] == "New information not yet acknowledged"
     assert body["counts"] == {"inbound": 2, "needs_review": 0, "unacknowledged": 1, "crew_alerts": 0,
-                              "prepare_now": 1}
+                              "esi_1_2": 1}
 
 
 def test_a_new_ai_category_does_not_move_anyone(monkeypatch):
@@ -191,7 +197,7 @@ def test_cannot_assess_needs_review_until_acknowledged(monkeypatch):
     acknowledge(now)
     body = queue()
     assert [c["id"] for c in body["cases"]] == [unsure, now]
-    assert body["cases"][0]["queue_reasons"][0] == "Needs review: Insufficient information to assess preparation needs."
+    assert body["cases"][0]["queue_reasons"][0] == "Needs review: Insufficient information to suggest an ESI level."
     assert body["counts"]["needs_review"] == 1
 
     # The doctor has read it: an unknown no longer outranks a known Prepare now.
@@ -362,7 +368,7 @@ def test_the_order_does_not_change_just_because_time_passes():
     from datetime import datetime, timezone
     def inbound(case_id, eta_at):
         return {"id": case_id, "status": "active", "arrived_at": None, "eta_at": eta_at,
-                "started_at": f"2026-10-11T18:00:0{case_id}.000Z", "preparation_category": "Can wait",
+                "started_at": f"2026-10-11T18:00:0{case_id}.000Z", "esi_level": 3, "risk_score": 4,
                 "latest_update_acknowledged": True, "processing": {"needs_review": False, "reasons": []}}
     # Both ETAs pass between the two looks; the one due first stays first.
     cases_ = [inbound(1, "2026-10-11T18:05:00.000Z"), inbound(2, "2026-10-11T18:03:00.000Z")]
@@ -371,42 +377,49 @@ def test_the_order_does_not_change_just_because_time_passes():
     assert early == late == [2, 1]
 
 
-# ---- AI-assisted: the AI's category as one more tier, below a person's calls ----------------------
+# ---- AI-assisted: the ESI level and risk score as one more tier, below a person's calls ----------
 
-def ai_assisted_case(case_id, category=None, eta="2026-10-15T15:20:00.000Z", acknowledged=True, alert=False,
-               needs_review=False, alert_unacknowledged=False):
+def ai_assisted_case(case_id, esi=None, eta="2026-10-15T15:20:00.000Z", acknowledged=True, alert=False,
+               needs_review=False, alert_unacknowledged=False, risk=None):
     """Only the stored fields the ordering reads, so the table below is a spec anyone can reimplement."""
-    return {"id": case_id, "preparation_category": category, "eta_at": eta,
+    return {"id": case_id, "esi_level": esi, "risk_score": risk, "eta_at": eta,
             "started_at": f"2026-10-15T15:00:0{case_id}.000Z", "latest_update_acknowledged": acknowledged,
             "processing": {"needs_review": needs_review},
             "crew_alerts": {"active": [{"alert": "stroke"}] if alert else [], "unacknowledged": alert_unacknowledged}}
 
 
 @pytest.mark.parametrize("name, cases, expected", [
-    ("the AI category orders cases that are otherwise equal",
-     [ai_assisted_case(1, "Routine", "2026-10-15T15:05:00.000Z"), ai_assisted_case(2, "Can wait", "2026-10-15T15:10:00.000Z"),
-      ai_assisted_case(3, "Prepare now", "2026-10-15T15:30:00.000Z")], [3, 2, 1]),
-    ("the AI breaks a tie between two cases with unacknowledged information",
-     [ai_assisted_case(1, "Routine", "2026-10-15T15:05:00.000Z", acknowledged=False),
-      ai_assisted_case(2, "Prepare now", "2026-10-15T15:20:00.000Z", acknowledged=False)], [2, 1]),
-    ("the AI breaks a tie between two cases with active crew alerts",
-     [ai_assisted_case(1, "Routine", "2026-10-15T15:05:00.000Z", alert=True),
-      ai_assisted_case(2, "Prepare now", "2026-10-15T15:20:00.000Z", alert=True)], [2, 1]),
-    ("arrival breaks ties inside one category",
-     [ai_assisted_case(1, "Prepare now", "2026-10-15T15:30:00.000Z"), ai_assisted_case(2, "Prepare now", "2026-10-15T15:10:00.000Z")], [2, 1]),
-    ("unacknowledged information outranks the AI",
-     [ai_assisted_case(1, "Prepare now"), ai_assisted_case(2, "Routine", acknowledged=False)], [2, 1]),
-    ("an unacknowledged crew alert outranks the AI",
-     [ai_assisted_case(1, "Prepare now"), ai_assisted_case(2, "Routine", alert_unacknowledged=True)], [2, 1]),
-    ("a processing failure outranks the AI",
-     [ai_assisted_case(1, "Prepare now"), ai_assisted_case(2, None, needs_review=True)], [2, 1]),
-    ("an active crew alert outranks the AI",
-     [ai_assisted_case(1, "Prepare now"), ai_assisted_case(2, "Routine", alert=True)], [2, 1]),
-    ("Cannot assess and no assessment share the unknown tier, between Prepare now and Can wait",
-     [ai_assisted_case(1, "Can wait", "2026-10-15T15:05:00.000Z"), ai_assisted_case(2, "Cannot assess", "2026-10-15T15:20:00.000Z"),
-      ai_assisted_case(3, None, "2026-10-15T15:10:00.000Z"), ai_assisted_case(4, "Prepare now", "2026-10-15T15:30:00.000Z")], [4, 3, 2, 1]),
+    ("the ESI level orders cases that are otherwise equal",
+     [ai_assisted_case(1, 5, "2026-10-15T15:05:00.000Z"), ai_assisted_case(2, 3, "2026-10-15T15:10:00.000Z"),
+      ai_assisted_case(3, 1, "2026-10-15T15:30:00.000Z"), ai_assisted_case(4, 2, "2026-10-15T15:40:00.000Z"),
+      ai_assisted_case(5, 4, "2026-10-15T15:00:00.000Z")], [3, 4, 2, 5, 1]),
+    ("the higher risk score breaks a tie within one level",
+     [ai_assisted_case(1, 2, "2026-10-15T15:05:00.000Z", risk=5), ai_assisted_case(2, 2, "2026-10-15T15:30:00.000Z", risk=8)],
+     [2, 1]),
+    ("the risk score never lifts a case above a more urgent level",
+     [ai_assisted_case(1, 3, risk=10), ai_assisted_case(2, 2, risk=1)], [2, 1]),
+    ("arrival breaks ties inside one level and risk score",
+     [ai_assisted_case(1, 2, "2026-10-15T15:30:00.000Z", risk=7), ai_assisted_case(2, 2, "2026-10-15T15:10:00.000Z", risk=7)],
+     [2, 1]),
+    ("ESI breaks a tie between two cases with unacknowledged information",
+     [ai_assisted_case(1, 4, "2026-10-15T15:05:00.000Z", acknowledged=False),
+      ai_assisted_case(2, 2, "2026-10-15T15:20:00.000Z", acknowledged=False)], [2, 1]),
+    ("ESI breaks a tie between two cases with active crew alerts",
+     [ai_assisted_case(1, 4, "2026-10-15T15:05:00.000Z", alert=True),
+      ai_assisted_case(2, 2, "2026-10-15T15:20:00.000Z", alert=True)], [2, 1]),
+    ("unacknowledged information outranks ESI",
+     [ai_assisted_case(1, 1), ai_assisted_case(2, 5, acknowledged=False)], [2, 1]),
+    ("an unacknowledged crew alert outranks ESI",
+     [ai_assisted_case(1, 1), ai_assisted_case(2, 5, alert_unacknowledged=True)], [2, 1]),
+    ("a processing failure outranks ESI",
+     [ai_assisted_case(1, 1), ai_assisted_case(2, None, needs_review=True)], [2, 1]),
+    ("an active crew alert outranks ESI",
+     [ai_assisted_case(1, 1), ai_assisted_case(2, 5, alert=True)], [2, 1]),
+    ("no level yet (including Cannot assess) sits between ESI 2 and ESI 3",
+     [ai_assisted_case(1, 3, "2026-10-15T15:05:00.000Z"), ai_assisted_case(2, None, "2026-10-15T15:20:00.000Z", risk=5),
+      ai_assisted_case(3, None, "2026-10-15T15:10:00.000Z"), ai_assisted_case(4, 2, "2026-10-15T15:30:00.000Z")], [4, 2, 3, 1]),
     ("a case without an ETA goes last in its tier",
-     [ai_assisted_case(1, "Can wait", None), ai_assisted_case(2, "Can wait", "2026-10-15T15:50:00.000Z")], [2, 1]),
+     [ai_assisted_case(1, 3, None), ai_assisted_case(2, 3, "2026-10-15T15:50:00.000Z")], [2, 1]),
 ])
 def test_ai_assisted_ordering_table(name, cases, expected):
     assert [c["id"] for c in sorted(cases, key=case_queue.ai_assisted_key)] == expected, name
@@ -435,8 +448,8 @@ def test_ai_assisted_mode_reorders_by_the_ai_category_and_says_where_standard_wo
     assert [(c["id"], c["queue_position"], c["suggested_position"]) for c in assisted["cases"]] == [
         (now, 1, 3), (wait, 2, 2), (routine, 3, 1)]
     # "Why here" names what AI-assisted used, and the Standard rule's text and both versions are in the response.
-    assert assisted["cases"][0]["queue_reasons"] == ["AI suggests Prepare now", "ETA 30 min"]
-    assert assisted["rule_versions"] == {"standard": "draft-4", "ai_assisted": "ai-assisted-1"}
+    assert assisted["cases"][0]["queue_reasons"] == ["ESI 2 (suggested), risk 7/10", "ETA 30 min"]
+    assert assisted["rule_versions"] == {"standard": "draft-4", "ai_assisted": "ai-assisted-2"}
     assert assisted["rules"]["ai_assisted"] == case_queue.AI_ASSISTED_RULE and assisted["rules"]["standard"] == case_queue.QUEUE_RULE
     assert assisted["counts"] == standard["counts"]
     # Queue history keeps recording the Standard order: switching mode changes nothing on record.
@@ -458,10 +471,68 @@ def test_ai_assisted_mode_keeps_a_persons_call_above_the_ai(monkeypatch):
     assert [c["id"] for c in queue()["cases"]] == [calm, now]   # the crew's alert beats the AI's Prepare now
 
 
+# ---- A doctor's ESI level ---------------------------------------------------------------------------
+
+def set_esi(case_id, level, username=DOCTOR):
+    return client.post(f"/api/cases/{case_id}/esi", json={"esi_level": level}, headers=auth(username))
+
+
+def test_a_doctors_esi_level_replaces_the_suggestion_holds_through_new_reports_and_can_be_undone(monkeypatch):
+    score_as(monkeypatch, {"worse": "Can wait", "calm": "Routine"})
+    case_id = open_case("emt.wilson", "calm patient", eta=10)
+    changed = set_esi(case_id, 1)
+    assert changed.status_code == 200, changed.text
+    body = changed.json()
+    assert (body["esi_level"], body["ai_esi_level"], body["risk_score"]) == (1, 4, 2)
+    assert body["esi_change"]["esi_level"] == 1 and body["esi_change"]["user_name"]
+    assert body["preparation_category"] == "Prepare now"  # derived from the level in use
+
+    client.post(f"/api/cases/{case_id}/updates", json={"kind": "note", "body": "worse after a new report"},
+                headers=auth("emt.wilson"))
+    after = cases.get_case(case_id)
+    assert (after["esi_level"], after["ai_esi_level"]) == (1, 3)  # the doctor's level holds
+
+    undone = set_esi(case_id, None).json()
+    assert undone["esi_change"] is None and undone["esi_level"] == 3 and undone["preparation_category"] == "Can wait"
+    assert [r["esi_level"] for r in query("SELECT esi_level FROM case_esi_changes WHERE case_id = ? ORDER BY id",
+                                          (case_id,))] == [1, None]
+
+
+def test_a_doctors_esi_level_orders_ai_assisted_and_is_recorded(monkeypatch):
+    score_as(monkeypatch, {"calm": "Routine", "now": "Prepare now"})
+    calm = open_case("emt.wilson", "calm patient", eta=30)
+    now = open_case("emt.garcia", "now patient", eta=10)
+    acknowledge(calm)
+    acknowledge(now)
+    client.put("/api/hospitals/mine/queue-mode", json={"mode": "ai_assisted"}, headers=auth(DOCTOR))
+    assert [c["id"] for c in queue()["cases"]] == [now, calm]
+    set_esi(calm, 1)
+    body = queue()
+    assert [c["id"] for c in body["cases"]] == [calm, now]
+    assert body["cases"][0]["queue_reasons"] == ["ESI 1 (set by a doctor), risk 2/10", "ETA 30 min"]
+    client.put("/api/hospitals/mine/queue-mode", json={"mode": "standard"}, headers=auth(DOCTOR))
+    assert [c["id"] for c in queue()["cases"]] == [now, calm]  # Standard ignores ESI
+
+
+@pytest.mark.parametrize("level", [0, 6, 2.5, "2", True])
+def test_an_esi_level_must_be_1_to_5_or_null(monkeypatch, level):
+    score_as(monkeypatch, {"calm": "Routine"})
+    case_id = open_case("emt.wilson", "calm patient", eta=10)
+    assert set_esi(case_id, level).status_code == 400
+
+
+def test_only_the_destination_hospitals_doctors_set_the_esi_level(monkeypatch):
+    score_as(monkeypatch, {"calm": "Routine"})
+    case_id = open_case("emt.wilson", "calm patient", eta=10)
+    assert set_esi(case_id, 2, "dr.jones").status_code == 404
+    assert set_esi(case_id, 2, "emt.wilson").status_code == 403
+
+
 # ---- AI-assisted pins: a doctor's move holds while the AI orders the rest around it ----------------
 
-def pinned_case(case_id, category, acknowledged=True, info_version=1):
-    case = ai_assisted_case(case_id, category, acknowledged=acknowledged)
+def pinned_case(case_id, category, acknowledged=True, info_version=1, esi=None):
+    """A case at the ESI level its category maps to (ESI_FOR), unless esi is given."""
+    case = ai_assisted_case(case_id, esi or int(ESI_FOR[category][0]), acknowledged=acknowledged)
     case.update(info_version=info_version, crew_alerts={**case["crew_alerts"], "latest_change_id": None})
     return case
 
@@ -492,13 +563,15 @@ def test_a_case_that_needs_a_person_goes_above_the_pins():
         (3, False), (1, True), (2, False)]
 
 
-def test_new_information_a_new_eta_or_an_alert_change_ends_a_pin():
+def test_new_information_a_new_eta_an_alert_change_or_a_new_esi_level_ends_a_pin():
     routine, now = pinned_case(1, "Routine"), pinned_case(2, "Prepare now")
     pin = case_queue.pin_for(routine, 1)
     assert pinned_order([pinned_case(1, "Routine", info_version=2), now], [pin]) == [(2, False), (1, False)]
     assert pinned_order([{**routine, "eta_at": "2026-10-15T15:40:00.000Z"}, now], [pin]) == [(2, False), (1, False)]
     alerted = {**routine, "crew_alerts": {"active": [], "unacknowledged": False, "latest_change_id": 7}}
     assert pinned_order([alerted, now], [pin]) == [(2, False), (1, False)]
+    # A doctor (or the AI) moving the patient to ESI 1 ends the pin, so the new level takes effect.
+    assert pinned_order([{**routine, "esi_level": 1}, now], [pin]) == [(1, False), (2, False)]
 
 
 def test_a_doctor_drags_a_case_in_ai_assisted_and_the_pin_holds_for_every_doctor(monkeypatch):
