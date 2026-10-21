@@ -247,7 +247,7 @@ def _cases_table(keys: dict, cases: list) -> list:
             "PREPARATION_CATEGORY": case["preparation_category"],
             "ESI_LEVEL": case["esi_level"],
             "AI_ESI_LEVEL": case["ai_esi_level"],
-            "ESI_SET_BY_DOCTOR": _bool(case["esi_change"]),
+            "ESI_SET_BY_DOCTOR": int(bool(case["esi_change"])),
             "RISK_SCORE": case["risk_score"],
             "MEANINGFUL_CHANGE": assessment.get("meaningful_change"),
             "ASSESSMENT_OUTDATED": _bool(case["assessment_is_outdated"]),

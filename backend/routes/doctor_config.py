@@ -80,7 +80,7 @@ async def get_config(current_user: dict = Depends(require_role(["doctor"]))):
 
 @hospital_router.put("/mine/queue-mode")
 async def set_queue_mode(request: Request, current_user: dict = Depends(require_role(["doctor"]))):
-    """Standard (the written rule), AI-assisted (the rule plus the AI's category) or Manual (the doctors' own order)."""
+    """Standard (the written rule), AI-assisted (the rule plus the ESI level and risk score) or Manual (the doctors' own order)."""
     hospital_id = own_hospital(current_user)
     mode = (await read_json_body(request)).get("mode")
     if mode not in QUEUE_MODES:
