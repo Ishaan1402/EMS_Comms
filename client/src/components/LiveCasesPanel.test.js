@@ -110,14 +110,14 @@ test('queue rows label the AI category as the AI\'s, and the order menu carries 
   expect(container.textContent).not.toContain('draft-');
 });
 
-test('in Manual the order says so, and only then do the rows get drag handles', async () => {
+test('in Manual the order says so and the rows get drag handles; Standard has none', async () => {
   await loadTwoCases({ queue_mode: 'manual', auto_order: false });
   expect(orderButton().textContent).toBe('Order: Manual');
   expect(container.querySelector('ul').querySelector('[aria-label^="Move "]')).not.toBeNull();
   await act(() => { mockHandler('queue.reordered', {}); });
   await new Promise((done) => setTimeout(done, 350));    // the panel re-fetches the queue shortly after
-  await resolve(pendingFor('/api/cases/queue')[0], { ...queue(9, [[1, 'Medic 1'], [2, 'Medic 2']]), queue_mode: 'ai_assisted', auto_order: true });
-  expect(orderButton().textContent).toBe('Order: AI-assisted');
+  await resolve(pendingFor('/api/cases/queue')[0], { ...queue(9, [[1, 'Medic 1'], [2, 'Medic 2']]), queue_mode: 'standard', auto_order: true });
+  expect(orderButton().textContent).toBe('Order: Standard');
   expect(container.querySelector('ul').querySelector('[aria-label^="Move "]')).toBeNull();
 });
 
@@ -229,7 +229,7 @@ test('in Manual, a move that fails to save puts back the order the server last c
   expect(rowUnits().indexOf('Medic 1')).toBeLessThan(rowUnits().indexOf('Medic 2'));
 });
 
-test('the drag handles only show in Manual with the plain queue view, and the screen says why they are gone', async () => {
+test('the drag handles only show with the plain queue view, and the screen says why they are gone', async () => {
   await loadTwoCases({ queue_mode: 'manual', auto_order: false });
   const arrows = () => container.querySelectorAll('ul [aria-label^="Move "]').length;
   expect(arrows()).toBe(2);
@@ -241,4 +241,35 @@ test('the drag handles only show in Manual with the plain queue view, and the sc
   expect(arrows()).toBe(0);
   press(chip('Not acknowledged'));
   expect(arrows()).toBe(2);
+});
+
+const loadAiAssisted = async (pinned = false) => {
+  mockPut.mockClear();
+  await act(async () => root.render(<LiveCasesPanel />));
+  await resolve(pendingFor('/api/hospitals/mine')[0], { id: 1, name: 'General' });
+  await resolve(pendingFor('/api/cases')[0], [inbound(1, 'Medic 1'), inbound(2, 'Medic 2')]);
+  const body = queue(1, [[1, 'Medic 1'], [2, 'Medic 2']]);
+  body.cases[0] = { ...body.cases[0], pinned };
+  await resolve(pendingFor('/api/cases/queue')[0], { ...body, queue_mode: 'ai_assisted', auto_order: true });
+};
+
+test('in AI-assisted a doctor can move a row, and the move pins it for the hospital', async () => {
+  await loadAiAssisted();
+  expect(container.textContent).not.toContain('Back to AI order');
+  const handle = container.querySelector('ul [aria-label^="Move Medic 1"]');
+  await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+  expect(rowOrder(container)).toEqual(['Medic 2', 'Medic 1']);
+  expect(mockPut).toHaveBeenCalledWith('/api/hospitals/mine/ai-pins', { case_ids: [2, 1], moved: 1 });
+});
+
+test('in AI-assisted a pinned row says so and the team can go back to the AI order', async () => {
+  await loadAiAssisted(true);
+  expect(container.querySelector('ul').textContent).toContain('Moved by your team');
+  expect(container.textContent).toContain('Back to AI order');
+});
+
+test('in AI-assisted a case that needs a person now has no handle: it stays on top', async () => {
+  await loadTwoCases({ queue_mode: 'ai_assisted', auto_order: true });
+  expect(container.querySelector('ul [aria-label^="Move Medic 1"]')).not.toBeNull();
+  expect(container.querySelector('ul [aria-label^="Move Medic 2"]')).toBeNull();   // not acknowledged
 });
