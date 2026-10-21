@@ -52,7 +52,7 @@ No approved references means quality scores are **N/A**, never fabricated zeros.
 
 ## Application integration (October 14)
 
-The app now uses the same five-field output contract with `awareness_v3`. Its stored/displayed `Cannot assess` maps to the evaluation contract's `Unsure`; `demo/replay.py` performs that mapping explicitly when exporting predictions. The comparison configurations below retain Vrishank's original v1/v2 experiment setup; their presence is not an evaluation of v3. Run the app replay to collect exact v3 predictions, then score them with this harness and approved references. Without approved references, quality remains N/A.
+The app now uses the ESI output contract with `awareness_v4`: the four shared fields plus `esi_level` (1-5 or Cannot assess), `esi_reason`, `risk_score` (1-10) and `risk_reason` (`contracts.ESI_OUTPUT_FIELDS`; `output_errors` accepts either contract). Category metrics apply to ESI outputs through `contracts.PREPARATION_FOR_ESI` (1-2 Prepare now, 3 Can wait, 4-5 Routine, Cannot assess as Unsure; the project's own mapping, not clinically validated). Where a reference gives `esi_level` or `risk_score`, the report also scores ESI agreement and the risk score's mean absolute difference. `demo/replay.py` exports the app's predictions in the ESI contract. The comparison configurations below retain Vrishank's original v1/v2 experiment setup; their presence is not an evaluation of v3. Run the app replay to collect exact v3 predictions, then score them with this harness and approved references. Without approved references, quality remains N/A.
 
 ## Data and prediction contract
 

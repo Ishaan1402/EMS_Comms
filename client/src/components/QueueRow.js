@@ -1,6 +1,6 @@
 import React from 'react';
 import { ArrowDown, ArrowUp } from 'lucide-react';
-import { CategoryBadge, ProcessingBadge, ReportingBadge, isReporting } from './CaseBadges';
+import { EsiBadge, ProcessingBadge, ReportingBadge, isReporting } from './CaseBadges';
 import { CrewAlertBadges } from './CrewAlerts';
 import { StatusText } from './ui';
 import { FILTERS } from '../utils/queueView';
@@ -83,7 +83,7 @@ const QueueRow = ({ liveCase: c, selected, onSelect, unseen, serverNow, move, ar
                 <span className="text-xs text-gray-500">No audio {Math.floor(quietMs / 60000)}m</span>
               )}
             </span>
-            <span className="shrink-0"><CategoryBadge liveCase={c} prefix={false} /></span>
+            <span className="shrink-0"><EsiBadge liveCase={c} detail={false} /></span>
           </div>
         )}
       </button>

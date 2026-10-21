@@ -27,11 +27,11 @@ const inbound = (id, unit) => ({
   id, ems_unit: unit, status: 'active', patient_info: `${unit} patient`, started_at: at(0), updated_at: at(1),
   eta_at: '2026-10-11T18:30:00.000Z', info_version: 2, latest_update_acknowledged: true,
   acknowledgment: { info_version: 2, user_name: 'John Smith', acknowledged_at: at(1) },
-  operational_status: 'acknowledged', preparation_category: 'Can wait', emt_first_name: 'E', emt_last_name: 'T',
+  operational_status: 'acknowledged', preparation_category: 'Can wait', esi_level: 3, risk_score: 4, emt_first_name: 'E', emt_last_name: 'T',
   processing: { status: 'completed', needs_review: false, reasons: [] },
 });
 const queue = (second, units) => ({
-  as_of: at(second), rule_version: 'draft-3', rule: 'r', counts: { inbound: 2, needs_review: 0, unacknowledged: 0, prepare_now: 0 },
+  as_of: at(second), rule_version: 'draft-3', rule: 'r', counts: { inbound: 2, needs_review: 0, unacknowledged: 0, esi_1_2: 0 },
   cases: units.map(([id, unit], index) => ({ ...inbound(id, unit), queue_position: index + 1, queue_reasons: ['Can wait'], vital_changes: [] })),
 });
 
@@ -92,13 +92,13 @@ test('a delayed hospital fetch cannot undo a newer setting received by the strea
   expect(chip('Arriving soon').textContent).toBe('Arriving soon1');
 });
 
-test('queue rows label the AI category as the AI\'s, and the order menu carries the options and the disclosure', async () => {
+test('queue rows show the ESI level without an AI label, and the order menu carries the options and the disclosure', async () => {
   await act(async () => root.render(<LiveCasesPanel />));
   await resolve(pendingFor('/api/hospitals/mine')[0], { id: 1, name: 'General' });
   await resolve(pendingFor('/api/cases')[0], [inbound(1, 'Medic 1')]);
   const body = queue(1, [[1, 'Medic 1']]);
   await resolve(pendingFor('/api/cases/queue')[0], { ...body, queue_mode: 'standard', counts: { ...body.counts, crew_alerts: 0 } });
-  expect(container.querySelector('ul').textContent).toContain('Can wait');
+  expect(container.querySelector('ul').textContent).toContain('ESI 3 · Risk 4/10');
   expect(container.querySelector('ul').textContent).not.toContain('AI:');   // the case says where it comes from
   expect(container.querySelector('[role="listbox"]')).toBeNull();            // closed: nothing in the way
   expect(orderButton().textContent).toBe('Order: Standard');

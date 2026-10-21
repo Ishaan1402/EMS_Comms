@@ -14,10 +14,9 @@ const PROCESSING = {
   needs_review: { label: 'Needs review', tone: 'attention' },
 };
 
-// The AI's preparation category (the evaluation contract's draft labels). Only Prepare now asks for
-// action; Can wait is not a warning. A label we don't know is shown as one to look at.
-const CATEGORY_TONES = { 'Prepare now': 'urgent', 'Can wait': 'neutral', Routine: 'neutral', 'Cannot assess': 'attention' };
-const CATEGORY_TEXT = { urgent: 'text-red-600', neutral: 'text-gray-600', attention: 'text-amber-700' };
+// The ESI level: ESI 1 asks for action, other levels are normal text, and no level (Cannot assess or no
+// answer yet) asks someone to look.
+const ESI_TEXT = { urgent: 'text-red-600', neutral: 'text-gray-600', attention: 'text-amber-700' };
 
 /** Only the states a person should notice: where the case ended up. Inbound and acknowledged are normal. */
 export const OperationalBadge = ({ status }) => (OPERATIONAL_LABELS[status]
@@ -40,24 +39,32 @@ export const isReporting = (liveCase) => liveCase.status === 'active' && !liveCa
 
 export const ReportingBadge = ({ liveCase }) => (isReporting(liveCase) ? <StatusText tone="info" pulse>Reporting…</StatusText> : null);
 
-// No assessment yet shows as unavailable, never as a guess. The case says "AI:" before it; a queue row
-// (prefix={false}) shows the category alone.
-export const CategoryBadge = ({ liveCase, prefix = true }) => {
-  const ai = prefix ? 'AI: ' : '';
-  const category = liveCase.preparation_category;
+// The case's ESI level (a doctor's when one set it, else the AI's suggestion) and the AI's risk score.
+// No assessment yet shows as unavailable, never as a guess. The case pane (detail) also says where the
+// level came from; a queue row shows the level and score alone, with the source on hover.
+export const EsiBadge = ({ liveCase, detail = true }) => {
+  const { esi_level: level, ai_esi_level: suggested, esi_change: change, risk_score: risk } = liveCase;
   const assessing = ['pending', 'processing'].includes(liveCase.processing?.assessment?.status);
-  if (!category && assessing) {
+  if (!level && !liveCase.preparation_category && assessing) {
     return (
       <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-600">
-        <Loader2 className="h-3 w-3 animate-spin" />{prefix ? 'AI: assessing…' : 'Assessing…'}
+        <Loader2 className="h-3 w-3 animate-spin" />Assessing…
       </span>
     );
   }
-  const tone = CATEGORY_TONES[category] || 'attention';
+  const tone = level === 1 ? 'urgent' : level ? 'neutral' : 'attention';
+  const label = level ? `ESI ${level}`
+    : liveCase.preparation_category === 'Cannot assess' ? 'ESI: cannot assess' : 'Not assessed';
+  const setBy = change && `set by ${change.user_name}${suggested !== level ? ` (suggested ${suggested ? `ESI ${suggested}` : 'none'})` : ''}`;
+  let text = label;
+  if (detail && setBy) text = `${label} · ${setBy}`;
+  else if (detail && level) text = `Suggested ${label}`;
   return (
-    <span className={`text-xs font-medium ${CATEGORY_TEXT[tone]}`}>
-      {ai}{category || (prefix ? 'unavailable' : 'Not assessed')}
-      {category && liveCase.assessment_is_outdated && ' · earlier info'}
+    <span className={`text-xs font-medium ${ESI_TEXT[tone]}`}
+          title={!detail && level ? (setBy ? `ESI ${setBy}` : 'Suggested ESI') : undefined}>
+      {text}
+      {risk != null && ` · Risk ${risk}/10`}
+      {(level || risk != null) && liveCase.assessment_is_outdated && ' · earlier info'}
     </span>
   );
 };
