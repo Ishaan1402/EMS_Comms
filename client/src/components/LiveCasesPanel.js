@@ -14,6 +14,7 @@ import CaseHeader from './CaseHeader';
 import { SectionLabel, StatusText } from './ui';
 import CaseChat from './CaseChat';
 import QueueToolbar from './QueueToolbar';
+import Disclosure from './Disclosure';
 import { CrewAlertPanel, CrewAlertSound } from './CrewAlerts';
 import { CaseRiskFields, DragHandle } from './DoctorQueueSettings';
 import useDragReorder from '../hooks/useDragReorder';
@@ -23,6 +24,10 @@ const OFFLINE_LABELS = {
   reconnecting: 'Reconnecting… transcript may be behind',
   unauthorized: 'Session expired — log in again for live updates',
 };
+
+// Above every pin in AI-assisted (case_queue.stays_on_top): unacknowledged information, a failure or a crew alert.
+const staysOnTop = (c) => Boolean(c.processing?.needs_review || c.latest_update_acknowledged === false
+  || c.crew_alerts?.unacknowledged || c.crew_alerts?.active?.length);
 
 const newestFirst = (cases) => [...cases].sort((a, b) => b.started_at.localeCompare(a.started_at));
 
@@ -46,6 +51,8 @@ const LiveCasesPanel = () => {
   const [segments, setSegments] = useState([]);
   const [riskRefresh, setRiskRefresh] = useState(0);
   const [unseen, setUnseen] = useState({});
+  // The arrived and closed cases stay folded under the queue until the doctor opens them.
+  const [showDone, setShowDone] = useState(false);
   // Server clock minus local clock, so idle times aren't skewed by a wrong local clock.
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -211,6 +218,9 @@ const LiveCasesPanel = () => {
   const others = newestFirst(cases.filter((c) => !queuedIds.has(c.id)));
   const selectedInQueue = queued.find((c) => c.id === selectedId);
   const selected = byId.get(selectedId) || selectedInQueue;
+  // A selected case that leaves the queue (arrived or closed) stays in sight: its folder opens.
+  const selectedIsDone = others.some((c) => c.id === selectedId);
+  useEffect(() => { if (selectedIsDone) setShowDone(true); }, [selectedIsDone]);
   const serverNow = now + clockOffsetMs;
   // This screen's own view of the queue (a filter and a sort); it resets on reload and never changes the order.
   const [view, setView] = useState(DEFAULT_VIEW);
@@ -218,8 +228,10 @@ const LiveCasesPanel = () => {
   const visible = applyQueueView(queued, view, viewContext);
   const counts = queue.counts ? viewCounts(queued, viewContext) : null;
   const autoOrder = queue.auto_order !== false;
+  const aiAssisted = queue.queue_mode === 'ai_assisted';
 
-  // Manual order: move a row and save the whole order for the hospital. The screen shows the new order
+  // Manual order: move a row and save the whole order for the hospital. In AI-assisted the move pins the
+  // row to its spot instead (case_queue.pinned_ordered) and the AI orders the rest around it. The screen shows the new order
   // at once (without a "from #" cue, since this doctor made the move) and the server's queue replaces it.
   // If the save fails, the last order the server confirmed comes back, unless a newer one has arrived.
   const orderIds = queued.map((c) => c.id);
@@ -233,7 +245,8 @@ const LiveCasesPanel = () => {
       .map((entry) => ({ ...entry, queue_position: position[entry.id] ?? entry.queue_position }))
       .sort((a, b) => a.queue_position - b.queue_position) }));
     try {
-      await axios.put('/api/hospitals/mine/doctor-order', { case_ids: ids });
+      if (aiAssisted) await axios.put('/api/hospitals/mine/ai-pins', { case_ids: ids, moved: id });
+      else await axios.put('/api/hospitals/mine/doctor-order', { case_ids: ids });
     } catch (error) {
       if (queueAsOf.current === confirmed.asOf) {
         positions.current = confirmed.positions;
@@ -243,8 +256,19 @@ const LiveCasesPanel = () => {
     }
     fetchQueue();
   };
-  const canReorder = !autoOrder && isDefaultView(view) && queued.length > 1;
+  const canReorder = (!autoOrder || aiAssisted) && isDefaultView(view) && queued.length > 1;
   const reorder = useDragReorder(orderIds, moveCase, canReorder);
+  // In AI-assisted a case that needs a person now or has a crew alert stays on top, so it has no handle.
+  const movable = (c) => !aiAssisted || !staysOnTop(c);
+  const anyPinned = aiAssisted && queued.some((c) => c.pinned);
+  const backToAiOrder = async () => {
+    try {
+      await axios.delete('/api/hospitals/mine/ai-pins');
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Could not reset the order');
+    }
+    fetchQueue();
+  };
 
   const dismissSegment = async (segment) => {
     try {
@@ -296,37 +320,54 @@ const LiveCasesPanel = () => {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-5">
           <div className="lg:col-span-2 border-r border-gray-200">
-            {!autoOrder && !isDefaultView(view) && (
+            {anyPinned && isDefaultView(view) && (
+              <p className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-2 text-xs text-gray-500">
+                Cases your team moved stay in place; the AI orders the rest around them.
+                <button type="button" onClick={backToAiOrder} className="shrink-0 font-medium text-blue-600 hover:underline">
+                  Back to AI order
+                </button>
+              </p>
+            )}
+            {(!autoOrder || aiAssisted) && !isDefaultView(view) && (
               <p className="border-b border-gray-100 px-4 py-2 text-xs text-gray-500">
                 Show all cases in queue order to drag them into a new order.
               </p>
             )}
-            <ul className="max-h-[48rem] overflow-y-auto">
-              {visible.map((c, index) => (
-                <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
-                              unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
-                              arrivalMinutes={hospital?.arrival_highlight_minutes}
-                              rowProps={canReorder ? reorder.rowProps(c.id, index) : undefined}
-                              dragHandle={canReorder && (
-                                <DragHandle name={c.ems_unit || `case #${c.id}`} {...reorder.handleProps(c.id, index)} />
-                              )} />
-              ))}
-              {visible.length === 0 && queued.length > 0 && (
-                <li className="px-4 py-6 text-sm text-gray-600">
-                  No cases match this filter.{' '}
-                  <button type="button" onClick={() => setView(DEFAULT_VIEW)} className="text-blue-600 hover:underline">Show all</button>
-                </li>
-              )}
+            <div className="max-h-[48rem] overflow-y-auto">
+              <ul>
+                {visible.map((c, index) => (
+                  <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
+                                unseen={unseen[c.id]} serverNow={serverNow} move={moves[c.id]}
+                                arrivalMinutes={hospital?.arrival_highlight_minutes}
+                                rowProps={canReorder ? reorder.rowProps(c.id, index) : undefined}
+                                dragHandle={canReorder && (movable(c)
+                                  ? <DragHandle name={c.ems_unit || `case #${c.id}`} {...reorder.handleProps(c.id, index)} />
+                                  : <span className="w-8 shrink-0 border-b border-gray-100" title="Stays on top: needs acknowledging or has a crew alert" />
+                                )} />
+                ))}
+                {visible.length === 0 && queued.length > 0 && (
+                  <li className="px-4 py-6 text-sm text-gray-600">
+                    No cases match this filter.{' '}
+                    <button type="button" onClick={() => setView(DEFAULT_VIEW)} className="text-blue-600 hover:underline">Show all</button>
+                  </li>
+                )}
+                {queued.length === 0 && (
+                  <li className="border-b border-gray-100 px-4 py-6 text-sm text-gray-600">No patients inbound right now.</li>
+                )}
+              </ul>
+              {/* Off the queue: the patient is here (arrived) or the crew ended the case (closed). */}
               {view.filter === 'all' && others.length > 0 && (
-                <li className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500">
-                  Arrived and closed
-                </li>
+                <Disclosure title="Arrived and closed" summary={`${others.length}`} open={showDone} onToggle={setShowDone}
+                            className="bg-gray-50 px-4 py-2">
+                  <ul className="-mb-2 -ml-10 -mr-4 border-t border-gray-100">
+                    {others.map((c) => (
+                      <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
+                                    unseen={unseen[c.id]} serverNow={serverNow} />
+                    ))}
+                  </ul>
+                </Disclosure>
               )}
-              {view.filter === 'all' && others.map((c) => (
-                <QueueRow key={c.id} liveCase={c} selected={c.id === selectedId} onSelect={setSelectedId}
-                              unseen={unseen[c.id]} serverNow={serverNow} />
-              ))}
-            </ul>
+            </div>
           </div>
 
           <div className="lg:col-span-3 p-6">

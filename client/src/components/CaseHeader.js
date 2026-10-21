@@ -45,7 +45,7 @@ const CaseHeader = ({ liveCase: c, inQueue, queueMode = 'standard', onAcknowledg
               </Button>
             )}
             {!c.arrived_at && (
-              <Button onClick={onMarkArrived}>Mark arrived</Button>
+              <Button onClick={onMarkArrived} title="The patient is here: takes the case off the queue">Mark arrived</Button>
             )}
           </div>
         )}
@@ -53,18 +53,24 @@ const CaseHeader = ({ liveCase: c, inQueue, queueMode = 'standard', onAcknowledg
       <div className="mb-4">
         <p className="text-sm text-gray-500">
           Case #{c.id} · EMT {c.emt_first_name} {c.emt_last_name} · started {clockTime(c.started_at)}
-          {c.closed_at && ` · closed ${clockTime(c.closed_at)}`}
           {' · '}
           <button onClick={() => downloadFhir(c.id)} className="text-blue-600 hover:underline"
                   title="The handoff as a FHIR R4 Bundle for the hospital's record system: each extracted fact with the report it quotes">
             Export FHIR
           </button>
         </p>
+        {(c.status === 'closed' || c.arrived_at) && (
+          <p className="mt-1 text-sm text-gray-700">
+            {c.status === 'closed'
+              ? `The crew ended this case at ${clockTime(c.closed_at)}.`
+              : `Arrived at ${clockTime(c.arrived_at)}, so it is off the queue. The crew can still send updates until they end the case.`}
+          </p>
+        )}
         {reasons && (
           <p className="mt-1 text-sm text-gray-500">
             {queueMode === 'manual'
               ? `Placed by your team. Standard order would put it #${inQueue.suggested_position}: `
-              : 'Why here: '}
+              : inQueue.pinned ? 'Moved here by your team. Why the AI order had it: ' : 'Why here: '}
             {reasons.join(' · ')}
             {queueMode === 'ai_assisted' && inQueue.suggested_position !== inQueue.queue_position
               && ` · Standard order: #${inQueue.suggested_position}`}

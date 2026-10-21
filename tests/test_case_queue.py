@@ -1,5 +1,6 @@
 """The hospital inbound queue (case_queue.py, GET /api/cases/queue)."""
 import os
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -455,3 +456,113 @@ def test_ai_assisted_mode_keeps_a_persons_call_above_the_ai(monkeypatch):
     acknowledge_alerts(calm)
     client.put("/api/hospitals/mine/queue-mode", json={"mode": "ai_assisted"}, headers=auth(DOCTOR))
     assert [c["id"] for c in queue()["cases"]] == [calm, now]   # the crew's alert beats the AI's Prepare now
+
+
+# ---- AI-assisted pins: a doctor's move holds while the AI orders the rest around it ----------------
+
+def pinned_case(case_id, category, acknowledged=True, info_version=1):
+    case = ai_assisted_case(case_id, category, acknowledged=acknowledged)
+    case.update(info_version=info_version, crew_alerts={**case["crew_alerts"], "latest_change_id": None})
+    return case
+
+
+def pinned_order(cases, pins):
+    ordered = case_queue.ai_assisted_ordered(case_queue.order(
+        [{**case, "status": "active", "arrived_at": None, "processing": {"needs_review": False, "reasons": []}}
+         for case in cases], datetime(2026, 10, 15, 15, 0, tzinfo=timezone.utc)))
+    return [(case["id"], case["pinned"]) for case in case_queue.pinned_ordered(ordered, pins)]
+
+
+def test_a_pinned_case_keeps_its_spot_and_new_patients_fill_in_around_it():
+    routine, wait, now = pinned_case(1, "Routine"), pinned_case(2, "Can wait"), pinned_case(3, "Prepare now")
+    pins = [case_queue.pin_for(routine, 1)]
+    assert pinned_order([routine, wait, now], pins) == [(1, True), (3, False), (2, False)]
+    # A new Prepare now patient goes where the AI puts it among the rest, below the pin.
+    another = pinned_case(4, "Prepare now")
+    assert pinned_order([routine, wait, now, another], pins) == [(1, True), (3, False), (4, False), (2, False)]
+    # A spot past the end of the queue holds the case last.
+    assert pinned_order([routine, now], [case_queue.pin_for(wait, 1), case_queue.pin_for(now, 9)]) == [
+        (1, False), (3, True)]
+
+
+def test_a_case_that_needs_a_person_goes_above_the_pins():
+    routine, now = pinned_case(1, "Routine"), pinned_case(2, "Prepare now")
+    unacknowledged = pinned_case(3, "Routine", acknowledged=False)
+    assert pinned_order([routine, now, unacknowledged], [case_queue.pin_for(routine, 1)]) == [
+        (3, False), (1, True), (2, False)]
+
+
+def test_new_information_a_new_eta_or_an_alert_change_ends_a_pin():
+    routine, now = pinned_case(1, "Routine"), pinned_case(2, "Prepare now")
+    pin = case_queue.pin_for(routine, 1)
+    assert pinned_order([pinned_case(1, "Routine", info_version=2), now], [pin]) == [(2, False), (1, False)]
+    assert pinned_order([{**routine, "eta_at": "2026-10-15T15:40:00.000Z"}, now], [pin]) == [(2, False), (1, False)]
+    alerted = {**routine, "crew_alerts": {"active": [], "unacknowledged": False, "latest_change_id": 7}}
+    assert pinned_order([alerted, now], [pin]) == [(2, False), (1, False)]
+
+
+def test_a_doctor_drags_a_case_in_ai_assisted_and_the_pin_holds_for_every_doctor(monkeypatch):
+    score_as(monkeypatch, {"routine": "Routine", "wait": "Can wait", "now": "Prepare now"})
+    routine = open_case("emt.wilson", "routine patient", eta=5)
+    wait = open_case("emt.garcia", "wait patient", eta=20)
+    now = open_case("emt.lee", "now patient", eta=30)
+    for case_id in (routine, wait, now):
+        acknowledge(case_id)
+    client.put("/api/hospitals/mine/queue-mode", json={"mode": "ai_assisted"}, headers=auth(DOCTOR))
+    recorded = len(history())
+    assert [c["id"] for c in queue()["cases"]] == [now, wait, routine]
+    saved = client.put("/api/hospitals/mine/ai-pins", json={"case_ids": [routine, now, wait], "moved": routine},
+                       headers=auth(DOCTOR))
+    assert saved.status_code == 200, saved.text
+    body = queue()
+    assert [(c["id"], c["pinned"]) for c in body["cases"]] == [(routine, True), (now, False), (wait, False)]
+    # Queue history keeps recording the Standard order.
+    assert len(history()) == recorded
+    # A new report on the pinned patient ends the pin: it goes on top as unacknowledged, then back to its AI place.
+    client.post(f"/api/cases/{routine}/updates", json={"kind": "note", "body": "routine patient worse"},
+                headers=auth("emt.wilson"))
+    assert [(c["id"], c["pinned"]) for c in queue()["cases"]][0] == (routine, False)
+    acknowledge(routine)
+    assert [c["id"] for c in queue()["cases"]] == [now, wait, routine]
+
+
+def test_back_to_ai_order_and_a_mode_change_clear_the_pins(monkeypatch):
+    score_as(monkeypatch, {"routine": "Routine", "now": "Prepare now"})
+    routine = open_case("emt.wilson", "routine patient", eta=5)
+    now = open_case("emt.garcia", "now patient", eta=30)
+    acknowledge(routine)
+    acknowledge(now)
+    client.put("/api/hospitals/mine/queue-mode", json={"mode": "ai_assisted"}, headers=auth(DOCTOR))
+    pin = {"case_ids": [routine, now], "moved": routine}
+    client.put("/api/hospitals/mine/ai-pins", json=pin, headers=auth(DOCTOR))
+    assert client.delete("/api/hospitals/mine/ai-pins", headers=auth(DOCTOR)).status_code == 204
+    assert [c["id"] for c in queue()["cases"]] == [now, routine]
+    client.put("/api/hospitals/mine/ai-pins", json=pin, headers=auth(DOCTOR))
+    client.put("/api/hospitals/mine/queue-mode", json={"mode": "standard"}, headers=auth(DOCTOR))
+    client.put("/api/hospitals/mine/queue-mode", json={"mode": "ai_assisted"}, headers=auth(DOCTOR))
+    assert [c["id"] for c in queue()["cases"]] == [now, routine]
+
+
+@pytest.mark.parametrize("body", [{"case_ids": [1, 1], "moved": 1}, {"case_ids": [1, 2], "moved": 3},
+                                  {"case_ids": "1,2", "moved": 1}, {"case_ids": [1, 2]}])
+def test_pins_are_validated_and_only_doctors_can_set_them(body):
+    assert client.put("/api/hospitals/mine/ai-pins", json=body, headers=auth(DOCTOR)).status_code == 400
+    assert client.put("/api/hospitals/mine/ai-pins", json={"case_ids": [1], "moved": 1},
+                      headers=auth("emt.wilson")).status_code == 403
+
+
+def test_an_active_crew_alert_stays_above_the_pins_even_once_acknowledged():
+    routine, now = pinned_case(1, "Routine"), pinned_case(2, "Prepare now")
+    alerted = pinned_case(3, "Routine")
+    alerted["crew_alerts"] = {"active": [{"alert": "stroke", "label": "Stroke"}], "unacknowledged": False, "latest_change_id": 4}
+    assert pinned_order([routine, now, alerted], [case_queue.pin_for(routine, 1)]) == [
+        (3, False), (1, True), (2, False)]
+    # A pin on a case whose alert is active is set aside: the alert keeps it on top.
+    assert pinned_order([routine, alerted], [case_queue.pin_for(alerted, 2)])[0] == (3, False)
+
+
+def test_pins_crowded_to_the_bottom_when_cases_leave_keep_their_order():
+    a, b, c = pinned_case(1, "Routine"), pinned_case(2, "Routine"), pinned_case(3, "Prepare now")
+    assert pinned_order([a, b, c], [case_queue.pin_for(a, 3), case_queue.pin_for(b, 4)]) == [
+        (3, False), (1, True), (2, True)]
+    assert pinned_order([a, b], [case_queue.pin_for(a, 3), case_queue.pin_for(b, 4)]) == [(1, True), (2, True)]
