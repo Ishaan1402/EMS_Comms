@@ -214,6 +214,9 @@ const LiveCasesPanel = () => {
   const others = newestFirst(cases.filter((c) => !queuedIds.has(c.id)));
   const selectedInQueue = queued.find((c) => c.id === selectedId);
   const selected = byId.get(selectedId) || selectedInQueue;
+  // A selected case that leaves the queue (arrived or closed) stays in sight: its folder opens.
+  const selectedIsDone = others.some((c) => c.id === selectedId);
+  useEffect(() => { if (selectedIsDone) setShowDone(true); }, [selectedIsDone]);
   const serverNow = now + clockOffsetMs;
   // This screen's own view of the queue (a filter and a sort); it resets on reload and never changes the order.
   const [view, setView] = useState(DEFAULT_VIEW);

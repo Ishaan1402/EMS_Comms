@@ -43,7 +43,7 @@ test('Acknowledge only while there is something to acknowledge; no actions for a
   expect(buttons()).toEqual(['Acknowledge', 'Export FHIR']);
   render({ liveCase: liveCase({ status: 'closed', closed_at: '2026-10-15T15:30:00Z' }) });
   expect(buttons()).toEqual(['Export FHIR']);
-  expect(container.textContent).toContain('Closed by the crew at');
+  expect(container.textContent).toContain('The crew ended this case at');
 });
 
 test('the buttons call what the panel gave them', () => {
@@ -82,7 +82,7 @@ test('a case off the queue says why: arrived (the crew can still update) or clos
   render({ liveCase: liveCase({ arrived_at: '2026-10-15T15:18:00Z' }) });
   expect(container.textContent).toContain('so it is off the queue');
   render({ liveCase: liveCase({ status: 'closed', closed_at: '2026-10-15T15:25:00Z' }) });
-  expect(container.textContent).toContain('Closed by the crew at');
+  expect(container.textContent).toContain('The crew ended this case at');
   render();
   expect(container.textContent).not.toContain('off the queue');
 });

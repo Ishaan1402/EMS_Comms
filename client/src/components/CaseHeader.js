@@ -62,7 +62,7 @@ const CaseHeader = ({ liveCase: c, inQueue, queueMode = 'standard', onAcknowledg
         {(c.status === 'closed' || c.arrived_at) && (
           <p className="mt-1 text-sm text-gray-700">
             {c.status === 'closed'
-              ? `Closed by the crew at ${clockTime(c.closed_at)}. Nothing more will arrive on this case.`
+              ? `The crew ended this case at ${clockTime(c.closed_at)}.`
               : `Arrived at ${clockTime(c.arrived_at)}, so it is off the queue. The crew can still send updates until they end the case.`}
           </p>
         )}

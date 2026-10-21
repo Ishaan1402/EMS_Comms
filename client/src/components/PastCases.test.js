@@ -53,3 +53,16 @@ test('a case the crew ends joins the folder; nothing shows while there are none'
   await act(async () => mockHandler('case.updated', { case: closed(3, 'Medic 3', '2026-10-20T17:00:00.000Z') }));
   expect(button('Past cases').textContent).toContain('1 closed');
 });
+
+test('an opened past case reloads its transcript when a report still finishing after close lands', async () => {
+  await act(async () => root.render(<PastCases />));
+  await act(async () => button('Past cases').click());
+  await act(async () => button('Medic 1').click());
+  const transcriptLoads = () => mockGet.mock.calls.filter(([url]) => url === '/api/cases/1/segments').length;
+  expect(transcriptLoads()).toBe(1);
+
+  await act(async () => mockHandler('segment.updated', { case_id: 2 }));
+  expect(transcriptLoads()).toBe(1);
+  await act(async () => mockHandler('segment.updated', { case_id: 1 }));
+  expect(transcriptLoads()).toBe(2);
+});
