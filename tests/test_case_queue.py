@@ -549,3 +549,20 @@ def test_pins_are_validated_and_only_doctors_can_set_them(body):
     assert client.put("/api/hospitals/mine/ai-pins", json=body, headers=auth(DOCTOR)).status_code == 400
     assert client.put("/api/hospitals/mine/ai-pins", json={"case_ids": [1], "moved": 1},
                       headers=auth("emt.wilson")).status_code == 403
+
+
+def test_an_active_crew_alert_stays_above_the_pins_even_once_acknowledged():
+    routine, now = pinned_case(1, "Routine"), pinned_case(2, "Prepare now")
+    alerted = pinned_case(3, "Routine")
+    alerted["crew_alerts"] = {"active": [{"alert": "stroke", "label": "Stroke"}], "unacknowledged": False, "latest_change_id": 4}
+    assert pinned_order([routine, now, alerted], [case_queue.pin_for(routine, 1)]) == [
+        (3, False), (1, True), (2, False)]
+    # A pin on a case whose alert is active is set aside: the alert keeps it on top.
+    assert pinned_order([routine, alerted], [case_queue.pin_for(alerted, 2)])[0] == (3, False)
+
+
+def test_pins_crowded_to_the_bottom_when_cases_leave_keep_their_order():
+    a, b, c = pinned_case(1, "Routine"), pinned_case(2, "Routine"), pinned_case(3, "Prepare now")
+    assert pinned_order([a, b, c], [case_queue.pin_for(a, 3), case_queue.pin_for(b, 4)]) == [
+        (3, False), (1, True), (2, True)]
+    assert pinned_order([a, b], [case_queue.pin_for(a, 3), case_queue.pin_for(b, 4)]) == [(1, True), (2, True)]

@@ -24,9 +24,9 @@ const OFFLINE_LABELS = {
   unauthorized: 'Session expired — log in again for live updates',
 };
 
-// The queue rule's first tier (case_queue.needs_attention): unacknowledged information or crew alert, or a failure.
-const needsPerson = (c) => Boolean(c.processing?.needs_review || c.latest_update_acknowledged === false
-  || c.crew_alerts?.unacknowledged);
+// Above every pin in AI-assisted (case_queue.stays_on_top): unacknowledged information, a failure or a crew alert.
+const staysOnTop = (c) => Boolean(c.processing?.needs_review || c.latest_update_acknowledged === false
+  || c.crew_alerts?.unacknowledged || c.crew_alerts?.active?.length);
 
 const newestFirst = (cases) => [...cases].sort((a, b) => b.started_at.localeCompare(a.started_at));
 
@@ -252,8 +252,8 @@ const LiveCasesPanel = () => {
   };
   const canReorder = (!autoOrder || aiAssisted) && isDefaultView(view) && queued.length > 1;
   const reorder = useDragReorder(orderIds, moveCase, canReorder);
-  // In AI-assisted a case that needs a person now stays on top, so it has no handle.
-  const movable = (c) => !aiAssisted || !needsPerson(c);
+  // In AI-assisted a case that needs a person now or has a crew alert stays on top, so it has no handle.
+  const movable = (c) => !aiAssisted || !staysOnTop(c);
   const anyPinned = aiAssisted && queued.some((c) => c.pinned);
   const backToAiOrder = async () => {
     try {
@@ -335,7 +335,7 @@ const LiveCasesPanel = () => {
                               rowProps={canReorder ? reorder.rowProps(c.id, index) : undefined}
                               dragHandle={canReorder && (movable(c)
                                 ? <DragHandle name={c.ems_unit || `case #${c.id}`} {...reorder.handleProps(c.id, index)} />
-                                : <span className="w-8 shrink-0 border-b border-gray-100" title="Stays on top until acknowledged" />
+                                : <span className="w-8 shrink-0 border-b border-gray-100" title="Stays on top: needs acknowledging or has a crew alert" />
                               )} />
               ))}
               {visible.length === 0 && queued.length > 0 && (
