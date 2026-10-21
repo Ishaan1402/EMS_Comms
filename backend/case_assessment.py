@@ -20,6 +20,7 @@ Runs in-process (like realtime.py), so use a single server worker.
 import asyncio
 import concurrent.futures
 import json
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -299,6 +300,88 @@ def interpret(output) -> dict:
     return {**fields, "status": "completed", "review_reason": None}
 
 
+# A number written in digits, not part of a name such as SpO2; "120/80" is two numbers.
+DIGITS = re.compile(r"(?<![A-Za-z\d.])\d+(?:\.\d+)?")
+NUMBER_WORDS = {word: n for n, word in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+    "sixteen seventeen eighteen nineteen".split())}
+NUMBER_WORDS.update({word: 10 * n for n, word in enumerate(
+    "twenty thirty forty fifty sixty seventy eighty ninety".split(), start=2)})
+NUMBER_WORDS.update(a=1, an=1)
+
+
+def spoken_numbers(text: str) -> set:
+    """
+    Numbers said in words, as radio reports say them: "ninety two" (92), "thirty-nine point one"
+    (39.1), "one hundred and ten" (110), and "one forty" (140). Each word's own value counts too,
+    so an ambiguous phrase allows every reading.
+    """
+    found = set()
+    numbers, hundred, point = [], False, False
+    for word in re.findall(r"[a-z]+", text.lower()) + [""]:
+        if word in NUMBER_WORDS:
+            n = NUMBER_WORDS[word]
+            found.add(n)
+            if point and numbers and n < 10:
+                numbers[-1] = round(numbers[-1] + n / 10, 1)
+            elif numbers and n < 10 and numbers[-1] % 10 == 0 and numbers[-1] % 100 >= 20:
+                numbers[-1] += n
+            elif hundred and numbers and n < 100 and numbers[-1] % 100 == 0:
+                numbers[-1] += n
+            else:
+                numbers.append(n)
+            found.add(numbers[-1])
+            point = False
+        elif word == "hundred":
+            numbers[-1:] = [(numbers[-1] if numbers else 1) * 100]
+            hundred = True
+        elif word == "point" and numbers:
+            point = True
+        elif word == "and" and hundred:
+            continue
+        else:
+            found.update(numbers)
+            found.update(a * 100 + b for a, b in zip(numbers, numbers[1:]) if a < 10 and 10 <= b < 100)
+            numbers, hundred, point = [], False, False
+    return found
+
+
+def numbers_in(text: str) -> set:
+    """Every number the text states, in digits or in words."""
+    return {float(n) for n in DIGITS.findall(text)} | {float(n) for n in spoken_numbers(text)}
+
+
+def stated(number: float, numbers: set, temperature: bool = True) -> bool:
+    """Whether a number is one of these, as given or (for a temperature) converted between °F and °C."""
+    return any(number == n or temperature and (abs(number - (n - 32) * 5 / 9) <= 0.5
+                                               or abs(number - (n * 9 / 5 + 32)) <= 0.5)
+               for n in numbers)
+
+
+def unsupported_numbers(fields: dict, inputs: dict) -> list:
+    """
+    Numbers in the handoff that nothing the model read states: not the reports, typed vitals,
+    ETA or elapsed time. A wrong vital in a handoff looks as trustworthy as a right one.
+    """
+    given = inputs["input"]
+    numbers = numbers_in(f"{given['prior_information']}\n{given['current_transcript']}")
+    numbers |= {float(given[key]) for key in ("eta_minutes", "elapsed_minutes") if given[key] is not None}
+    written = DIGITS.findall(f"{fields['summary']}\n{fields['change_explanation']}")
+    return list(dict.fromkeys(n for n in written if not stated(float(n), numbers)))
+
+
+def check_numbers(fields: dict, inputs: dict) -> dict:
+    """A handoff with a number the reports don't state needs review, with the numbers named."""
+    if fields["status"] == "failed":
+        return fields
+    missing = unsupported_numbers(fields, inputs)
+    if not missing:
+        return fields
+    reason = f"Handoff mentions {', '.join(missing)}, not found in the crew's reports. Check before relying on it."
+    return {**fields, "status": "needs_review",
+            "review_reason": f"{fields['review_reason']} {reason}" if fields["review_reason"] else reason}
+
+
 def estimate_cost(model: str, usage: dict) -> Optional[float]:
     prices = PRICES_PER_MILLION.get(model)
     if not prices or usage.get("input_tokens") is None or usage.get("output_tokens") is None:
@@ -433,7 +516,7 @@ class AssessmentRunner(CaseRunner):
         usage = {}
         try:
             output, usage = await asyncio.wait_for(score(inputs), timeout=SCORING_TIMEOUT_SECONDS)
-            fields = interpret(output)
+            fields = check_numbers(interpret(output), inputs)
             error = fields.pop("error", None)
         except Exception as exc:
             print(f"❌ Assessment failed for case {case_id}: {exc!r}")

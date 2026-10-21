@@ -164,6 +164,19 @@ class TestInterpret:
         ), self.INFO)
         assert [(f["finding_type"], f["value"]) for f in facts] == [("finding", "Pale")]
 
+    def test_drops_a_vital_whose_number_is_not_in_its_quote(self):
+        info = {"new": [{"id": "radio-1", "text": "BP 92 over 58. Temp one hundred two point four. Heart rate fifty.",
+                         "segment_id": 1, "update_id": None, "time": "t1"}]}
+        facts = case_extraction.interpret(self.output(vitals=[
+            {"name": "sbp", "value": 29, "qualifier": "", "item": "radio-1", "quote": "BP 92 over 58"},
+            {"name": "dbp", "value": 58, "qualifier": "", "item": "radio-1", "quote": "BP 92 over 58"},
+            {"name": "temp_c", "value": 39.1, "qualifier": "", "item": "radio-1",
+             "quote": "Temp one hundred two point four"},
+            {"name": "hr", "value": 122, "qualifier": "", "item": "radio-1", "quote": "Heart rate fifty"},
+            {"name": "hr", "value": 50, "qualifier": "", "item": "radio-1", "quote": "Heart rate fifty"},
+        ]), info)
+        assert [(f["vital_name"], f["vital_value"]) for f in facts] == [("dbp", 58), ("temp_c", 39.1), ("hr", 50)]
+
     def test_wrong_shape_is_unreadable_not_empty(self):
         assert case_extraction.interpret(None, self.INFO) is None
         assert case_extraction.interpret({"vitals": []}, self.INFO) is None

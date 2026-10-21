@@ -24,7 +24,7 @@ import time
 from typing import Optional
 
 from backend.case_assessment import (VITAL_SIGNS, CaseRunner, ScoringRefused, ScoringUnavailable, UNREADABLE_ERROR,
-                             assessment_executor, describe_error, estimate_cost)
+                             assessment_executor, describe_error, estimate_cost, numbers_in, stated)
 from backend import case_reports
 from backend.database import get_db, query, run, utc_now_iso
 from backend import openai_config
@@ -236,7 +236,8 @@ def _number(value: float):
 def interpret(output, info: dict) -> Optional[list]:
     """
     Facts to store, or None if the answer doesn't have the expected shape. Entries that can't be
-    traced to one of the new items, or with a vital sign out of range, are dropped, never guessed.
+    traced to one of the new items, or with a vital sign out of range or not stated in its quote,
+    are dropped, never guessed.
     An unverified quote on an otherwise accepted fact fails the run; no partial batch is stored.
     """
     if not isinstance(output, dict) or set(output) != set(OUTPUT_SCHEMA["required"]) \
@@ -258,6 +259,10 @@ def interpret(output, info: dict) -> Optional[list]:
             return
         seen.add(key)
         quote = verified_quote(entry.get("quote"), item.get("text"))
+        # A real quote with the wrong number stored ("BP 92 over 58" as systolic 29) is dropped too.
+        if vital_value is not None and not stated(float(vital_value), numbers_in(quote),
+                                                       temperature=vital_name == "temp_c"):
+            return
         facts.append({
             "finding_type": finding_type, "value": value, "detail": detail,
             "vital_name": vital_name, "vital_value": vital_value,
