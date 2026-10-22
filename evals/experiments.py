@@ -88,7 +88,8 @@ def build_plan(spec, cases, queues, *, model_ids=None, environ=None):
     source = {c["case_id"]: c for c in cases}
     for model in models:
         allowed_model = {"id", "provider", "model", "base_url", "think", "temperature", "context_tokens",
-                         "reasoning_effort", "thinking_level", "input_usd_per_million", "output_usd_per_million"}
+                         "reasoning_effort", "thinking_level", "input_usd_per_million", "output_usd_per_million",
+                         "openrouter_provider"}
         if set(model) - allowed_model:
             raise ValueError("Unknown model fields; never place API keys in experiment JSON")
         if not isinstance(model["id"], str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", model["id"]):
@@ -168,6 +169,7 @@ def execute_plan(plan, jobs, cases, queues, directory, *, consent=False, synthet
                    "configs": plan["configs"], "records": [], "queues": [],
                    "experiment": {"purpose": plan["purpose"], "dataset_sha256": plan["dataset_sha256"]}}
     calls, reserved, estimated, unknown = 0, 0.0, 0.0, 0
+    reported_total = 0.0
     stopped = None
     try:
         with (directory / "attempts.jsonl").open("x", encoding="utf-8") as ledger:
@@ -197,16 +199,22 @@ def execute_plan(plan, jobs, cases, queues, directory, *, consent=False, synthet
                         (inp * job["model"]["input_usd_per_million"] * 1.25
                          + out * job["model"]["output_usd_per_million"]) / 1_000_000
                         if number(inp, integer=True) and number(out, integer=True) else None)
-                    unknown += int(cost is None)
+                    reported = response.get("reported_api_cost_usd")
+                    reported = reported if number(reported) else None
+                    # OpenRouter returns deducted credit cost; missing billing is not a zero/estimate.
+                    accounted = reported if job["model"]["provider"] == "openrouter" else cost
+                    unknown += int(accounted is None)
                     estimated += cost or 0
+                    reported_total += reported or 0
                     row = {"config_id": job["config_id"], "repeat_id": job["repeat_id"],
                            "case_id": job.get("case_id"), "queue_id": job.get("queue_id"),
                            "task": job["task"], "attempt": retry + 1, **response,
-                           "estimated_token_cost_usd": cost, "reservation_usd": job["reservation_usd"]}
+                           "estimated_token_cost_usd": cost, "accounted_cost_usd": accounted,
+                           "reservation_usd": job["reservation_usd"]}
                     ledger.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
                     ledger.flush()
                     attempt_rows.append(row)
-                    if cost is not None and cost > job["reservation_usd"]:
+                    if max(cost or 0, accounted or 0) > job["reservation_usd"]:
                         stopped = "cost_exceeded_reservation"
                         break
                     if not retryable or retry == plan["spec"]["max_retries"]:
@@ -218,11 +226,14 @@ def execute_plan(plan, jobs, cases, queues, directory, *, consent=False, synthet
                               "status": last["status"], "output": last.get("output"),
                               "raw_text": last.get("raw_text"), "error_code": last.get("error_code"),
                               "actual_model": last.get("actual_model"), "finish_reason": last.get("finish_reason"),
+                              "actual_provider": last.get("actual_provider"), "request_id": last.get("request_id"),
                               "latency_ms": (time.monotonic() - started) * 1000, "retry_count": len(attempt_rows) - 1,
                               "input_sha256": digest(job["input"]),
-                              "cost_usd": sum(r["estimated_token_cost_usd"] for r in attempt_rows)
-                                  if all(r["estimated_token_cost_usd"] is not None for r in attempt_rows) else None,
-                              "cost_basis": "padded list-rate token estimate; not invoice", "usage": last.get("usage"),
+                              "cost_usd": sum(r["accounted_cost_usd"] for r in attempt_rows)
+                                  if all(r["accounted_cost_usd"] is not None for r in attempt_rows) else None,
+                              "cost_basis": ("OpenRouter reported credit deduction; excludes credit-purchase fees/taxes"
+                                  if job["model"]["provider"] == "openrouter" else "padded list-rate token estimate; not invoice"),
+                              "usage": last.get("usage"),
                               "input_tokens": sum(r["input_tokens"] for r in attempt_rows)
                                   if all(number(r.get("input_tokens"), integer=True) for r in attempt_rows) else None,
                               "output_tokens": sum(r["output_tokens"] for r in attempt_rows)
@@ -248,6 +259,7 @@ def execute_plan(plan, jobs, cases, queues, directory, *, consent=False, synthet
         save_json(directory / "predictions.json", predictions)
         save_json(directory / "run_summary.json", {"attempts": calls, "reserved_usd": reserved,
                   "known_estimated_token_cost_usd": estimated, "unknown_cost_attempts": unknown,
+                  "known_reported_api_cost_usd": reported_total,
                   "stopped": stopped, "cost_scope": "all awareness and queue calls including retries",
                   "cost_warning": "Estimates are not invoices. Provider account billing limits are still required."})
     return predictions

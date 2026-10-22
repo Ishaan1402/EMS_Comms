@@ -56,6 +56,10 @@ The [evaluation pipeline](evals/README.md) and [evaluation notebook](analytics/e
 
 For the separate [v2 clinician form](docs/clinician-annotation/v2/README.md), use [v2 intake/scoring](evals/V2_EVALUATION.md) and the [v2 LLM collector](evals/V2_LLM_RUNS.md). V2 collection has its own prompts/schemas, opt-in execution gates, and offline re-scoring of saved outputs. The original notebook/commands remain v1; no labels or annotations are silently migrated.
 
+[OpenRouter model comparison](evals/OPENROUTER.md) runs multiple commercial/open-weight hosted candidates with a single API key and credit balance. It is optional; direct providers and local models are preserved. Planning and tests never make inference calls.
+
+For the revised **v2.1 ESI annotations**, [TF-IDF preparation for SAS Data Maker](evals/TFIDF_DATA_MAKER.md) creates a training-only colleague handoff and keeps the development test set separate. Start with [the SAS/Jupyter preparation notebook](analytics/tfidf_data_maker_prep.ipynb). No synthetic-data service, classifier or LLM is invoked by this workflow.
+
 ### For EMTs/Paramedics
 - **Audio Recording**: Record patient conversations directly from mobile devices
 - **Patient Information**: Add context and details about the emergency

@@ -1,5 +1,7 @@
 # EMS evaluation pipeline
 
+**Revised v2.1 ESI workbook / Data Maker handoff:** use [TF-IDF preparation](TFIDF_DATA_MAKER.md) or [the preparation notebook](../analytics/tfidf_data_maker_prep.ipynb). It exports a training-only colleague ZIP and a separate local development test set. It does not synthesize data, infer clinical approvals, train classifiers or map ESI to the older attention categories.
+
 A provider-independent pilot evaluation, **offline by default**. It uses the **same 10 fictional cases and two optional queue exercises sent to the clinician**. Mock scoring and planning need no keys, model calls, or app server. Opt-in live adapters are documented in [the model comparison guide](MODEL_COMPARISON.md).
 
 Start with [the notebook](../analytics/ems_evaluation.ipynb), or run the commands below from the repository root. The application and clinician workbook are unchanged.

@@ -6,6 +6,7 @@ an experiment must attribute every response/failure to its actual candidate.
 
 import json
 import os
+import re
 import socket
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
@@ -13,7 +14,8 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 
 from .contracts import CHANGE, PREPARATION, OUTPUT_FIELDS, number
 
-KEY_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY"}
+KEY_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY",
+           "openrouter": "OPENROUTER_API_KEY"}
 
 
 def awareness_schema():
@@ -74,6 +76,31 @@ def post_json(url, headers, payload, timeout):
 
 def request_spec(model, system, user, schema, max_output_tokens):
     provider, name = model["provider"], model["model"]
+    if provider != "openrouter" and "openrouter_provider" in model:
+        raise ValueError("openrouter_provider is only valid with provider=openrouter")
+    if provider == "openrouter":
+        serving = model.get("openrouter_provider")
+        if not isinstance(serving, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_./-]*", serving):
+            raise ValueError("OpenRouter evaluations require one explicit openrouter_provider slug")
+        if (not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", name)
+                or name.startswith("openrouter/") or name.endswith("-latest")):
+            raise ValueError("Use an explicit OpenRouter model slug, not auto-routing/variants/latest")
+        unsupported = {"base_url", "think", "context_tokens", "reasoning_effort", "thinking_level"} & set(model)
+        if unsupported:
+            raise ValueError("Direct/local provider settings are not translated to OpenRouter")
+        if any(not number(model.get(k)) for k in ("input_usd_per_million", "output_usd_per_million")):
+            raise ValueError("OpenRouter requires verified token rates for endpoint price caps")
+        return "https://openrouter.ai/api/v1/chat/completions", {
+            "model": name, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "stream": False, "max_tokens": max_output_tokens, "temperature": model.get("temperature", 0.2),
+            "response_format": {"type": "json_schema", "json_schema": {
+                "name": "ems_output", "strict": True, "schema": schema}},
+            "provider": {"only": [serving], "order": [serving],
+                         "allow_fallbacks": False, "require_parameters": True,
+                         "max_price": {"prompt": model["input_usd_per_million"],
+                                       "completion": model["output_usd_per_million"]}},
+            # Explicitly override account defaults; no output healing, tools or context rewriting.
+            "plugins": [], "transforms": []}
     if provider == "openai":
         payload = {"model": name, "instructions": system, "input": user,
                    "store": False, "service_tier": "default", "max_output_tokens": max_output_tokens,
@@ -119,7 +146,7 @@ def headers_for(provider, environ):
         raise ValueError(f"Missing {KEY_ENV[provider]} (set it outside the notebook; never paste it into outputs)")
     if not isinstance(key, str) or any(c in key for c in ("\r", "\n")):
         raise ValueError("API key contains invalid characters")
-    if provider == "openai":
+    if provider in ("openai", "openrouter"):
         return {"Authorization": f"Bearer {key}"}
     if provider == "anthropic":
         return {"x-api-key": key, "anthropic-version": "2023-06-01"}
@@ -163,12 +190,40 @@ def parse_response(provider, raw):
             status = "refusal"
         elif finish != "STOP":
             status = "error"
-    else:
+    elif provider == "openrouter":
+        usage_raw = raw.get("usage") or {}
+        if not isinstance(usage_raw, dict):
+            raise ProviderError("invalid_provider_response")
+        # Never retain provider error metadata or reasoning text.
+        usage = {k: usage_raw[k] for k in ("prompt_tokens", "completion_tokens", "total_tokens", "cost")
+                 if number(usage_raw.get(k))}
+        inp, out = usage.get("prompt_tokens"), usage.get("completion_tokens")
+        choices = raw.get("choices") or []
+        if not isinstance(choices, list) or len(choices) > 1:
+            raise ProviderError("invalid_provider_response")
+        choice = choices[0] if choices else {}
+        if not isinstance(choice, dict):
+            raise ProviderError("invalid_provider_response")
+        message = choice.get("message") or {}
+        if not isinstance(message, dict):
+            raise ProviderError("invalid_provider_response")
+        finish, content = choice.get("finish_reason"), message.get("content") or ""
+        if not isinstance(content, str):
+            raise ProviderError("invalid_provider_response")
+        if raw.get("error") or choice.get("error"):
+            status = "error"
+        elif message.get("refusal") or finish == "content_filter":
+            status = "refusal"
+        elif finish != "stop" or message.get("tool_calls"):
+            status = "error"
+    elif provider == "ollama":
         inp, out = raw.get("prompt_eval_count"), raw.get("eval_count")
         usage = {"load_duration_ns": raw.get("load_duration"), "total_duration_ns": raw.get("total_duration")}
         finish, content = raw.get("done_reason"), raw.get("message", {}).get("content", "")
         if not raw.get("done") or finish not in ("stop", None):
             status = "error"
+    else:
+        raise ValueError(f"Unsupported provider: {provider}")
     output = None
     if status == "ok":
         try:
@@ -184,10 +239,16 @@ def parse_response(provider, raw):
         except (ValueError, TypeError):
             # Preserve malformed text as an unusable output; do not fix or hide it.
             output = content
-    return {"status": status, "output": output, "raw_text": content,
+    result = {"status": status, "output": output, "raw_text": content,
             "input_tokens": inp if number(inp, integer=True) else None,
             "output_tokens": out if number(out, integer=True) else None,
             "finish_reason": finish, "actual_model": raw.get("model", raw.get("modelVersion")), "usage": usage}
+    if provider == "openrouter":
+        result.update({"actual_provider": raw.get("provider"), "request_id": raw.get("id"),
+                       "reported_api_cost_usd": usage.get("cost")})
+        if status == "error":
+            result["error_code"] = "openrouter_response_error"
+    return result
 
 
 def generate(model, system, user, schema, max_output_tokens, timeout, *, transport=post_json, environ=None):

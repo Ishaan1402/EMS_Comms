@@ -1,5 +1,7 @@
 # V2 LLM calls and model comparison
 
+**Want one key instead of several?** Use the [OpenRouter setup](OPENROUTER.md) and `--config evals/experiments_openrouter_v2.json`. It compares four models with only `OPENROUTER_API_KEY`; the direct-provider configuration below remains available.
+
 The v2 collector uses the existing OpenAI Responses, Claude Messages, Gemini Generate Content, and loopback Ollama adapters. It sends the **six-field v2 awareness schema** and a separate **attention_v2 rank schema**, never the old preparation categories. No provider SDK or app server is required. It does not change the application's recording route.
 
 Implementation has been exercised with fake transports, not live credentials. Account/model access, model-specific settings, available quotas, and real latency/reliability still need a separately authorized live smoke test. No real API call is made by importing this module, running tests, or planning.
@@ -39,6 +41,7 @@ Keys are read from the executing process environment:
 | OpenAI | `OPENAI_API_KEY` |
 | Claude | `ANTHROPIC_API_KEY` |
 | Gemini | `GEMINI_API_KEY` |
+| OpenRouter (optional one-key configuration) | `OPENROUTER_API_KEY` |
 | Local Ollama | No API key; configured model must already be installed and served on loopback |
 
 In a Jupyter notebook, a hidden-input cell can set a key for subprocesses launched **from that same kernel**:

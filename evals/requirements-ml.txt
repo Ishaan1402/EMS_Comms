@@ -1,0 +1,3 @@
+# Optional TF-IDF preparation; independent of the application and LLM runners.
+-r requirements.txt
+scikit-learn>=1.5,<2

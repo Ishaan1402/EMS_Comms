@@ -1,0 +1,28 @@
+{
+  "dataset_version": "pilot_v1",
+  "purpose": "development",
+  "case_ids": ["SYN001", "SYN002"],
+  "queue_ids": [],
+  "repeats": 1,
+  "prompt_versions": ["awareness_form_v2"],
+  "queue_prompt_version": "attention_form_v2",
+  "max_output_tokens": 1024,
+  "timeout_seconds": 45,
+  "max_retries": 0,
+  "random_seed": 20261019,
+  "pricing_checked": "2026-10-19: public OpenRouter model endpoint catalog, USD/million text tokens for pinned endpoints; excludes credit-purchase fees/taxes. Recheck before execution.",
+  "models": [
+    {"id": "or_gemini_lite", "provider": "openrouter", "model": "google/gemini-2.5-flash-lite",
+     "openrouter_provider": "google-ai-studio", "temperature": 0.2,
+     "input_usd_per_million": 0.10, "output_usd_per_million": 0.40},
+    {"id": "or_gpt_mini", "provider": "openrouter", "model": "openai/gpt-4.1-mini",
+     "openrouter_provider": "openai", "temperature": 0.2,
+     "input_usd_per_million": 0.40, "output_usd_per_million": 1.60},
+    {"id": "or_haiku", "provider": "openrouter", "model": "anthropic/claude-haiku-4.5",
+     "openrouter_provider": "anthropic", "temperature": 0.2,
+     "input_usd_per_million": 1.00, "output_usd_per_million": 5.00},
+    {"id": "or_qwen32b", "provider": "openrouter", "model": "qwen/qwen3-32b",
+     "openrouter_provider": "deepinfra/fp8", "temperature": 0.2,
+     "input_usd_per_million": 0.08, "output_usd_per_million": 0.28}
+  ]
+}
