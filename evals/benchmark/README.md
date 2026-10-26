@@ -39,7 +39,7 @@ Tests (offline, fake model): `python -m unittest evals.tests.test_benchmark`.
 ## Data licences and credit
 
 - MIMIC-IV-ED Demo and MIMIC-IV Demo (PhysioNet), Open Data Commons Open Database License v1.0.
-  Johnson A, Bulgarelli L, Pollard T, Celi LA, Mark R, Horng S. The derived `cases/mimic.jsonl`
+  Citations in results/SOURCES.md. The derived `cases/mimic.jsonl`
   is shared under the same licence.
 - Moon SH, Shim JL, Park KS, Park CS. Triage accuracy and causes of mistriage using the Korean
   Triage and Acuity Scale. PLoS ONE 14(9): e0216972 (2019). CC BY 4.0. `cases/ktas*.jsonl` are
