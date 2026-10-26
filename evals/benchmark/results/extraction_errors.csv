@@ -1,0 +1,2 @@
+dataset,case_id,vital,stated,extracted,run_status,report
+ktas,KTAS-0165,temp_c,36.6,,ok,"We have an 80-year-old woman. Chief complaint: dyspnea. She responds only to pain. Pulse 100, BP 100/60, temperature 36.6 Celsius. Respirations and saturation could not be measured. Reports no pain."
