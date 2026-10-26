@@ -573,7 +573,7 @@ class Replay:
                        for queue_id, order in self.queue_snapshots.items()],
             "app_run": {
                 **self.manifest(),
-                "notes": ("Outputs of the running app (Asclepius) on a replay. Each record is the app's last AI "
+                "notes": ("Outputs of the running app (Eir) on a replay. Each record is the app's last AI "
                           "assessment of the case's final information. Earlier information is what the doctor "
                           "had acknowledged; reports were " + ("typed" if self.typed else
                                                                "spoken (text-to-speech) and transcribed") +

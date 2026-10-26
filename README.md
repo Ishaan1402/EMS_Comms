@@ -1,6 +1,6 @@
-# 🏥 Asclepius EMT System
+# 🏥 Eir EMT System
 
-Asclepius keeps the receiving hospital up to date while an ambulance is on the way. The crew opens a case for the patient, then talks or types. The app transcribes what they say and pulls out vitals and findings, each with the words it came from. It gives the hospital a short AI handoff saying what changed since they last acknowledged. Inbound patients are ordered by a stated rule, and the crew and the hospital can message each other.
+Eir keeps the receiving hospital up to date while an ambulance is on the way. The crew opens a case for the patient, then talks or types. The app transcribes what they say and pulls out vitals and findings, each with the words it came from. It gives the hospital a short AI handoff saying what changed since they last acknowledged. Inbound patients are ordered by a stated rule, and the crew and the hospital can message each other.
 
 This is a hackathon prototype that runs on fictional patients. It isn't ready for real patient data (see [Limits](#limits)). The AI's suggested ESI level (Emergency Severity Index, 1 to 5, or Cannot assess) and risk score (1 to 10) are pre-arrival suggestions for clinician review from the EMS report only, not validated triage. A doctor can change the ESI level.
 
@@ -32,7 +32,7 @@ SEED_DEMO_USERS=1
 
 `./start-python.sh` installs the packages and starts the server, but exits unless `.env` exists.
 
-The database is a SQLite file, `asclepius.db`, created when the server starts. Older databases are migrated on startup: new columns are added, and `messages` is rebuilt so a message can belong to a case or a recording. Set `ASCLEPIUS_DB_PATH` to use another file, such as a fresh one per demo rehearsal.
+The database is a SQLite file, `eir.db`, created when the server starts (an existing `asclepius.db` from before the rename is still used if there is no `eir.db`). Older databases are migrated on startup: new columns are added, and `messages` is rebuilt so a message can belong to a case or a recording. Set `EIR_DB_PATH` to use another file, such as a fresh one per demo rehearsal.
 
 ### Client
 
@@ -52,7 +52,7 @@ The database is a SQLite file, `asclepius.db`, created when the server starts. O
 | `OPENAI_REASONING_EFFORT` | `none` | Leave blank for models without reasoning |
 | `PORT` | `5000` | Server port |
 | `NODE_ENV` | unset | `production` serves `client/build` |
-| `ASCLEPIUS_DB_PATH` | `asclepius.db` next to the code | Database file |
+| `EIR_DB_PATH` | `eir.db` next to the code | Database file (the old name `ASCLEPIUS_DB_PATH` still works) |
 | `SEED_DEMO_USERS` | off | `1` creates the demo accounts on startup |
 | `SAS_SYNC_ENABLED` and the other `SAS_*` settings | off | [SAS Viya sync](#sas-viya-sync) |
 

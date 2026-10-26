@@ -11,7 +11,7 @@ on them keeps working when the live push takes over.
        import swat
        conn = ...                      # connect exactly as in your cas_test.py
        from load_csvs import load_tables
-       load_tables(conn, "sas_export") # or caslib="ASCLEPIUS" if the team gets its own caslib
+       load_tables(conn, "sas_export") # or caslib="EIR" if the team gets its own caslib
 
 Each table is replaced: uploaded to a staging table, swapped in under the shared name, and saved to
 disk so it survives a CAS restart. If promotion fails, restore the last saved .sashdat copy and

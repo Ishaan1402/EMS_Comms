@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🚑 Starting Asclepius EMT System (Python/FastAPI Backend)..."
+echo "🚑 Starting Eir EMT System (Python/FastAPI Backend)..."
 
 # Check if .env file exists
 if [ ! -f .env ]; then

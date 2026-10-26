@@ -20,14 +20,14 @@ from main import app
 from backend import database
 from backend.database import query, run, init_database, insert_sample_data, utc_now_iso
 
-REAL_DB_PATH = Path(database.__file__).parent.parent / "asclepius.db"
+REAL_DB_PATH = database.configured_db_path()
 
 client = TestClient(app, raise_server_exceptions=False)
 
 
 @pytest.fixture(scope="module", autouse=True)
 def temp_database(tmp_path_factory):
-    """Fresh seeded temp DB for this module; never the real asclepius.db."""
+    """Fresh seeded temp DB for this module; never the real eir.db."""
     previous = database.DB_PATH
     database.DB_PATH = tmp_path_factory.mktemp("messages-db") / "test.db"
     assert database.DB_PATH.resolve() != REAL_DB_PATH.resolve()
