@@ -44,9 +44,19 @@ proc freq data=work.agree;
   test wtkap;
 run;
 
+title "Eir suggested ESI vs reference (repeat 1), linear weights";
+proc freq data=work.agree;
+  by analysis;
+  weight count / zeros;
+  tables reference_level * ai_esi / agree(wt=ca) norow nocol nopercent;
+run;
+
 /* Human yardstick on the KTAS data: the triage nurses' KTAS vs the experts' (same scale). */
 title "KTAS triage nurse vs KTAS experts";
 proc freq data=work.pairs(where=(repeat = 1 and dataset = 'ktas'));
   tables reference_level * nurse_ktas / agree(wt=fc) norow nocol nopercent;
+run;
+proc freq data=work.pairs(where=(repeat = 1 and dataset = 'ktas'));
+  tables reference_level * nurse_ktas / agree(wt=ca) norow nocol nopercent;
 run;
 title;

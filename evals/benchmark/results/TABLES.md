@@ -17,7 +17,8 @@ AI gave an ESI level: 10/10 (100%, 95% CI 72-100%). Reference 1-2 patients, all 
 | | reference 1-2 given 1-2 (high-acuity sensitivity) | 6/6 (100%, 95% CI 61-100%) |
 | | reference 1-2 given 3 or lower | 0/6 (0%, 95% CI 0-39%) |
 | | reference 1 given 1-2 | 2/2 (100%, 95% CI 34-100%) |
-| Always level 3 (most common reference) | exact | 4/10 (40%, 95% CI 17-69%) |
+| Always level 3 (most common reference) | exact, all cases | 4/10 (40%, 95% CI 17-69%) |
+| | exact, on the cases the AI gave a level | 4/10 (40%, 95% CI 17-69%) |
 
 AI vs reference, counts:
 
@@ -49,7 +50,9 @@ AI gave an ESI level: 153/207 (74%, 95% CI 68-79%). Reference 1-2 patients, all 
 | Simple vitals rule vs reference | exact | 103/207 (50%, 95% CI 43-57%) |
 | | weighted kappa (quadratic) | 0.16 (95% CI 0.04 to 0.29) |
 | | reference 1-2 given 1-2 | 49/115 (43%, 95% CI 34-52%) |
-| Always level 2 (most common reference) | exact | 97/207 (47%, 95% CI 40-54%) |
+| Always level 2 (most common reference) | exact, all cases | 97/207 (47%, 95% CI 40-54%) |
+| | exact, on the cases the AI gave a level | 75/153 (49%, 95% CI 41-57%) |
+| (visits are from 56 distinct patients) | | |
 
 AI vs reference, counts:
 
@@ -81,7 +84,9 @@ AI gave an ESI level: 90/119 (76%, 95% CI 67-82%). Reference 1-2 patients, all o
 | Simple vitals rule vs reference | exact | 63/119 (53%, 95% CI 44-62%) |
 | | weighted kappa (quadratic) | 0.18 (95% CI 0.04 to 0.33) |
 | | reference 1-2 given 1-2 | 33/75 (44%, 95% CI 33-55%) |
-| Always level 2 (most common reference) | exact | 68/119 (57%, 95% CI 48-66%) |
+| Always level 2 (most common reference) | exact, all cases | 68/119 (57%, 95% CI 48-66%) |
+| | exact, on the cases the AI gave a level | 54/90 (60%, 95% CI 50-70%) |
+| (visits are from 38 distinct patients) | | |
 
 AI vs reference, counts:
 
@@ -122,7 +127,8 @@ AI gave an ESI level: 668/1267 (53%, 95% CI 50-55%). Reference 1-2 patients, all
 | Simple vitals rule vs reference | exact | 457/1267 (36%, 95% CI 33-39%) |
 | | weighted kappa (quadratic) | 0.22 (95% CI 0.17 to 0.27) |
 | | reference 1-2 given 1-2 | 116/246 (47%, 95% CI 41-53%) |
-| Always level 3 (most common reference) | exact | 487/1267 (38%, 95% CI 36-41%) |
+| Always level 3 (most common reference) | exact, all cases | 487/1267 (38%, 95% CI 36-41%) |
+| | exact, on the cases the AI gave a level | 275/668 (41%, 95% CI 38-45%) |
 
 AI vs reference, counts:
 
@@ -163,7 +169,8 @@ AI gave an ESI level: 277/421 (66%, 95% CI 61-70%). Reference 1-2 patients, all 
 | Simple vitals rule vs reference | exact | 194/421 (46%, 95% CI 41-51%) |
 | | weighted kappa (quadratic) | 0.31 (95% CI 0.22 to 0.40) |
 | | reference 1-2 given 1-2 | 84/154 (55%, 95% CI 47-62%) |
-| Always level 3 (most common reference) | exact | 169/421 (40%, 95% CI 36-45%) |
+| Always level 3 (most common reference) | exact, all cases | 169/421 (40%, 95% CI 36-45%) |
+| | exact, on the cases the AI gave a level | 99/277 (36%, 95% CI 30-42%) |
 
 AI vs reference, counts:
 
@@ -204,7 +211,8 @@ AI gave an ESI level: 301/421 (72%, 95% CI 67-76%). Reference 1-2 patients, all 
 | Simple vitals rule vs reference | exact | 194/421 (46%, 95% CI 41-51%) |
 | | weighted kappa (quadratic) | 0.31 (95% CI 0.22 to 0.40) |
 | | reference 1-2 given 1-2 | 84/154 (55%, 95% CI 47-62%) |
-| Always level 3 (most common reference) | exact | 169/421 (40%, 95% CI 36-45%) |
+| Always level 3 (most common reference) | exact, all cases | 169/421 (40%, 95% CI 36-45%) |
+| | exact, on the cases the AI gave a level | 107/301 (36%, 95% CI 30-41%) |
 
 AI vs reference, counts:
 
@@ -228,7 +236,7 @@ Same 421 ambulance patients, numbers in digits vs spoken as words: identical ESI
 
 ### Guardrails
 
-Unmodified real outputs (repeat 1) naming a number the reports don't state: 6/1905 (0%, 95% CI 0-1%).
+Unmodified real outputs (repeat 1) naming a number the reports don't state: 6/1905 (0%, 95% CI 0-1%); all runs including repeats: 9/3201 (0%, 95% CI 0-1%).
 
 | Test | Caught |
 |---|---|

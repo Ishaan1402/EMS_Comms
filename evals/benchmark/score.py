@@ -127,6 +127,11 @@ def analyse_assessments(cases, records):
             "ai_levels": dict(sorted(Counter(p for _, p in pairs).items())),
             "simple_rule_vs_reference": agreement(rule_all) if rule_all else None,
             "majority_class_exact": wilson(majority[1], len(chosen)) | {"level": majority[0]},
+            # The same guess on exactly the cases the AI gave a level for, so the two rates share a denominator.
+            "majority_class_exact_on_ai_assessed": wilson(sum(r == majority[0] for r, _ in pairs), len(pairs))
+            | {"level": majority[0]},
+            "distinct_patients": len({c["meta"]["source_row"]["subject_id"] for c in chosen})
+            if dataset == "mimic" else None,
             "nurse_vs_reference": agreement(nurse_all) if nurse_all else None,
             "nurse_vs_reference_on_ai_assessed": agreement(nurse_pairs) if nurse_pairs else None,
         }
@@ -341,6 +346,8 @@ def main(argv=None):
         "runs": run_infos,
         "esi": esi,
         "consistency": consistency(cases, by_key),
+        "model_unsupported_numbers_all_runs": wilson(
+            sum(r["status"] == "ok" and bool(r.get("unsupported_numbers")) for r in by_key.values()), len(by_key)),
         "model_unsupported_numbers_on_real_outputs": wilson(
             sum(bool(r.get("unsupported_numbers")) for r in primary_ok), len(primary_ok)),
         "guardrail_mutation_tests": mutations,

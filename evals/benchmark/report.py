@@ -68,7 +68,11 @@ def main(argv=None):
                     f"| | weighted kappa (quadratic) | {kap(s['kappa_quadratic'])} |",
                     f"| | reference 1-2 given 1-2 | {pct(s['high_acuity_sensitivity'])} |"]
         maj = r["majority_class_exact"]
-        out += [f"| Always level {maj['level']} (most common reference) | exact | {pct(maj)} |", ""]
+        same = r["majority_class_exact_on_ai_assessed"]
+        out += [f"| Always level {maj['level']} (most common reference) | exact, all cases | {pct(maj)} |",
+                f"| | exact, on the cases the AI gave a level | {pct(same)} |", ""]
+        if r.get("distinct_patients"):
+            out[-1:-1] = [f"| (visits are from {r['distinct_patients']} distinct patients) | | |"]
         out += ["AI vs reference, counts:", ""] + confusion(r["ai_vs_reference"]) + [""]
     c = m["consistency"]
     out += ["### Consistency", "", "| Set | Cases | Same ESI in every repeat | Within one level | Kappa repeat 1 vs 2 |",
@@ -84,7 +88,8 @@ def main(argv=None):
                 f"within one {pct(d['within_one'])}.", ""]
     g = m["guardrail_mutation_tests"]
     out += ["### Guardrails", "", f"Unmodified real outputs (repeat 1) naming a number the reports don't state: "
-            f"{pct(m['model_unsupported_numbers_on_real_outputs'])}.", "", "| Test | Caught |", "|---|---|"]
+            f"{pct(m['model_unsupported_numbers_on_real_outputs'])}; all runs including repeats: "
+            f"{pct(m['model_unsupported_numbers_all_runs'])}.", "", "| Test | Caught |", "|---|---|"]
     for name, value in g["handoff_number_check"].items():
         if isinstance(value, dict):
             out.append(f"| Handoff number check: {name.replace('_', ' ')} | {pct(value)} |")
