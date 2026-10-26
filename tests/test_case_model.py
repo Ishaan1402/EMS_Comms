@@ -1191,10 +1191,24 @@ class TestCaseAccessMatrix:
 
 class TestDatabasePath:
     def test_a_separate_database_can_be_named(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ASCLEPIUS_DB_PATH", str(tmp_path / "demo.db"))
+        monkeypatch.delenv("ASCLEPIUS_DB_PATH", raising=False)
+        monkeypatch.setenv("EIR_DB_PATH", str(tmp_path / "demo.db"))
         assert database.configured_db_path() == tmp_path / "demo.db"
-        monkeypatch.delenv("ASCLEPIUS_DB_PATH")
-        assert database.configured_db_path() == Path(database.__file__).parent.parent / "asclepius.db"
+
+    def test_the_old_setting_name_still_works(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("EIR_DB_PATH", raising=False)
+        monkeypatch.setenv("ASCLEPIUS_DB_PATH", str(tmp_path / "old.db"))
+        assert database.configured_db_path() == tmp_path / "old.db"
+
+    def test_default_is_eir_db_unless_only_the_old_file_exists(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("EIR_DB_PATH", raising=False)
+        monkeypatch.delenv("ASCLEPIUS_DB_PATH", raising=False)
+        monkeypatch.setattr(database, "__file__", str(tmp_path / "backend" / "database.py"))
+        assert database.configured_db_path() == tmp_path / "eir.db"
+        (tmp_path / "asclepius.db").touch()
+        assert database.configured_db_path() == tmp_path / "asclepius.db"
+        (tmp_path / "eir.db").touch()
+        assert database.configured_db_path() == tmp_path / "eir.db"
 
 
 class TestBuildInfo:

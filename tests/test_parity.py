@@ -14,7 +14,7 @@ from backend import database
 from backend.database import query, run, get_db, init_database, insert_sample_data
 from backend import openai_config
 
-REAL_DB_PATH = Path(database.__file__).parent.parent / "asclepius.db"
+REAL_DB_PATH = database.configured_db_path()
 
 # Global error handler responses are 500s; inspect them instead of re-raising.
 client = TestClient(app, raise_server_exceptions=False)
@@ -22,7 +22,7 @@ client = TestClient(app, raise_server_exceptions=False)
 
 @pytest.fixture(scope="session", autouse=True)
 def temp_database(tmp_path_factory):
-    """Point every query at a fresh, explicitly seeded temp DB; never the real asclepius.db."""
+    """Point every query at a fresh, explicitly seeded temp DB; never the real eir.db."""
     database.DB_PATH = tmp_path_factory.mktemp("db") / "test.db"
     assert database.DB_PATH.resolve() != REAL_DB_PATH.resolve()
     init_database()

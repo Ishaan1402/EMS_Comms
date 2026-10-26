@@ -50,7 +50,7 @@ const Login = () => {
             <Activity className="h-5 w-5" />
           </div>
           <h2 className="mt-6 text-center text-xl font-semibold text-gray-900">
-            Sign in to Asclepius
+            Sign in to Eir
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             Access your EMT or Doctor dashboard

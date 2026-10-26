@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
     yield
     await sas_sync.sync.stop()
 
-app = FastAPI(title="Asclepius EMT System", lifespan=lifespan)
+app = FastAPI(title="Eir EMT System", lifespan=lifespan)
 
 @app.exception_handler(APIError)
 async def api_error_handler(request: Request, exc: APIError):
@@ -258,7 +258,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 5000))
-    print(f"🏥 Asclepius EMT System running on port {port}")
+    print(f"🏥 Eir EMT System running on port {port}")
     # Auto-reload restarts the server whenever a .py file in the folder changes, which would cut
     # off a running demo (clips in flight are marked failed), so it is for development only.
     # Other checkouts of this repo live under .claude/worktrees; their edits must not reload this one.

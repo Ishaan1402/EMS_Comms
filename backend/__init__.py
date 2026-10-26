@@ -1,1 +1,1 @@
-"""The Asclepius backend: case model, AI steps, database, exports and the API routes."""
+"""The Eir backend: case model, AI steps, database, exports and the API routes."""

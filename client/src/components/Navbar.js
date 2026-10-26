@@ -18,7 +18,7 @@ const Navbar = () => {
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600 text-white">
               <Activity className="h-4 w-4" />
             </span>
-            <span className="text-base font-semibold">Asclepius</span>
+            <span className="text-base font-semibold">Eir</span>
           </Link>
           {isDoctor && (
             <div className="flex items-center gap-1">

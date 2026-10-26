@@ -8,8 +8,17 @@ import bcrypt
 from contextlib import contextmanager
 
 def configured_db_path() -> Path:
-    """ASCLEPIUS_DB_PATH (e.g. a separate database for demo runs), else asclepius.db next to this file."""
-    return Path(os.getenv("ASCLEPIUS_DB_PATH") or Path(__file__).parent.parent / "asclepius.db")
+    """
+    EIR_DB_PATH (e.g. a separate database for demo runs), else eir.db next to this file.
+    ASCLEPIUS_DB_PATH and an existing asclepius.db still work, from before the app was renamed Eir.
+    """
+    named = os.getenv("EIR_DB_PATH") or os.getenv("ASCLEPIUS_DB_PATH")
+    if named:
+        return Path(named)
+    root = Path(__file__).parent.parent
+    if not (root / "eir.db").exists() and (root / "asclepius.db").exists():
+        return root / "asclepius.db"
+    return root / "eir.db"
 
 
 DB_PATH = configured_db_path()
