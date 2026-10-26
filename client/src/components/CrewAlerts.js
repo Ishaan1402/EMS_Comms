@@ -14,9 +14,9 @@ export const ALERTS = [
 ];
 const byValue = Object.fromEntries(ALERTS.map((a) => [a.value, a]));
 
-export const clockTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+export const clockTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-// "LKW 14:10 (52 min ago)", or "LKW not stated": a missing key time is shown, never guessed.
+// "LKW 02:10 PM (52 min ago)", or "LKW not stated": a missing key time is shown, never guessed.
 export const keyTimeText = (alert, now) => {
   const { short } = byValue[alert.alert] || { short: 'key time' };
   if (!alert.key_time) return `${short} not stated`;
