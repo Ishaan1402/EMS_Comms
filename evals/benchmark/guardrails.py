@@ -4,7 +4,8 @@
    every number the reports do support is replaced, one at a time, by a wrong value (about 15%
    higher and lower; +/-1 for temperatures, +2 below 20). Caught = the check names the wrong value.
    A wrong value that the report happens to state elsewhere (e.g. pulse 96 changed to 136 when the
-   BP is 136/82) cannot be caught by design; those are counted separately as collisions.
+   BP is 136/82), or for a temperature also as its °F/°C conversion, cannot be caught by design;
+   those are counted separately as collisions.
 2. Extraction quote check (backend.case_extraction.interpret): in each real extraction, every kept
    vital sign gets a wrong value with its true quote (should be dropped), and separately a quote
    that is not in the report (the app should fail the run and store nothing).
@@ -42,11 +43,14 @@ def number_mutants(fields: dict, inputs: dict):
         original = match.group()
         if original in flagged:
             continue  # already unsupported in the real output
+        # The check reads a number as a temperature (and allows °F/°C conversions) by its context.
+        temperature = bool(case_assessment.DEGREES_AFTER.match(summary, match.end())
+                           or case_assessment.TEMPERATURE_BEFORE.search(summary[:match.start()]))
         for wrong in wrong_values(original):
             mutated = {**fields, "summary": summary[:match.start()] + wrong + summary[match.end():]}
             caught = wrong in case_assessment.unsupported_numbers(mutated, inputs)
-            yield {"original": original, "wrong": wrong, "caught": caught,
-                   "collision": case_assessment.stated(float(wrong), stated, temperature="." in wrong)}
+            yield {"original": original, "wrong": wrong, "caught": caught, "temperature": temperature,
+                   "collision": case_assessment.stated(float(wrong), stated, temperature=temperature)}
 
 
 def fabricated_vital(fields: dict, inputs: dict):

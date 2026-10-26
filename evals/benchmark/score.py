@@ -107,6 +107,10 @@ def analyse_assessments(cases, records):
                     rule_pairs.append((case["reference"]["level"], rule_baseline(case)))
                 if "nurse_ktas" in case["meta"]:
                     nurse_pairs.append((case["reference"]["level"], case["meta"]["nurse_ktas"]))
+        # Every reference 1-2 case, including those without an AI level (Cannot assess shows as Needs review).
+        urgent = [(c, r) for c, r in primary if c["reference"]["level"] <= 2]
+        urgent_outcome = Counter("given 1-2" if (ai_level(r) or 9) <= 2 else "given 3-5" if ai_level(r) else "no level"
+                                 for _, r in urgent)
         # Human comparison and rule on every case in the set, not only those the AI assessed.
         nurse_all = [(c["reference"]["level"], c["meta"]["nurse_ktas"]) for c in chosen if "nurse_ktas" in c["meta"]]
         rule_all = [(c["reference"]["level"], rule_baseline(c)) for c in chosen] if dataset != "purav" else []
@@ -116,6 +120,9 @@ def analyse_assessments(cases, records):
             "cases": len(chosen),
             "reference_levels": dict(sorted(Counter(c["reference"]["level"] for c in chosen).items())),
             "outcomes": dict(outcome),
+            "ai_gave_a_level": wilson(len(pairs), len(chosen)),
+            "reference_1_2_all_cases": {key: wilson(urgent_outcome[key], len(urgent))
+                                        for key in ("given 1-2", "given 3-5", "no level")},
             "ai_vs_reference": agreement(pairs),
             "ai_levels": dict(sorted(Counter(p for _, p in pairs).items())),
             "simple_rule_vs_reference": agreement(rule_all) if rule_all else None,

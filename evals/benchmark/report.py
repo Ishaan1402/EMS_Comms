@@ -56,6 +56,8 @@ def main(argv=None):
         out += [f"### {r['label']} (`{key}`)", "",
                 f"Cases: {r['cases']}; reference levels {r['reference_levels']}; outcomes {r['outcomes']}; "
                 f"AI levels {r['ai_levels']}.", "",
+                f"AI gave an ESI level: {pct(r['ai_gave_a_level'])}. Reference 1-2 patients, all of them: "
+                + "; ".join(f"{k} {pct(v)}" for k, v in r["reference_1_2_all_cases"].items()) + ".", "",
                 "| Comparison | Metric | Result |", "|---|---|---|"]
         out += agreement_rows("AI vs reference", r["ai_vs_reference"])
         if r.get("nurse_vs_reference"):
