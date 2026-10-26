@@ -208,10 +208,13 @@ class FakeSas:
         for marker, status in self.http_error.items():
             if marker in path:
                 return httpx.Response(status, json={"error": "HTTP/1.1 403 Forbidden", "disposition": None})
+        if "cookie" in request.headers:
+            # Real CAS refuses a client-credentials request that sends its tkhttp-id cookie back.
+            return httpx.Response(403, json={"error": "HTTP/1.1 403 Forbidden", "disposition": None})
         if path == "/SASLogon/oauth/token":
             return httpx.Response(200, json={"access_token": "tok-123", "expires_in": 29999999})
         if path.endswith("/cas/sessions") and request.method == "POST":
-            return httpx.Response(200, json={"session": "sess-1"})
+            return httpx.Response(200, json={"session": "sess-1"}, headers={"set-cookie": "tkhttp-id=abc; Path=/"})
         if request.method == "DELETE":
             return httpx.Response(200, json={})
         action = path.rsplit("/", 1)[-1]
@@ -348,6 +351,18 @@ class TestCasClient:
                 await c.close()
         run_async(go())
         assert [p for _, p in fake.calls()].count("/SASLogon/oauth/token") == 1
+
+    def test_the_cas_cookie_is_never_sent_back(self):
+        fake = FakeSas()
+
+        async def go():
+            c = cas_client(fake)
+            try:
+                await c.replace_tables({"CASES": b"x\n1\n"})
+            finally:
+                await c.close()
+        run_async(go())
+        assert len(fake.requests) == 8 and not [r for r in fake.requests if "cookie" in r.headers]
 
 
     def test_an_issued_access_token_is_used_as_is_without_signing_in(self):

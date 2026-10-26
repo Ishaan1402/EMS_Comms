@@ -38,6 +38,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from pathlib import Path
 from typing import Optional
 
@@ -449,7 +450,10 @@ class CasClient:
 
     def __init__(self, settings: Settings, transport: Optional[httpx.AsyncBaseTransport] = None):
         self.settings = settings
-        self._http = httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS, transport=transport)
+        # Keep no cookies: CAS sets tkhttp-id on its first reply, and a client-credentials request that
+        # sends it back is refused (HTTP 403) for every later action and for closing the session.
+        self._http = httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS, transport=transport,
+                                       cookies=CookieJar(DefaultCookiePolicy(allowed_domains=[])))
         self._token = None
         self._token_expires = 0.0
 
