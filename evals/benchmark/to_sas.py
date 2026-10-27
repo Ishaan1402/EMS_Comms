@@ -16,6 +16,8 @@ visits, whose source publishes them per row.
              arrival and stated vitals, tokens, latency and cost
     HEADLINE where the AI, the triage nurses and a simple vitals rule put the urgent visits
              (reference 1-2), one row per set, rater and outcome: the safety chart
+    OUTCOMES where each rater put the KTAS patients by what happened to them (ICU, death or surgery /
+             ward admission / sent home), from results/ktas_dispositions.csv (outcomes.py)
     METRICS  every number in metrics.json, one per row, with numerator, denominator and 95% interval
 """
 import argparse
@@ -27,6 +29,7 @@ from pathlib import Path
 
 from backend import sas_sync
 from .run_live import CASES_DIR, load_cases
+from .outcomes import outcome_rows, read_dispositions
 from .score import ai_level, analyse_assessments, read_jsonl
 
 HERE = Path(__file__).parent
@@ -84,6 +87,15 @@ COLUMNS = {
         ("VISITS", "num", "Visits"),
         ("SET_VISITS", "num", "Urgent visits in the set"),
         ("SHARE", "num", "Share of the set's urgent visits"),
+    ],
+    "OUTCOMES": [
+        ("SCOPE", "char", "Visits"),
+        ("OUTCOME_GROUP", "char", "What happened to the patient"),
+        ("RATER", "char", "Who placed them"),
+        ("PLACED", "char", "Placed at"),
+        ("VISITS", "num", "Visits"),
+        ("GROUP_VISITS", "num", "Visits with this outcome"),
+        ("SHARE", "num", "Share of the visits with this outcome"),
     ],
     "METRICS": [
         ("SECTION", "char", "Section of metrics.json"),
@@ -224,6 +236,7 @@ def build_tables(results: Path = RESULTS) -> dict:
     return {
         "CALLS": calls,
         "HEADLINE": headline_rows(calls),
+        "OUTCOMES": outcome_rows(calls, read_dispositions()),
         "METRICS": metrics_rows(json.loads((results / "metrics.json").read_text(encoding="utf-8"))),
     }
 

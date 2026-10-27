@@ -88,6 +88,7 @@ data work.urgent;
   length nurse_placed $ 9;
   if not missing(nurse_ktas) then nurse_placed = ifc(nurse_ktas <= 2, 'Given 1-2', 'Given 3-5');
   ai_put_at_3_5 = (urgent_outcome = 'Given 3-5');
+  ai_no_level = (ai_gave_level = 0);   /* Cannot assess: shown as Needs review */
 run;
 
 title "KTAS ambulance arrivals rated 1-2 by the experts: where Eir put them";
@@ -96,14 +97,15 @@ proc freq data=work.urgent;
   tables urgent_outcome nurse_placed / nocum;
 run;
 
-/* Fairness: of the urgent visits, did the AI put one sex or age band at 3-5 more often?
-   Expect no significant difference (two-sided Fisher p: KTAS sex 0.12, age 0.06; MIMIC sex 0.55,
-   age 0.12); the direction flips between the two datasets. Small counts: this cannot rule out a gap. */
+/* Fairness: of the urgent visits, did the AI put one sex or age band at 3-5, or give it no level,
+   more often? 8 tests, so the bar is p < 0.05 / 8 = 0.006. Expected two-sided Fisher p:
+     put at 3-5: KTAS sex 0.12, age 0.06; MIMIC sex 0.55, age 0.12 (none significant)
+     no level:   KTAS sex 0.56, age 0.004 (under 65 23/122 vs 65+ 8/124); MIMIC sex 0.67, age 0.19 */
 proc sort data=work.urgent; by dataset; run;
-title "Urgent visits Eir put at 3-5, by sex and by age band (Fisher's exact test)";
+title "Urgent visits Eir put at 3-5 or gave no level, by sex and by age band (Fisher's exact test)";
 proc freq data=work.urgent;
   by dataset;
-  tables (sex age_band) * ai_put_at_3_5 / fisher norow nocol nopercent;
+  tables (sex age_band) * (ai_put_at_3_5 ai_no_level) / fisher norow nocol nopercent;
 run;
 
 /* SAS's bias assessment on the visits the AI gave a level for: "urgent" is reference 1-2 and the

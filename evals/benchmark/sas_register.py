@@ -30,21 +30,52 @@ def share(k, n):
     return f"{k:,}/{n:,} ({k / n:.0%})" if n else "n/a"
 
 
-def fairness_lines(calls: list) -> list:
-    """Per dataset and variable, urgent visits put at 3-5 and given no level, with Fisher's exact p."""
-    lines = []
+def fairness_tests(calls: list) -> list:
+    """Per dataset and variable, urgent visits put at 3-5 and given no level, with Fisher's exact p
+    (the same 8 tests sas_fairness.py saves as EIR_BENCH_BIAS_TESTS)."""
+    tests = []
     for dataset in ("ktas", "mimic"):
         urgent = [r for r in calls if r["DATASET"] == dataset and r["PRIMARY"] and r["REFERENCE_URGENT"]]
         for column in ("SEX", "AGE_BAND"):
-            groups = sorted(Counter(r[column] for r in urgent).items())
+            (a, n1), (b, n2) = sorted(Counter(r[column] for r in urgent).items())
             for outcome, label in (("Given 3-5", "put at 3-5"), (NO_LEVEL, "no level")):
                 events = Counter(r[column] for r in urgent if r["URGENT_OUTCOME"] == outcome)
-                (a, n1), (b, n2) = groups
-                p = fisher_exact(events[a], n1, events[b], n2)
-                lines.append(f"{dataset.upper()} by {column.lower().replace('_', ' ')}, {label}: "
-                             f"{a} {events[a]}/{n1}, {b} {events[b]}/{n2} (Fisher p {p:.3f}"
-                             f"{', significant after 8 tests' if p < 0.05 / 8 else ''})")
-    return lines
+                tests.append({"dataset": dataset.upper(), "by": column.lower().replace("_", " "), "label": label,
+                              "a": a, "a_k": events[a], "a_n": n1, "b": b, "b_k": events[b], "b_n": n2,
+                              "p": fisher_exact(events[a], n1, events[b], n2)})
+    for test in tests:
+        test["significant"] = test["p"] < 0.05 / len(tests)
+    return tests
+
+
+def fairness_lines(calls: list) -> list:
+    return [f"{t['dataset']} by {t['by']}, {t['label']}: {t['a']} {t['a_k']}/{t['a_n']}, {t['b']} {t['b_k']}/{t['b_n']} "
+            f"(Fisher p {t['p']:.3f}{', significant after 8 tests' if t['significant'] else ''})"
+            for t in fairness_tests(calls)]
+
+
+def fairness_summary(calls: list) -> str:
+    """One sentence for the card's limitations and the Fairness property, from the tests themselves."""
+    found = [t for t in fairness_tests(calls) if t["significant"]]
+    if not found:
+        return "Fairness: no significant gap by sex or age band in 8 Fisher tests (small counts)."
+    return "Fairness: " + "; ".join(
+        f"{t['dataset']} urgent patients got {t['label']} {t['a']} {t['a_k']}/{t['a_n']} vs {t['b']} {t['b_k']}/{t['b_n']} "
+        f"(Fisher p {t['p']:.3f})" for t in found) + "; no other gap was significant in 8 tests."
+
+
+def outcome_table(rows: list) -> str:
+    """Card rows for all KTAS visits: each outcome group, with the AI, nurses and experts side by side."""
+    counts = {(r["OUTCOME_GROUP"], r["RATER"], r["PLACED"]): r for r in rows if r["SCOPE"] == "KTAS all visits"}
+    lines = []
+    for group in dict.fromkeys(r["OUTCOME_GROUP"] for r in rows):
+        def placed(rater, outcomes):
+            return " / ".join(str(counts[(group, rater, o)]["VISITS"]) for o in outcomes)
+        total = counts[(group, "Eir AI", "Given 1-2")]["GROUP_VISITS"]
+        lines.append(f"| {group} | {total} | {placed('Eir AI', ('Given 1-2', NO_LEVEL, 'Given 3-5'))} "
+                     f"| {placed('Triage nurses', ('Given 1-2', 'Given 3-5'))} "
+                     f"| {placed('KTAS experts', ('Given 1-2', 'Given 3-5'))} |")
+    return "\n".join(lines)
 
 
 def model_card(metrics: dict, tables: dict, comparison: list) -> str:
@@ -102,13 +133,20 @@ trained on 70% of the KTAS visits and compared on the same 30% holdout; the matc
 | --- | --- | --- | --- | --- | --- |
 {baseline}
 
+## Patient outcomes (KTAS, what happened after triage)
+A triage level is a judgement, even the experts'. The KTAS source also records each visit's disposition:
+
+| Patients who | Visits | Eir: 1-2 / no level / 3-5 | Triage nurses: 1-2 / 3-5 | KTAS experts: 1-2 / 3-5 |
+| --- | --- | --- | --- | --- |
+{outcome_table(tables['OUTCOMES'])}
+
 ## Fairness (SAS `fairAITools.assessBias` and Fisher's exact test)
 Urgent visits put at 3-5, by group:
 {chr(10).join('- ' + line for line in fairness_lines(tables['CALLS']))}
 
-Eight two-sided Fisher tests (2 datasets x 2 variables x 2 outcomes). The AI did not put one group's urgent
-patients at 3-5 significantly more often. It did give no level (Needs review) to more urgent KTAS patients under 65
-than 65 and over. The counts are small; these are the checks to repeat on live data.
+{fairness_summary(tables['CALLS'])[len('Fairness: '):]} Eight two-sided Fisher tests (2 datasets x 2 variables
+x 2 outcomes), significant below 0.05 / 8. A visit with no level goes to Needs review, so a clinician sees it. The counts
+are small; these are the checks to repeat on live data.
 
 ## Limits
 - No result is clinical validation. KTAS is not ESI; use it for "urgent flagged urgent", not ESI accuracy.
@@ -136,7 +174,7 @@ def properties(metrics: dict, tables: dict) -> list:
         "KTAS ambulance - within one level": share(ems["ai_vs_reference"]["within_one"]["k"],
                                                    ems["ai_vs_reference"]["within_one"]["n"]),
         "KTAS ambulance - weighted kappa": f"{ems['ai_vs_reference']['kappa_quadratic']['value']:.2f}",
-        "Fairness": "No significant gap in urgent put at 3-5; more no-level for KTAS urgent under 65 (see card)",
+        "Fairness": fairness_summary(tables["CALLS"])[len("Fairness: "):],
         "Clinical validation": "None",
     }
     # Model Manager allows only letters, digits, spaces, _ - and . in property names.
@@ -161,7 +199,7 @@ def _first(response) -> dict:
     return body["items"][0] if "items" in body else body
 
 
-async def register(client, settings, card: str, props: list, metrics: dict) -> str:
+async def register(client, settings, card: str, props: list, metrics: dict, limitation: str = "") -> str:
     url = settings.url + "/modelRepository"
     repository = next(r for r in (await client.get("/modelRepository/repositories", "repositories"))["items"]
                       if r["name"] == "Public")
@@ -177,11 +215,19 @@ async def register(client, settings, card: str, props: list, metrics: dict) -> s
                                           "targetEventValue": "1", "classTargetValues": "1,0",
                                           "description": "Eir's AI triage suggestion and the baseline it is compared "
                                                          "with. Target: reference triage level 1-2 (urgent)."})))
-    existing = (await client.get(f"/modelRepository/projects/{project['id']}/models?limit=100", "models"))["items"]
-    for model in existing:
-        if model["name"] == MODEL:
-            await client._call("DELETE", f"{url}/models/{model['id']}", "replace model")
     run = metrics["runs"][0]
+    files = {
+        "MODEL_CARD.md": (card.encode(), "text/markdown"),
+        "metrics.json": ((RESULTS / "metrics.json").read_bytes(), "application/json"),
+        f"{run['assessment_prompt']}.txt": ((PROMPTS / f"{run['assessment_prompt']}.txt").read_bytes(), "text/plain"),
+    }
+    existing = (await client.get(f"/modelRepository/projects/{project['id']}/models?limit=100", "models"))["items"]
+    model = next((m for m in existing if m["name"] == MODEL), None)
+    if model:
+        # Update in place: the model card text people typed in Model Manager (purpose, intended use,
+        # limitations, the embedded report) lives on this model and must survive a re-run.
+        await _update(client, url, model["id"], props, files, limitation)
+        return f"{settings.url}/SASModelManager/projects/{project['id']}"
     model = _first(await client._call("POST", f"{url}/models", "create model", headers={"Content-Type": MODEL_TYPE},
                                 content=json.dumps({
                                     "name": MODEL, "projectId": project["id"],
@@ -201,18 +247,35 @@ async def register(client, settings, card: str, props: list, metrics: dict) -> s
                                         {"name": "RISK_SCORE", "role": "output", "type": "integer", "level": "interval"},
                                         {"name": "AI_URGENT", "role": "output", "type": "decimal", "level": "interval"}],
                                     "properties": props})))
-    files = {
-        "MODEL_CARD.md": (card.encode(), "text/markdown"),
-        "metrics.json": ((RESULTS / "metrics.json").read_bytes(), "application/json"),
-        f"{run['assessment_prompt']}.txt": ((PROMPTS / f"{run['assessment_prompt']}.txt").read_bytes(), "text/plain"),
-    }
+    await _upload(client, url, model["id"], files)
+    return f"{settings.url}/SASModelManager/projects/{project['id']}"
+
+
+async def _upload(client, url: str, model_id: str, files: dict) -> None:
     headers = await client._headers()
     for name, (data, content_type) in files.items():
-        response = await client._http.post(f"{url}/models/{model['id']}/contents", headers=headers,
+        response = await client._http.post(f"{url}/models/{model_id}/contents", headers=headers,
                                            files={"files": (name, data, content_type)}, data={"name": name, "role": "documentation"})
         if response.status_code >= 400:
             raise sas_sync.SasError(f"upload {name}: HTTP {response.status_code}")
-    return f"{settings.url}/SASModelManager/projects/{project['id']}"
+
+
+async def _update(client, url: str, model_id: str, props: list, files: dict, limitation: str) -> None:
+    """Replace our properties and files on the model; keep every other field and property as it is."""
+    response = await client._call("GET", f"{url}/models/{model_id}", "read model")
+    model = response.json()
+    ours = {p["name"] for p in props}
+    model["properties"] = [p for p in model.get("properties") or [] if p["name"] not in ours] + props
+    if limitation and limitation not in (model.get("limitations") or ""):
+        model["limitations"] = " ".join(filter(None, [model.get("limitations"), limitation]))
+    await client._call("PUT", f"{url}/models/{model_id}", "update model",
+                       headers={"Content-Type": MODEL_TYPE, "If-Match": response.headers["etag"]},
+                       content=json.dumps(model))
+    contents = (await client.get(f"/modelRepository/models/{model_id}/contents?limit=100", "files"))["items"]
+    for content in contents:
+        if content["name"] in files:
+            await client._call("DELETE", f"{url}/models/{model_id}/contents/{content['id']}", f"replace {content['name']}")
+    await _upload(client, url, model_id, files)
 
 
 def main(argv=None) -> int:
@@ -229,7 +292,8 @@ def main(argv=None) -> int:
             comparison = await fetch_comparison(client)
             card = model_card(metrics, tables, comparison)
             (RESULTS / "MODEL_CARD.md").write_text(card, encoding="utf-8")
-            return await register(client, settings, card, properties(metrics, tables), metrics)
+            return await register(client, settings, card, properties(metrics, tables), metrics,
+                                  fairness_summary(tables["CALLS"]))
         finally:
             await client.close()
     try:

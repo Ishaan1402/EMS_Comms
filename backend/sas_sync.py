@@ -660,7 +660,8 @@ class SasSync:
     def start(self) -> None:
         if self.settings.enabled and self.settings.configured and self._task is None:
             self._task = asyncio.get_running_loop().create_task(self.run_forever())
-            print(f"🔄 SAS sync on: every {self.settings.interval:g}s to {self.settings.caslib} on {self.settings.url}")
+            print(f"🔄 SAS sync on: every {self.settings.interval:g}s to "
+                  f"{self.settings.caslib}.{self.settings.prefix}* on {self.settings.url}")
         elif self.settings.enabled:
             print("⚠️  SAS_SYNC_ENABLED is set but SAS_VIYA_URL and the client ID/secret (or SAS_ACCESS_TOKEN) are missing")
 

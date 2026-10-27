@@ -1,7 +1,8 @@
 """A SAS baseline model next to the AI: gradient boosting on the structured triage fields, in CAS.
 
     python -m evals.benchmark.to_sas push       # first: EIR_BENCH_CALLS must be in the caslib
-    python -m evals.benchmark.sas_model         # writes EIR_BENCH_FEATURES and EIR_BENCH_MODEL_COMPARISON
+    python -m evals.benchmark.sas_model         # writes EIR_BENCH_MODEL_COMPARISON (and EIR_BENCH_FEATURES
+                                                # if missing; --rebuild-features draws it again)
 
 The question it answers: could a model on the numbers alone (age, sex, arrival, mental state and
 the six vitals) find the urgent patients (expert KTAS 1-2) as well as the AI reading the report?
@@ -92,23 +93,45 @@ def compare(scored: list, probability: str) -> list:
     return rows
 
 
-async def analyse(client) -> list:
+async def _build_features(client, session, caslib: str, features: str) -> None:
+    await client.action(session, "fedSql.execDirect", {"query": FEATURES_QUERY.format(caslib=caslib)})
+    await client.action(session, "sampling.stratified", {
+        "table": {"caslib": caslib, "name": PREFIX + "FEATURES_SOURCE", "groupBy": ["REFERENCE_URGENT"]},
+        "samppct": HOLDOUT_PERCENT, "seed": SEED, "partInd": True,
+        "output": {"casOut": {"caslib": caslib, "name": features + "_STAGE", "replace": True},
+                   "copyVars": "ALL"}})
+    await client.action(session, "table.dropTable", {"caslib": caslib, "name": features, "quiet": True})
+    await client.action(session, "table.promote", {"caslib": caslib, "name": features + "_STAGE",
+                                                   "target": features, "targetLib": caslib, "drop": True})
+    await client.action(session, "table.save", {"table": {"caslib": caslib, "name": features},
+                                                "caslib": caslib, "name": f"{features}.sashdat", "replace": True})
+
+
+async def _features_ready(client, session, caslib: str, features: str) -> bool:
+    """The shared table, loaded back from its saved copy after a CAS restart if needed."""
+    found = await client.action(session, "table.tableExists", {"caslib": caslib, "name": features})
+    if found["results"]["exists"]:
+        return True
+    try:
+        await client.action(session, "table.loadTable", {"caslib": caslib, "path": f"{features}.sashdat",
+                                                         "casOut": {"caslib": caslib, "name": features, "promote": True}})
+        return True
+    except sas_sync.SasError:
+        return False
+
+
+async def analyse(client, rebuild: bool = False) -> list:
+    """
+    Keeps an existing EIR_BENCH_FEATURES unless rebuild: Model Studio projects are trained on its
+    _PartInd_, and CAS row order can differ between runs, so rebuilding may draw a different holdout.
+    """
     features, caslib = PREFIX + "FEATURES", client.settings.caslib
     session = await client.open_session()
     try:
         for action_set in ("fedSql", "sampling", "decisionTree"):
             await client.action(session, "builtins.loadActionSet", {"actionSet": action_set})
-        await client.action(session, "fedSql.execDirect", {"query": FEATURES_QUERY.format(caslib=caslib)})
-        await client.action(session, "sampling.stratified", {
-            "table": {"caslib": caslib, "name": PREFIX + "FEATURES_SOURCE", "groupBy": ["REFERENCE_URGENT"]},
-            "samppct": HOLDOUT_PERCENT, "seed": SEED, "partInd": True,
-            "output": {"casOut": {"caslib": caslib, "name": features + "_STAGE", "replace": True},
-                       "copyVars": "ALL"}})
-        await client.action(session, "table.dropTable", {"caslib": caslib, "name": features, "quiet": True})
-        await client.action(session, "table.promote", {"caslib": caslib, "name": features + "_STAGE",
-                                                       "target": features, "targetLib": caslib, "drop": True})
-        await client.action(session, "table.save", {"table": {"caslib": caslib, "name": features},
-                                                    "caslib": caslib, "name": f"{features}.sashdat", "replace": True})
+        if rebuild or not await _features_ready(client, session, caslib, features):
+            await _build_features(client, session, caslib, features)
         await client.action(session, "decisionTree.gbtreeTrain", {
             "table": {"caslib": caslib, "name": features, "where": "_PartInd_ = 0"},
             "target": "REFERENCE_URGENT", "inputs": list(INPUTS), "nominals": ["REFERENCE_URGENT", *NOMINALS],
@@ -139,7 +162,7 @@ def main(argv=None) -> int:
     async def run():
         client = sas_sync.CasClient(settings)
         try:
-            rows = await analyse(client)
+            rows = await analyse(client, rebuild="--rebuild-features" in (argv or sys.argv[1:]))
             await client.replace_tables({"MODEL_COMPARISON": sas_sync.to_csv("MODEL_COMPARISON", rows, COLUMNS)},
                                         COLUMNS)
             return rows
@@ -150,7 +173,8 @@ def main(argv=None) -> int:
     except sas_sync.SasError as error:
         print(f"SAS: {error}")
         return 1
-    print(f"{settings.caslib}.{PREFIX}FEATURES: KTAS visits, {HOLDOUT_PERCENT}% holdout (_PartInd_ = 1), saved")
+    print(f"{settings.caslib}.{PREFIX}FEATURES: KTAS visits, {HOLDOUT_PERCENT}% holdout (_PartInd_ = 1)"
+          f"{', drawn again and saved' if '--rebuild-features' in sys.argv[1:] else ', kept if it existed'}")
     for r in rows:
         cutoff = f" at {r['CUTOFF']:.3f}" if r["CUTOFF"] is not None else ""
         print(f"  {r['MODEL']}{cutoff}: caught {r['URGENT_CAUGHT']}/{r['HOLDOUT_URGENT']}, held {r['URGENT_HELD']}, "

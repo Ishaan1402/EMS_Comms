@@ -123,6 +123,15 @@ class BenchmarkSasTest(unittest.TestCase):
         for prop in sas_register.properties(metrics, self.tables):
             self.assertRegex(prop["name"], r"^[A-Za-z0-9 _.-]+$")  # what Model Manager accepts
 
+    def test_outcomes_count_each_rater_by_what_happened_to_the_patient(self):
+        rows = {(r["SCOPE"], r["OUTCOME_GROUP"], r["RATER"], r["PLACED"]): r for r in self.tables["OUTCOMES"]}
+        critical = ("KTAS all visits", "ICU, death or surgery from ED")
+        self.assertEqual(rows[critical + ("Eir AI", "Given 1-2")]["VISITS"], 22)
+        self.assertEqual(rows[critical + ("Eir AI", to_sas.NO_LEVEL)]["VISITS"], 13)
+        self.assertEqual(rows[critical + ("KTAS experts", "Given 1-2")]["GROUP_VISITS"], 39)
+        self.assertEqual(rows[critical + ("Triage nurses", "Given 3-5")]["VISITS"], 19)
+        self.assertNotIn(critical + ("Triage nurses", to_sas.NO_LEVEL), rows)
+
 
 if __name__ == "__main__":
     unittest.main()

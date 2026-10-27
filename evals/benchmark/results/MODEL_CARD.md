@@ -34,25 +34,39 @@
 
 ## Baseline: a SAS model on the numbers alone
 SAS gradient boosting (100 trees, CAS `decisionTree.gbtreeTrain`) on age, sex, arrival, mental state and six vitals,
-trained on 70% of the KTAS visits and compared on the same 30% holdout (`Public.EIR_BENCH_FEATURES`, `_PartInd_ = 1`).
+trained on 70% of the KTAS visits and compared on the same 30% holdout; the matched cutoff is tuned on that holdout, which favours the model (`Public.EIR_BENCH_FEATURES`, `_PartInd_ = 1`).
 
 | Who | Reads | Urgent caught | Held for review | Urgent missed | Non-urgent flagged |
 | --- | --- | --- | --- | --- | --- |
 | Eir AI | the crew's report | 63 | 9 | 2 | 77 of 306 |
 | SAS gradient boosting, default cutoff | age, sex, arrival, mental state, 6 vitals | 32 | 0 | 42 | 13 of 306 |
-| SAS gradient boosting, cutoff matched to Eir's false flags | age, sex, arrival, mental state, 6 vitals | 53 | 0 | 21 | 77 of 306 |
+| SAS gradient boosting, cutoff tuned on the holdout to Eir's false flags | age, sex, arrival, mental state, 6 vitals | 53 | 0 | 21 | 77 of 306 |
 | Triage nurses | the patient, at triage | 62 | 0 | 12 | 11 of 306 |
 | Simple vitals rule | mental state and 5 vitals | 33 | 0 | 41 | 71 of 306 |
 
+## Patient outcomes (KTAS, what happened after triage)
+A triage level is a judgement, even the experts'. The KTAS source also records each visit's disposition:
+
+| Patients who | Visits | Eir: 1-2 / no level / 3-5 | Triage nurses: 1-2 / 3-5 | KTAS experts: 1-2 / 3-5 |
+| --- | --- | --- | --- | --- |
+| ICU, death or surgery from ED | 39 | 22 / 13 / 4 | 20 / 19 | 20 / 19 |
+| Ward admission | 373 | 195 / 136 / 42 | 118 / 255 | 125 / 248 |
+| Sent home (discharge or AMA) | 823 | 255 / 439 / 129 | 78 / 745 | 83 / 740 |
+
 ## Fairness (SAS `fairAITools.assessBias` and Fisher's exact test)
 Urgent visits put at 3-5, by group:
-- KTAS by sex: Female 5/100, Male 2/146
-- KTAS by age band: 65 and over 1/124, Under 65 6/122
-- MIMIC by sex: Female 5/59, Male 7/56
-- MIMIC by age band: 65 and over 8/50, Under 65 4/65
+- KTAS by sex, put at 3-5: Female 5/100, Male 2/146 (Fisher p 0.124)
+- KTAS by sex, no level: Female 11/100, Male 20/146 (Fisher p 0.564)
+- KTAS by age band, put at 3-5: 65 and over 1/124, Under 65 6/122 (Fisher p 0.065)
+- KTAS by age band, no level: 65 and over 8/124, Under 65 23/122 (Fisher p 0.004, significant after 8 tests)
+- MIMIC by sex, put at 3-5: Female 5/59, Male 7/56 (Fisher p 0.551)
+- MIMIC by sex, no level: Female 16/59, Male 13/56 (Fisher p 0.672)
+- MIMIC by age band, put at 3-5: 65 and over 8/50, Under 65 4/65 (Fisher p 0.124)
+- MIMIC by age band, no level: 65 and over 16/50, Under 65 13/65 (Fisher p 0.194)
 
-No difference is significant (two-sided Fisher p 0.06 to 0.55) and the direction flips between the datasets.
-The counts are small, so this cannot rule out a gap; it is the check to repeat on live data.
+KTAS urgent patients got no level 65 and over 8/124 vs Under 65 23/122 (Fisher p 0.004); no other gap was significant in 8 tests. Eight two-sided Fisher tests (2 datasets x 2 variables
+x 2 outcomes), significant below 0.05 / 8. A visit with no level goes to Needs review, so a clinician sees it. The counts
+are small; these are the checks to repeat on live data.
 
 ## Limits
 - No result is clinical validation. KTAS is not ESI; use it for "urgent flagged urgent", not ESI accuracy.
