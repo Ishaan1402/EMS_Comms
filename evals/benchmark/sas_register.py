@@ -65,13 +65,15 @@ def fairness_summary(calls: list) -> str:
     """One sentence for the card's limitations and the Fairness property, from the tests themselves."""
     found = fairness_tests(calls)
     significant = [t for t in found if t["SIGNIFICANT"]]
+    families = sorted({(t["SCOPE"].split(",")[0], t["TESTS_RUN"]) for t in found}, key=lambda f: -f[1])
+    scope = " and ".join(f"{n} tests on {' and '.join(sorted({x for x, m in families if m == n}))}"
+                         for n in sorted({n for _, n in families})) + ", each family with its own Bonferroni bar"
     if not significant:
-        return f"Fairness: no significant gap by group in {len(found)} Fisher tests (small counts)."
+        return f"Fairness: no significant gap by group ({scope}; small counts)."
     return "Fairness: " + "; ".join(
         f"{t['SCOPE'].split(',')[0]} urgent patients got {'no level' if t['OUTCOME'] != 'Put at 3-5' else 'put at 3-5'} "
         f"{t['GROUP_A']} {t['A_EVENTS']}/{t['A_URGENT']} vs {t['GROUP_B']} {t['B_EVENTS']}/{t['B_URGENT']} "
-        f"(Fisher p {t['FISHER_P']:.3f})" for t in significant) + \
-        f"; no other gap was significant in {len(found)} tests."
+        f"(Fisher p {t['FISHER_P']:.3f})" for t in significant) + f"; no other gap was significant ({scope})."
 
 
 def outcome_table(rows: list) -> str:
@@ -90,6 +92,25 @@ def outcome_table(rows: list) -> str:
                          f"| {placed(nurse[scope], ('Given 1-2', 'Given 3-5'))} "
                          f"| {placed('KTAS experts', ('Given 1-2', 'Given 3-5'))} |")
     return "\n".join(lines)
+
+
+def nhamcs_line(metrics: dict, rows: list) -> str:
+    """The NHAMCS (US) result in one bullet, from its outcome rows and metrics; empty before its run."""
+    if "nhamcs/all" not in metrics["esi"]:
+        return ""
+    count = {(r["OUTCOME_GROUP"], r["RATER"], r["PLACED"]): r["VISITS"] for r in rows
+             if r["SCOPE"] == "NHAMCS ambulance arrivals"}
+    critical, home = "ICU, death or surgery from ED", "Sent home (discharge or AMA)"
+    ai = metrics["esi"]["nhamcs/all"]["ai_vs_reference"]
+    sent_home = sum(count[(home, "Eir AI", o)] for o in ("Given 1-2", NO_LEVEL, "Given 3-5"))
+    return (f"- NHAMCS 2022 (US): of {sum(count[(critical, 'Eir AI', o)] for o in ('Given 1-2', NO_LEVEL, 'Given 3-5'))} "
+            f"ambulance patients who went to ICU, the OR or the cath lab, or died, Eir put "
+            f"{count[(critical, 'Eir AI', 'Given 1-2')]} at 1-2, held {count[(critical, 'Eir AI', NO_LEVEL)]} for review "
+            f"and put {count[(critical, 'Eir AI', 'Given 3-5')]} at 3-5; the ED's own triage put "
+            f"{count[(critical, 'ED triage nurse', 'Given 1-2')]} at 1-2 and {count[(critical, 'ED triage nurse', 'Given 3-5')]} "
+            f"at 3-5. Of {sent_home:,} sent home, Eir flagged {share(count[(home, 'Eir AI', 'Given 1-2')], sent_home)} at 1-2 "
+            f"(ED: {count[(home, 'ED triage nurse', 'Given 1-2')]}). Exact agreement with the ED's level: "
+            f"{share(ai['exact']['k'], ai['exact']['n'])}, weighted kappa {ai['kappa_quadratic']['value']:.2f}.")
 
 
 def model_card(metrics: dict, tables: dict, comparison: list) -> str:
@@ -138,6 +159,7 @@ def model_card(metrics: dict, tables: dict, comparison: list) -> str:
   {share(ems['within_one']['k'], ems['within_one']['n'])}, weighted kappa {kappa['value']:.2f}
   ({kappa['low']:.2f}-{kappa['high']:.2f}). It leans urgent: over-triage {share(ems['over_triage']['k'], ems['over_triage']['n'])}.
 - On MIMIC its exact agreement is no better than always guessing ESI 2.
+{nhamcs_line(metrics, tables['OUTCOMES'])}
 - Same input three times: identical ESI for {share(consistency['k'], consistency['n'])} of KTAS ambulance cases.
 - Handoff number check caught {share(numbers['k'], numbers['n'])} of injected wrong numbers the reports did not contain.
 - Median {ops['latency_ms_median'] / 1000:.1f} s per assessment; about ${ops['list_price_usd_per_call']:.4f} per call at list price.
@@ -283,8 +305,10 @@ async def _update(client, url: str, model_id: str, props: list, files: dict, lim
     model = response.json()
     ours = {p["name"] for p in props}
     model["properties"] = [p for p in model.get("properties") or [] if p["name"] not in ours] + props
-    if limitation and limitation not in (model.get("limitations") or ""):
-        model["limitations"] = " ".join(filter(None, [model.get("limitations"), limitation]))
+    if limitation:
+        # Ours is the sentence starting "Fairness: " at the end; text people typed before it stays.
+        typed = (model.get("limitations") or "").split(" Fairness: ")[0].split("Fairness: ")[0].strip()
+        model["limitations"] = " ".join(filter(None, [typed, limitation]))
     await client._call("PUT", f"{url}/models/{model_id}", "update model",
                        headers={"Content-Type": MODEL_TYPE, "If-Match": response.headers["etag"]},
                        content=json.dumps(model))

@@ -106,6 +106,55 @@ measures reading stated numbers, not hearing them over a noisy radio.
 Assessment: median 3.1 s, p90 5.0 s, about 1,316 tokens in and 182 out, $0.0002 per call at list
 price. Extraction: median 2.5 s, p90 3.2 s, $0.0002 per call.
 
+## Added 2026-10-27: NHAMCS 2022, US ambulance arrivals (protocol addendum v1.1)
+
+Plan committed in `e1f21a1` before any call on this set; run on `4c92b43` (clean), 1,683 assessment
+calls, **0 errors**, $0.38, median 2.6 s. Every number is in `metrics.json` (`esi.nhamcs/all`,
+`added_sets.nhamcs`) and `outcomes.json`; the v1 figures above are unchanged. The set: CDC/NCHS
+NHAMCS 2022 ED file, adult ambulance arrivals from the scene with a triage level, 1,683 visits from
+129 hospitals. Reports are built from coded reasons for visit, vitals and pain only. Counts are of
+the sample, not national estimates (no survey weights).
+
+**What happened to the patient** (the outcome check; outcomes kept apart from the report):
+
+| Patients who | Visits | Eir: 1-2 / no level / 3-5 | ED triage nurse: 1-2 / 3-5 | Simple vitals rule: 1-2 / 3-5 |
+|---|---|---|---|---|
+| went to ICU, the OR or the cath lab, or died | 155 | 110 / 38 / 7 | 105 / 50 | 85 / 70 |
+| were admitted to a ward | 351 | 224 / 95 / 32 | 155 / 196 | 142 / 209 |
+| were sent home (incl. AMA) | 1,073 | 597 / 393 / 83 | 237 / 836 | 280 / 793 |
+
+Read plainly: of the critical-outcome patients, Eir put slightly more at 1-2 than the ED's own triage
+did (110 vs 105) and put far fewer at 3-5 (7 vs 50), but held 38 for review; counted as "not flagged
+urgent", that is 45 for Eir and 50 for the ED. It over-flags heavily: 56% of patients sent home got
+1-2 (ED: 22%).
+
+**Against the ED's triage level** (one nurse at the time, each hospital's scale, usually ESI):
+
+| Metric | Result |
+|---|---|
+| Triaged 1-2: Eir at 1-2 / no level / 3-5 | 366 / 139 / 27 of 532 (69% / 26% / 5%) |
+| Triaged 1, given a level: put at 1-2 | 51 of 53 |
+| Gave a level | 1,115 of 1,683 (66%) |
+| Exact / within one level | 396 (36%) / 1,014 (91%) of 1,115 |
+| Always guessing level 3, same visits | 606 of 1,115 (54%): better than Eir's exact match |
+| AI less / more urgent than the nurse | 76 (7%) / 643 (58%) of 1,115 |
+| Weighted kappa (quadratic) | 0.10 (0.06-0.14) |
+
+Exact agreement with one nurse's level is weak, as on MIMIC; the outcome table is the stronger evidence.
+
+**Fairness** (urgent = triaged 1-2; 10 Fisher tests, Bonferroni bar p < 0.005): no gap is
+significant. Put at 3-5: by sex p 0.84, by age band p 0.84, each race/ethnicity group against
+non-Hispanic White p 0.50 to 1.0. No level: men 89/295 vs women 50/237 (p 0.022) and under 65
+91/309 vs 65 and over 48/223 (p 0.046), both above the bar. The under-65 direction matches KTAS's
+significant gap (23/122 vs 8/124).
+
+**Number check** on the unmodified outputs: 3 of 1,683 flagged, all the known "over age 12" false
+alarm; 21,914 of 21,914 injected wrong numbers not in the report were caught.
+
+Limits specific to this set: reports from coded reasons are terser than KTAS's free-text complaints
+(and there is no mental status), which likely raises "Cannot assess" (34% here); 2022 includes
+COVID-19-era visits; the triage scale may differ by hospital.
+
 ## Checking it in SAS
 
 `python -m evals.benchmark.to_sas push` loads these results into CAS (`Public.EIR_BENCH_CALLS`), and
