@@ -53,7 +53,7 @@ class BenchmarkSasTest(unittest.TestCase):
 
     def test_calls_table_has_every_call_and_no_free_text(self):
         calls = self.tables["CALLS"]
-        self.assertEqual(len(calls), 3201)
+        self.assertEqual(sum(r["DATASET"] != "nhamcs" for r in calls), 3201)  # the v1 run
         header = next(csv.reader(io.StringIO(sas_sync.to_csv("CALLS", calls, to_sas.COLUMNS).decode())))
         self.assertEqual(header, [column for column, _, _ in to_sas.COLUMNS["CALLS"]])
         self.assertFalse({"ESI_REASON", "SUMMARY", "REPORT"} & set(header))
@@ -103,9 +103,9 @@ class BenchmarkSasTest(unittest.TestCase):
         ai = rows["Eir AI"]
         self.assertEqual((ai["URGENT_CAUGHT"], ai["URGENT_HELD"], ai["URGENT_MISSED"], ai["NOT_URGENT_FLAGGED"]),
                          (1, 1, 1, 1))
-        default = rows["SAS gradient boosting, default cutoff"]
+        default = rows["Gradient boosting (default cutoff)"]
         self.assertEqual((default["URGENT_CAUGHT"], default["NOT_URGENT_FLAGGED"]), (1, 1))
-        matched = rows["SAS gradient boosting, cutoff tuned on the holdout to Eir's false flags"]
+        matched = rows["Gradient boosting (tuned on holdout)"]
         self.assertEqual((matched["CUTOFF"], matched["URGENT_CAUGHT"], matched["NOT_URGENT_FLAGGED"]), (0.3, 2, 1))
         self.assertEqual(rows["Triage nurses"]["URGENT_CAUGHT"], 1)
         self.assertEqual(rows["Simple vitals rule"]["URGENT_CAUGHT"], 1)

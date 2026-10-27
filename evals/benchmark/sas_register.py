@@ -75,16 +75,20 @@ def fairness_summary(calls: list) -> str:
 
 
 def outcome_table(rows: list) -> str:
-    """Card rows for all KTAS visits: each outcome group, with the AI, nurses and experts side by side."""
-    counts = {(r["OUTCOME_GROUP"], r["RATER"], r["PLACED"]): r for r in rows if r["SCOPE"] == "KTAS all visits"}
+    """Card rows per set and outcome group: the AI, the triage nurse and (KTAS) the experts side by side."""
+    counts = {(r["SCOPE"], r["OUTCOME_GROUP"], r["RATER"], r["PLACED"]): r for r in rows}
+    nurse = {"KTAS all visits": "Triage nurses", "NHAMCS ambulance arrivals": "ED triage nurse"}
     lines = []
-    for group in dict.fromkeys(r["OUTCOME_GROUP"] for r in rows):
-        def placed(rater, outcomes):
-            return " / ".join(str(counts[(group, rater, o)]["VISITS"]) for o in outcomes)
-        total = counts[(group, "Eir AI", "Given 1-2")]["GROUP_VISITS"]
-        lines.append(f"| {group} | {total} | {placed('Eir AI', ('Given 1-2', NO_LEVEL, 'Given 3-5'))} "
-                     f"| {placed('Triage nurses', ('Given 1-2', 'Given 3-5'))} "
-                     f"| {placed('KTAS experts', ('Given 1-2', 'Given 3-5'))} |")
+    for scope in ("KTAS all visits", "NHAMCS ambulance arrivals"):
+        for group in dict.fromkeys(r["OUTCOME_GROUP"] for r in rows if r["SCOPE"] == scope):
+            def placed(rater, outcomes):
+                if (scope, group, rater, outcomes[0]) not in counts:
+                    return "n/a"
+                return " / ".join(str(counts[(scope, group, rater, o)]["VISITS"]) for o in outcomes)
+            total = counts[(scope, group, "Eir AI", "Given 1-2")]["GROUP_VISITS"]
+            lines.append(f"| {scope} | {group} | {total} | {placed('Eir AI', ('Given 1-2', NO_LEVEL, 'Given 3-5'))} "
+                         f"| {placed(nurse[scope], ('Given 1-2', 'Given 3-5'))} "
+                         f"| {placed('KTAS experts', ('Given 1-2', 'Given 3-5'))} |")
     return "\n".join(lines)
 
 
@@ -119,6 +123,9 @@ def model_card(metrics: dict, tables: dict, comparison: list) -> str:
 ## Evaluation data (benchmark run {run['started_at'][:10]})
 - KTAS (Moon et al. 2019, PLoS ONE, CC BY 4.0): 1,267 real ED visits, expert KTAS as the reference.
 - MIMIC-IV-ED Demo v2.2 (PhysioNet, ODbL): 207 stays from 56 patients, triage nurse ESI as the reference.
+- NHAMCS 2022 (CDC/NCHS, public domain): 1,683 adult ambulance arrivals from 129 US hospitals, the ED's own
+  triage level as the reference (protocol addendum v1.1, written before its model calls). Counts are of the
+  sample, not national estimates.
 - 10 fictional cases labelled by one clinician (Purav).
 - Reports were written from triage fields: shorter and cleaner than real radio, no speech-to-text step.
 
@@ -143,11 +150,11 @@ trained on 70% of the KTAS visits and compared on the same 30% holdout; the matc
 | --- | --- | --- | --- | --- | --- |
 {baseline}
 
-## Patient outcomes (KTAS, what happened after triage)
-A triage level is a judgement, even the experts'. The KTAS source also records each visit's disposition:
+## Patient outcomes (what happened after triage)
+A triage level is a judgement, even the experts'. KTAS and NHAMCS also record each visit's disposition:
 
-| Patients who | Visits | Eir: 1-2 / no level / 3-5 | Triage nurses: 1-2 / 3-5 | KTAS experts: 1-2 / 3-5 |
-| --- | --- | --- | --- | --- |
+| Set | Patients who | Visits | Eir: 1-2 / no level / 3-5 | Triage nurse: 1-2 / 3-5 | KTAS experts: 1-2 / 3-5 |
+| --- | --- | --- | --- | --- | --- |
 {outcome_table(tables['OUTCOMES'])}
 
 ## Fairness (SAS `fairAITools.assessBias` and Fisher's exact test)

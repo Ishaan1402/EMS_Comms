@@ -80,12 +80,12 @@ def compare(scored: list, probability: str) -> list:
         return _row(label, "age, sex, arrival, mental state, 6 vitals", urgent, not_urgent,
                     sum(r[probability] >= cutoff for r in urgent), 0,
                     sum(r[probability] >= cutoff for r in not_urgent), cutoff)
-    rows.append(model_row(0.5, "SAS gradient boosting, default cutoff"))
+    rows.append(model_row(0.5, "Gradient boosting (default cutoff)"))
     # The lowest cutoff (most urgent visits caught) that flags no more non-urgent visits than the AI.
     candidates = sorted({round(r[probability], 6) for r in scored})
     matched = min((c for c in candidates if sum(r[probability] >= c for r in not_urgent) <= ai_flagged),
                   default=1.0)
-    rows.append(model_row(matched, "SAS gradient boosting, cutoff tuned on the holdout to Eir's false flags"))
+    rows.append(model_row(matched, "Gradient boosting (tuned on holdout)"))
     rows.append(_row("Triage nurses", "the patient, at triage", urgent, not_urgent,
                      sum(r["NURSE_KTAS"] <= 2 for r in urgent), 0, sum(r["NURSE_KTAS"] <= 2 for r in not_urgent)))
     rows.append(_row("Simple vitals rule", "mental state and 5 vitals", urgent, not_urgent,
