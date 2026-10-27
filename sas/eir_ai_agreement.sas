@@ -113,12 +113,13 @@ title "fairAITools.assessBias: KTAS and MIMIC, urgent vs not";
 proc cas;
   loadactionset "fairAITools";
   do grp over {"SEX", "AGE_BAND"};
+    program = "P_URGENT = AI_URGENT; P_NOT_URGENT = 1 - AI_URGENT; length URGENT $ 3; " ||
+              "URGENT = ifc(REFERENCE_URGENT = 1, 'Yes', 'No');";
     fairAITools.assessBias /
       table={caslib="Public", name="EIR_BENCH_CALLS",
              where="PRIMARY = 1 and AI_GAVE_LEVEL = 1 and DATASET in ('ktas', 'mimic')",
              computedVars={{name="P_URGENT"}, {name="P_NOT_URGENT"}, {name="URGENT"}},
-             computedVarsProgram="P_URGENT = AI_URGENT; P_NOT_URGENT = 1 - AI_URGENT;
-                                  length URGENT $ 3; URGENT = ifc(REFERENCE_URGENT = 1, 'Yes', 'No');"},
+             computedVarsProgram=program},
       modelTableType="NONE", response={name="URGENT"}, event="Yes", responseLevels={"Yes", "No"},
       predictedVariables={{name="P_URGENT"}, {name="P_NOT_URGENT"}},
       sensitiveVariable={name=grp};
