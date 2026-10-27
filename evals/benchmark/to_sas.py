@@ -67,6 +67,8 @@ COLUMNS = {
         ("AGE", "num", "Age (years; KTAS only)"),
         ("AGE_BAND", "char", "Age band"),
         ("SEX", "char", "Sex"),
+        ("RACE_ETHNICITY", "char", "Race/ethnicity (NHAMCS only, NCHS imputed)"),
+        ("OUTCOME", "char", "What happened to the patient (NHAMCS only; KTAS in EIR_BENCH_OUTCOMES)"),
         ("MENTAL_STATE", "char", "Mental state at triage (KTAS set only)"),
         ("HR", "num", "Heart rate stated in the report"),
         ("SBP", "num", "Systolic BP stated in the report"),
@@ -160,7 +162,8 @@ def calls_rows(cases: dict, records: list, run_infos: list) -> list:
             "SIMPLE_RULE": _number(pair["simple_rule"]), "NUMBER_FLAG": pair["number_flag"],
             "ATTEMPTS": pair["attempts"],
             "AGE": exact_age, "AGE_BAND": None if age is None else "65 and over" if age >= 65 else "Under 65",
-            "SEX": SEX.get(meta.get("sex")), "MENTAL_STATE": KTAS_MENTAL.get(meta.get("mental")),
+            "SEX": SEX.get(meta.get("sex")), "RACE_ETHNICITY": meta.get("race_ethnicity"),
+            "OUTCOME": meta.get("outcome"), "MENTAL_STATE": KTAS_MENTAL.get(meta.get("mental")),
             "HR": vitals.get("hr"), "SBP": vitals.get("sbp"), "DBP": vitals.get("dbp"), "RR": vitals.get("rr"),
             "SPO2": vitals.get("spo2"), "TEMP_C": vitals.get("temp_c"),
             "LATENCY_MS": usage.get("latency_ms"), "INPUT_TOKENS": usage.get("input_tokens"),
@@ -175,6 +178,7 @@ HEADLINE_SETS = (
     ("KTAS ambulance arrivals", lambda r: r["DATASET"] == "ktas" and r["EMS_ARRIVAL"]),
     ("KTAS all visits", lambda r: r["DATASET"] == "ktas"),
     ("MIMIC ambulance arrivals", lambda r: r["DATASET"] == "mimic" and r["EMS_ARRIVAL"]),
+    ("NHAMCS ambulance arrivals", lambda r: r["DATASET"] == "nhamcs"),
 )
 
 
@@ -190,6 +194,8 @@ def headline_rows(calls: list) -> list:
     rows = []
     for set_name, chosen in HEADLINE_SETS:
         urgent = [r for r in calls if r["PRIMARY"] and r["REFERENCE_URGENT"] and chosen(r)]
+        if not urgent:
+            continue  # a set with no recorded calls yet
         for rater, outcome_of in raters:
             outcomes = [outcome_of(r) for r in urgent]
             if any(o is None for o in outcomes):

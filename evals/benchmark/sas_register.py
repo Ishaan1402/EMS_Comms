@@ -31,37 +31,47 @@ def share(k, n):
 
 
 def fairness_tests(calls: list) -> list:
-    """Per dataset and variable, urgent visits put at 3-5 and given no level, with Fisher's exact p
-    (the same 8 tests sas_fairness.py saves as EIR_BENCH_BIAS_TESTS)."""
-    tests = []
-    for dataset in ("ktas", "mimic"):
-        urgent = [r for r in calls if r["DATASET"] == dataset and r["PRIMARY"] and r["REFERENCE_URGENT"]]
-        for column in ("SEX", "AGE_BAND"):
-            (a, n1), (b, n2) = sorted(Counter(r[column] for r in urgent).items())
-            for outcome, label in (("Given 3-5", "put at 3-5"), (NO_LEVEL, "no level")):
-                events = Counter(r[column] for r in urgent if r["URGENT_OUTCOME"] == outcome)
-                tests.append({"dataset": dataset.upper(), "by": column.lower().replace("_", " "), "label": label,
-                              "a": a, "a_k": events[a], "a_n": n1, "b": b, "b_k": events[b], "b_n": n2,
-                              "p": fisher_exact(events[a], n1, events[b], n2)})
-    for test in tests:
-        test["significant"] = test["p"] < 0.05 / len(tests)
-    return tests
+    """The same Fisher tests sas_fairness.py saves as EIR_BENCH_BIAS_TESTS, from the same counts."""
+    from .sas_fairness import SENSITIVE, TEST_FAMILIES, tests
+    datasets = {"KTAS, all visits": "ktas", "MIMIC, all stays": "mimic", "NHAMCS, all visits": "nhamcs"}
+    groups = []
+    for scope in TEST_FAMILIES:
+        urgent = [r for r in calls if r["DATASET"] == datasets[scope] and r["PRIMARY"] and r["REFERENCE_URGENT"]]
+        for column in SENSITIVE:
+            for value in sorted({r[column] for r in urgent if r[column]}):
+                rows = [r for r in urgent if r[column] == value]
+                groups.append({"SCOPE": scope, "SENSITIVE_VARIABLE": column, "GROUP_VALUE": value,
+                               "URGENT_VISITS": len(rows),
+                               "GIVEN_3_5": sum(r["URGENT_OUTCOME"] == "Given 3-5" for r in rows),
+                               "NO_LEVEL": sum(r["URGENT_OUTCOME"] == NO_LEVEL for r in rows)})
+    return tests(groups)
+
+
+def _label(t: dict) -> str:
+    return (f"{t['SCOPE'].split(',')[0]} by {t['SENSITIVE_VARIABLE'].lower().replace('_', ' ')}, "
+            f"{'put at 3-5' if t['OUTCOME'] == 'Put at 3-5' else 'no level'}")
 
 
 def fairness_lines(calls: list) -> list:
-    return [f"{t['dataset']} by {t['by']}, {t['label']}: {t['a']} {t['a_k']}/{t['a_n']}, {t['b']} {t['b_k']}/{t['b_n']} "
-            f"(Fisher p {t['p']:.3f}{', significant after 8 tests' if t['significant'] else ''})"
-            for t in fairness_tests(calls)]
+    lines = []
+    for t in fairness_tests(calls):
+        flag = f", significant after {t['TESTS_RUN']} tests" if t["SIGNIFICANT"] else ""
+        lines.append(f"{_label(t)}: {t['GROUP_A']} {t['A_EVENTS']}/{t['A_URGENT']}, "
+                     f"{t['GROUP_B']} {t['B_EVENTS']}/{t['B_URGENT']} (Fisher p {t['FISHER_P']:.3f}{flag})")
+    return lines
 
 
 def fairness_summary(calls: list) -> str:
     """One sentence for the card's limitations and the Fairness property, from the tests themselves."""
-    found = [t for t in fairness_tests(calls) if t["significant"]]
-    if not found:
-        return "Fairness: no significant gap by sex or age band in 8 Fisher tests (small counts)."
+    found = fairness_tests(calls)
+    significant = [t for t in found if t["SIGNIFICANT"]]
+    if not significant:
+        return f"Fairness: no significant gap by group in {len(found)} Fisher tests (small counts)."
     return "Fairness: " + "; ".join(
-        f"{t['dataset']} urgent patients got {t['label']} {t['a']} {t['a_k']}/{t['a_n']} vs {t['b']} {t['b_k']}/{t['b_n']} "
-        f"(Fisher p {t['p']:.3f})" for t in found) + "; no other gap was significant in 8 tests."
+        f"{t['SCOPE'].split(',')[0]} urgent patients got {'no level' if t['OUTCOME'] != 'Put at 3-5' else 'put at 3-5'} "
+        f"{t['GROUP_A']} {t['A_EVENTS']}/{t['A_URGENT']} vs {t['GROUP_B']} {t['B_EVENTS']}/{t['B_URGENT']} "
+        f"(Fisher p {t['FISHER_P']:.3f})" for t in significant) + \
+        f"; no other gap was significant in {len(found)} tests."
 
 
 def outcome_table(rows: list) -> str:

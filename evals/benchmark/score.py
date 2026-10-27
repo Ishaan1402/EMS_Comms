@@ -19,7 +19,7 @@ from .stats import agreement, kappa, percentile, wilson
 NUMBER_FLAG = "not found in the crew's reports"
 # (dataset, subset) analysed; repeat 1 of each case is the primary result (PROTOCOL.md).
 ANALYSES = [("purav", "all"), ("mimic", "all"), ("mimic", "ems"), ("ktas", "all"), ("ktas", "ems"),
-            ("ktas_spoken", "all")]
+            ("ktas_spoken", "all"), ("nhamcs", "all")]
 LABELS = {
     ("purav", "all"): "Purav's 10 synthetic cases (one clinician's ESI)",
     ("mimic", "all"): "MIMIC-IV-ED Demo, all stays with an ESI (triage nurse's ESI)",
@@ -27,6 +27,7 @@ LABELS = {
     ("ktas", "all"): "KTAS dataset, all patients (expert KTAS)",
     ("ktas", "ems"): "KTAS dataset, ambulance arrivals (expert KTAS)",
     ("ktas_spoken", "all"): "KTAS ambulance arrivals, numbers spoken as words (expert KTAS)",
+    ("nhamcs", "all"): "NHAMCS 2022, adult ambulance arrivals from the scene (ED triage level)",
 }
 
 

@@ -31,14 +31,30 @@ GROUPS = {
     "Ward admission": {"2"},
     "Sent home (discharge or AMA)": {"1", "4"},
 }
-SCOPES = {"KTAS all visits": lambda r: True, "KTAS ambulance arrivals": lambda r: bool(r["EMS_ARRIVAL"])}
-NO_LEVEL = "No level (Needs review)"
-RATERS = {
-    "Eir AI": lambda r: NO_LEVEL if not r["AI_GAVE_LEVEL"] else "Given 1-2" if r["AI_URGENT"] else "Given 3-5",
-    "Triage nurses": lambda r: "Given 1-2" if r["NURSE_KTAS"] <= 2 else "Given 3-5",
-    "KTAS experts": lambda r: "Given 1-2" if r["REFERENCE_LEVEL"] <= 2 else "Given 3-5",
-    "Simple vitals rule": lambda r: "Given 1-2" if r["SIMPLE_RULE"] <= 2 else "Given 3-5",
+# scope -> (rows of CALLS in it, raters). KTAS outcomes come from ktas_dispositions.csv; NHAMCS's
+# from the case itself (CALLS.OUTCOME, written by build_cases from its disposition fields).
+SCOPES = {
+    "KTAS all visits": (lambda r: r["DATASET"] == "ktas", "ktas"),
+    "KTAS ambulance arrivals": (lambda r: r["DATASET"] == "ktas" and bool(r["EMS_ARRIVAL"]), "ktas"),
+    "NHAMCS ambulance arrivals": (lambda r: r["DATASET"] == "nhamcs", "nhamcs"),
 }
+NO_LEVEL = "No level (Needs review)"
+
+
+def _reference(r):
+    return "Given 1-2" if r["REFERENCE_LEVEL"] <= 2 else "Given 3-5"
+
+
+RATERS = {
+    "ktas": {
+        "Eir AI": lambda r: NO_LEVEL if not r["AI_GAVE_LEVEL"] else "Given 1-2" if r["AI_URGENT"] else "Given 3-5",
+        "Triage nurses": lambda r: "Given 1-2" if r["NURSE_KTAS"] <= 2 else "Given 3-5",
+        "KTAS experts": _reference,
+        "Simple vitals rule": lambda r: "Given 1-2" if r["SIMPLE_RULE"] <= 2 else "Given 3-5",
+    },
+}
+RATERS["nhamcs"] = {"Eir AI": RATERS["ktas"]["Eir AI"], "ED triage nurse": _reference,
+                    "Simple vitals rule": RATERS["ktas"]["Simple vitals rule"]}
 
 
 def read_source(data: Path) -> dict:
@@ -60,14 +76,23 @@ def read_dispositions(path: Path = DISPOSITIONS) -> dict:
         return {row["case_id"]: row["disposition"] for row in csv.DictReader(file)}
 
 
+def outcome_group(row: dict, dispositions: dict):
+    if row["DATASET"] == "nhamcs":
+        return row["OUTCOME"] if row["OUTCOME"] in GROUPS else None  # transfers are left out
+    code = dispositions.get(row["CASE_ID"])
+    return next((group for group, codes in GROUPS.items() if code in codes), None)
+
+
 def outcome_rows(calls: list, dispositions: dict) -> list:
-    """Long rows (scope, outcome group, rater, placed at, visits) for the primary KTAS run."""
-    ktas = [r for r in calls if r["DATASET"] == "ktas" and r["PRIMARY"] and r["CASE_ID"] in dispositions]
+    """Long rows (scope, outcome group, rater, placed at, visits) for the primary run."""
     rows = []
-    for scope, chosen in SCOPES.items():
-        for group, codes in GROUPS.items():
-            visits = [r for r in ktas if chosen(r) and dispositions[r["CASE_ID"]] in codes]
-            for rater, placed_by in RATERS.items():
+    for scope, (chosen, raters) in SCOPES.items():
+        visits_in = [r for r in calls if r["PRIMARY"] and chosen(r)]
+        if raters == "ktas" and not dispositions:
+            continue
+        for group in GROUPS:
+            visits = [r for r in visits_in if outcome_group(r, dispositions) == group]
+            for rater, placed_by in RATERS[raters].items():
                 placed = [placed_by(r) for r in visits]
                 for outcome in ("Given 1-2", NO_LEVEL, "Given 3-5"):
                     if outcome == NO_LEVEL and rater != "Eir AI":
@@ -103,7 +128,8 @@ def main(argv=None) -> int:
     rows = build_tables()["OUTCOMES"]
     (RESULTS / "outcomes.json").write_text(json.dumps(summary(rows), indent=1) + "\n", encoding="utf-8")
     for row in rows:
-        if row["SCOPE"] == "KTAS all visits":
+        if row["SCOPE"] != "KTAS ambulance arrivals":
+            print(f"  {row['SCOPE'][:6]:7}", end="")
             print(f"  {row['OUTCOME_GROUP']:30} {row['RATER']:18} {row['PLACED']:24} {row['VISITS']}/{row['GROUP_VISITS']}")
     print(f"{RESULTS / 'outcomes.json'}")
     return 0

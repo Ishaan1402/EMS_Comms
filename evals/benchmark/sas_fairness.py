@@ -12,9 +12,10 @@ Two CAS actions do the work, through the app's SAS client:
   opportunity (the gap in the share of urgent visits flagged urgent) and equalized odds.
 
 EIR_BENCH_BIAS_TESTS compares the two groups of each variable within each dataset, for both ways an
-urgent patient can be let down: put at 3-5, and given no level (held for review). That is 8 tests
-(2 datasets x 2 variables x 2 outcomes), each a two-sided Fisher's exact test (stats.fisher_exact);
-SIGNIFICANT marks p below 0.05 / 8. The datasets use different scales, so they are not pooled.
+urgent patient can be let down: put at 3-5, and given no level (held for review). Each is a two-sided
+Fisher's exact test (stats.fisher_exact). KTAS and MIMIC (protocol v1: 8 tests) and NHAMCS (v1.1:
+sex, age band, and each race/ethnicity group against non-Hispanic White) are separate families, each
+with its own Bonferroni bar. The datasets use different scales, so they are not pooled.
 
 The counts are SAS's; the 95% Wilson intervals (stats.wilson) and the Fisher tests are computed here
 from those counts. Primary results only (repeat 1), as in REPORT.md.
@@ -33,12 +34,15 @@ SCOPES = {
     "KTAS, all visits": "DATASET = 'ktas'",
     "MIMIC, all stays": "DATASET = 'mimic'",
     "KTAS and MIMIC": "DATASET in ('ktas', 'mimic')",
+    "NHAMCS, all visits": "DATASET = 'nhamcs'",
 }
-SENSITIVE = ("SEX", "AGE_BAND")
-# Tests run within one dataset only: KTAS and MIMIC references are different scales.
-TESTED_SCOPES = ("KTAS, all visits", "MIMIC, all stays")
+SENSITIVE = ("SEX", "AGE_BAND", "RACE_ETHNICITY")
+# Race/ethnicity is recorded only in NHAMCS; each group is compared with this one.
+REFERENCE_GROUP = {"RACE_ETHNICITY": "Non-Hispanic White"}
+# Tests run within one dataset only (the references are different scales), in two families with
+# their own Bonferroni bar: protocol v1 (KTAS, MIMIC) and its v1.1 addendum (NHAMCS).
+TEST_FAMILIES = {"KTAS, all visits": "v1", "MIMIC, all stays": "v1", "NHAMCS, all visits": "v1.1"}
 TESTED_OUTCOMES = {"GIVEN_3_5": "Put at 3-5", "NO_LEVEL": "No level (Needs review)"}
-TESTS = len(TESTED_SCOPES) * len(SENSITIVE) * len(TESTED_OUTCOMES)
 OUTCOMES = {"Given 1-2": "GIVEN_1_2", "Given 3-5": "GIVEN_3_5", NO_LEVEL: "NO_LEVEL"}
 # The nurses' KTAS for the same urgent visits (KTAS set only), as text so freqTab can cross it.
 NURSE_PROGRAM = "length NURSE_OUTCOME $ 10; if NURSE_KTAS <= 2 then NURSE_OUTCOME = 'Given 1-2'; " \
@@ -134,6 +138,8 @@ async def analyse(client) -> dict:
             await client.action(session, "builtins.loadActionSet", {"actionSet": action_set})
         for scope, where in SCOPES.items():
             for by in SENSITIVE:
+                if by == "RACE_ETHNICITY" and not scope.startswith("NHAMCS"):
+                    continue  # recorded only in NHAMCS
                 ai = await _counts(client, session, where, by, "URGENT_OUTCOME")
                 nurse = (await _counts(client, session, where, by, "NURSE_OUTCOME", NURSE_PROGRAM)
                          if scope.startswith("KTAS,") else {})
@@ -179,32 +185,48 @@ async def analyse(client) -> dict:
 
 
 def tests(groups: list) -> list:
-    """Fisher's exact test between the two groups of each variable, per dataset and outcome."""
+    """
+    Fisher's exact test per dataset, variable and outcome: the two groups against each other, or
+    (race/ethnicity) every group against REFERENCE_GROUP. SIGNIFICANT uses 0.05 / the family's tests.
+    """
     rows = []
-    for scope in TESTED_SCOPES:
+    for scope in TEST_FAMILIES:
         for by in SENSITIVE:
-            pair = sorted((g for g in groups if g["SCOPE"] == scope and g["SENSITIVE_VARIABLE"] == by),
-                          key=lambda g: g["GROUP_VALUE"])
-            if len(pair) != 2:
+            found = sorted((g for g in groups if g["SCOPE"] == scope and g["SENSITIVE_VARIABLE"] == by),
+                           key=lambda g: g["GROUP_VALUE"])
+            base = next((g for g in found if g["GROUP_VALUE"] == REFERENCE_GROUP.get(by)), None)
+            if base:
+                pairs = [(base, g) for g in found if g is not base]
+            elif len(found) == 2:
+                pairs = [tuple(found)]
+            else:
                 continue
-            a, b = pair
-            for column, outcome in TESTED_OUTCOMES.items():
-                p = fisher_exact(a[column], a["URGENT_VISITS"], b[column], b["URGENT_VISITS"])
-                rows.append({"SCOPE": scope, "SENSITIVE_VARIABLE": by, "OUTCOME": outcome,
-                             "GROUP_A": a["GROUP_VALUE"], "A_EVENTS": a[column], "A_URGENT": a["URGENT_VISITS"],
-                             "A_RATE": round(a[column] / a["URGENT_VISITS"], 4),
-                             "GROUP_B": b["GROUP_VALUE"], "B_EVENTS": b[column], "B_URGENT": b["URGENT_VISITS"],
-                             "B_RATE": round(b[column] / b["URGENT_VISITS"], 4),
-                             "FISHER_P": round(p, 4), "TESTS_RUN": TESTS, "SIGNIFICANT": int(p < 0.05 / TESTS)})
+            for a, b in pairs:
+                for column, outcome in TESTED_OUTCOMES.items():
+                    p = fisher_exact(a[column], a["URGENT_VISITS"], b[column], b["URGENT_VISITS"])
+                    rows.append({"SCOPE": scope, "SENSITIVE_VARIABLE": by, "OUTCOME": outcome,
+                                 "GROUP_A": a["GROUP_VALUE"], "A_EVENTS": a[column], "A_URGENT": a["URGENT_VISITS"],
+                                 "A_RATE": round(a[column] / a["URGENT_VISITS"], 4),
+                                 "GROUP_B": b["GROUP_VALUE"], "B_EVENTS": b[column], "B_URGENT": b["URGENT_VISITS"],
+                                 "B_RATE": round(b[column] / b["URGENT_VISITS"], 4), "FISHER_P": round(p, 4)})
+    for row in rows:
+        family = [r for r in rows if TEST_FAMILIES[r["SCOPE"]] == TEST_FAMILIES[row["SCOPE"]]]
+        row["TESTS_RUN"] = len(family)
+        row["SIGNIFICANT"] = int(row["FISHER_P"] < 0.05 / len(family))
     return rows
 
 
 def check_against_metrics(groups: list, metrics: dict) -> list:
     """SAS's totals per scope must equal score.py's reference 1-2 counts; returns the mismatches."""
     problems = []
-    for scope, key in (("KTAS, all visits", "ktas/all"), ("MIMIC, all stays", "mimic/all")):
+    for scope, key in (("KTAS, all visits", "ktas/all"), ("MIMIC, all stays", "mimic/all"),
+                       ("NHAMCS, all visits", "nhamcs/all")):
+        if key not in metrics["esi"]:
+            continue
         expected = metrics["esi"][key]["reference_1_2_all_cases"]
         for by in SENSITIVE:
+            if by == "RACE_ETHNICITY" and not scope.startswith("NHAMCS"):
+                continue
             rows = [g for g in groups if g["SCOPE"] == scope and g["SENSITIVE_VARIABLE"] == by]
             for label, column in OUTCOMES.items():
                 got = sum(g[column] for g in rows)
