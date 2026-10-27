@@ -4,10 +4,12 @@
     python -m evals.benchmark.to_sas csv DIR     # the same tables as CSV + schema.json (for sas/load_csvs.py)
 
 Reads results/raw/ and results/metrics.json (run `python -m evals.benchmark.score` first). Uses the
-SAS settings in .env, as backend.sas_sync does, but always the prefix EIR_BENCH_, so the app's own
-tables are never touched. Each table is replaced the way the app's sync replaces its own: staging
-table, swap, saved as .sashdat so it survives a CAS restart. No free text leaves the repo: the
-reports and the AI's reasons stay in results/.
+SAS settings in .env, as backend.sas_sync does (the caslib is SAS_CASLIB, default Public), but always
+the prefix EIR_BENCH_, so the app's own tables are never touched. Each table is replaced the way the
+app's sync replaces its own: staging table, swap, saved as .sashdat so it survives a CAS restart.
+No free text leaves the repo: the reports and the AI's reasons stay in results/. MIMIC stays go as
+MIMIC-001... (not their stay IDs) and with their age band only; exact ages go only for the KTAS
+visits, whose source publishes them per row.
 
     CALLS    one row per AI assessment call (the last attempt per dataset, case and repeat): the
              reference level, the AI's level, how they compare, the patient's age band, sex,
@@ -38,7 +40,7 @@ NO_LEVEL = "No level (Needs review)"
 COLUMNS = {
     "CALLS": [
         ("DATASET", "char", "Benchmark set (ktas / ktas_spoken / mimic / purav)"),
-        ("CASE_ID", "char", "Case"),
+        ("CASE_ID", "char", "Case (MIMIC: a sequence number, not the stay ID)"),
         ("REPEAT", "num", "Repeat of the same input (1 = primary result)"),
         ("PRIMARY", "num", "Primary result: repeat 1 (1/0)"),
         ("EMS_ARRIVAL", "num", "Arrived by ambulance or helicopter (1/0)"),
@@ -59,7 +61,7 @@ COLUMNS = {
         ("SIMPLE_RULE", "num", "Simple vitals-and-consciousness rule's level (ours, not clinical)"),
         ("NUMBER_FLAG", "num", "Handoff number check flagged the answer (1/0)"),
         ("ATTEMPTS", "num", "Attempts for this call"),
-        ("AGE", "num", "Age (years)"),
+        ("AGE", "num", "Age (years; KTAS only)"),
         ("AGE_BAND", "char", "Age band"),
         ("SEX", "char", "Sex"),
         ("MENTAL_STATE", "char", "Mental state at triage (KTAS set only)"),
@@ -114,6 +116,8 @@ def calls_rows(cases: dict, records: list, run_infos: list) -> list:
     _, pairs, by_key = analyse_assessments(cases, records)
     price = next((r["price_per_million_tokens"] for r in run_infos if r.get("price_per_million_tokens")), None)
     scorer = next((f"{r['scoring_model']} / {r['assessment_prompt']}" for r in run_infos if r.get("scoring_model")), None)
+    # MIMIC stays are numbered in case-file order instead of carrying their stay IDs into SAS.
+    mimic_ids = {c["case_id"]: f"MIMIC-{i:03d}" for i, c in enumerate(cases["mimic"], start=1)}
     rows = []
     for pair in pairs:
         dataset, case_id, repeat = pair["dataset"], pair["case_id"], pair["repeat"]
@@ -125,9 +129,11 @@ def calls_rows(cases: dict, records: list, run_infos: list) -> list:
         if price and usage.get("input_tokens") is not None and usage.get("output_tokens") is not None:
             cost = round((usage["input_tokens"] * price[0] + usage["output_tokens"] * price[1]) / 1e6, 8)
         age = _number(meta.get("age"))
+        exact_age = age if dataset.startswith("ktas") else None
         nurse = _number(meta.get("nurse_ktas"))
         row = {
-            "DATASET": dataset, "CASE_ID": case_id, "REPEAT": repeat, "PRIMARY": int(repeat == 1),
+            "DATASET": dataset, "CASE_ID": mimic_ids.get(case_id, case_id), "REPEAT": repeat,
+            "PRIMARY": int(repeat == 1),
             "EMS_ARRIVAL": pair["ems_arrival"], "ARRIVAL": meta.get("arrival"),
             "REFERENCE_SCALE": case["reference"]["scale"], "REFERENCE_LEVEL": reference,
             "REFERENCE_URGENT": int(reference <= 2),
@@ -141,7 +147,7 @@ def calls_rows(cases: dict, records: list, run_infos: list) -> list:
             "NURSE_KTAS": nurse, "NURSE_LESS_URGENT": None if nurse is None else int(nurse > reference),
             "SIMPLE_RULE": _number(pair["simple_rule"]), "NUMBER_FLAG": pair["number_flag"],
             "ATTEMPTS": pair["attempts"],
-            "AGE": age, "AGE_BAND": None if age is None else "65 and over" if age >= 65 else "Under 65",
+            "AGE": exact_age, "AGE_BAND": None if age is None else "65 and over" if age >= 65 else "Under 65",
             "SEX": SEX.get(meta.get("sex")), "MENTAL_STATE": KTAS_MENTAL.get(meta.get("mental")),
             "HR": vitals.get("hr"), "SBP": vitals.get("sbp"), "DBP": vitals.get("dbp"), "RR": vitals.get("rr"),
             "SPO2": vitals.get("spo2"), "TEMP_C": vitals.get("temp_c"),

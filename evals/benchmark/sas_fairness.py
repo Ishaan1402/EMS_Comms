@@ -1,7 +1,7 @@
 """Check the AI for bias by sex and age band with SAS's own tools, in CAS, and save the results there.
 
     python -m evals.benchmark.to_sas push       # first: EIR_BENCH_CALLS must be in the caslib
-    python -m evals.benchmark.sas_fairness      # runs in CAS, writes EIR_BENCH_BIAS_GROUPS and _METRICS
+    python -m evals.benchmark.sas_fairness      # runs in CAS, writes EIR_BENCH_BIAS_GROUPS, _TESTS, _METRICS
 
 Two CAS actions do the work, through the app's SAS client:
 - freqTab.freqTab counts, for every visit whose reference level is 1-2 (the urgent ones), how many
@@ -11,8 +11,13 @@ Two CAS actions do the work, through the app's SAS client:
   reference 1-2, the AI's prediction is "gave 1-2". It reports demographic parity, equal
   opportunity (the gap in the share of urgent visits flagged urgent) and equalized odds.
 
-The counts are SAS's; only the 95% Wilson intervals on the "placed 3-5" rates are added here
-(stats.wilson). Primary results only (repeat 1), as in REPORT.md.
+EIR_BENCH_BIAS_TESTS compares the two groups of each variable within each dataset, for both ways an
+urgent patient can be let down: put at 3-5, and given no level (held for review). That is 8 tests
+(2 datasets x 2 variables x 2 outcomes), each a two-sided Fisher's exact test (stats.fisher_exact);
+SIGNIFICANT marks p below 0.05 / 8. The datasets use different scales, so they are not pooled.
+
+The counts are SAS's; the 95% Wilson intervals (stats.wilson) and the Fisher tests are computed here
+from those counts. Primary results only (repeat 1), as in REPORT.md.
 """
 import asyncio
 import dataclasses
@@ -21,7 +26,7 @@ import sys
 from pathlib import Path
 
 from backend import sas_sync
-from .stats import wilson
+from .stats import fisher_exact, wilson
 from .to_sas import NO_LEVEL, PREFIX, RESULTS
 
 SCOPES = {
@@ -30,6 +35,10 @@ SCOPES = {
     "KTAS and MIMIC": "DATASET in ('ktas', 'mimic')",
 }
 SENSITIVE = ("SEX", "AGE_BAND")
+# Tests run within one dataset only: KTAS and MIMIC references are different scales.
+TESTED_SCOPES = ("KTAS, all visits", "MIMIC, all stays")
+TESTED_OUTCOMES = {"GIVEN_3_5": "Put at 3-5", "NO_LEVEL": "No level (Needs review)"}
+TESTS = len(TESTED_SCOPES) * len(SENSITIVE) * len(TESTED_OUTCOMES)
 OUTCOMES = {"Given 1-2": "GIVEN_1_2", "Given 3-5": "GIVEN_3_5", NO_LEVEL: "NO_LEVEL"}
 # The nurses' KTAS for the same urgent visits (KTAS set only), as text so freqTab can cross it.
 NURSE_PROGRAM = "length NURSE_OUTCOME $ 10; if NURSE_KTAS <= 2 then NURSE_OUTCOME = 'Given 1-2'; " \
@@ -63,6 +72,22 @@ COLUMNS = {
         ("FNR", "num", "Urgent visits the AI put at 3-5 (false negative rate)"),
         ("ACC", "num", "Urgent / not urgent accuracy"),
     ],
+    "BIAS_TESTS": [
+        ("SCOPE", "char", "Visits analysed"),
+        ("SENSITIVE_VARIABLE", "char", "Grouped by"),
+        ("OUTCOME", "char", "What happened to the urgent visits"),
+        ("GROUP_A", "char", "First group"),
+        ("A_EVENTS", "num", "First group: urgent visits with this outcome"),
+        ("A_URGENT", "num", "First group: urgent visits"),
+        ("A_RATE", "num", "First group: share"),
+        ("GROUP_B", "char", "Second group"),
+        ("B_EVENTS", "num", "Second group: urgent visits with this outcome"),
+        ("B_URGENT", "num", "Second group: urgent visits"),
+        ("B_RATE", "num", "Second group: share"),
+        ("FISHER_P", "num", "Two-sided Fisher's exact p"),
+        ("TESTS_RUN", "num", "Tests run in this family"),
+        ("SIGNIFICANT", "num", "p below 0.05 / tests run (1/0)"),
+    ],
     "BIAS_METRICS": [
         ("SCOPE", "char", "Visits analysed"),
         ("SENSITIVE_VARIABLE", "char", "Grouped by"),
@@ -87,7 +112,7 @@ def _crosslist(results: dict) -> list:
 
 async def _counts(client, session, where: str, by: str, outcome: str, program: str = "") -> dict:
     """{group: {outcome: frequency}} for the urgent visits in `where`, from freqTab."""
-    table = {"caslib": "Public", "name": PREFIX + "CALLS",
+    table = {"caslib": client.settings.caslib, "name": PREFIX + "CALLS",
              "where": f"PRIMARY = 1 and REFERENCE_URGENT = 1 and {where}"}
     if program:
         table |= {"computedVars": [{"name": outcome}], "computedVarsProgram": program}
@@ -113,7 +138,7 @@ async def analyse(client) -> dict:
                 nurse = (await _counts(client, session, where, by, "NURSE_OUTCOME", NURSE_PROGRAM)
                          if scope.startswith("KTAS,") else {})
                 bias = (await client.action(session, "fairAITools.assessBias", {
-                    "table": {"caslib": "Public", "name": PREFIX + "CALLS",
+                    "table": {"caslib": client.settings.caslib, "name": PREFIX + "CALLS",
                               "where": f"PRIMARY = 1 and AI_GAVE_LEVEL = 1 and {where}",
                               "computedVars": [{"name": "P_URGENT"}, {"name": "P_NOT_URGENT"}, {"name": "URGENT"}],
                               "computedVarsProgram": BIAS_PROGRAM},
@@ -150,7 +175,28 @@ async def analyse(client) -> dict:
             await client.close_session(session)
         except sas_sync.SasError as error:  # the session times out on its own
             print(f"SAS: could not close CAS session: {error}")
-    return {"BIAS_GROUPS": groups, "BIAS_METRICS": metrics}
+    return {"BIAS_GROUPS": groups, "BIAS_TESTS": tests(groups), "BIAS_METRICS": metrics}
+
+
+def tests(groups: list) -> list:
+    """Fisher's exact test between the two groups of each variable, per dataset and outcome."""
+    rows = []
+    for scope in TESTED_SCOPES:
+        for by in SENSITIVE:
+            pair = sorted((g for g in groups if g["SCOPE"] == scope and g["SENSITIVE_VARIABLE"] == by),
+                          key=lambda g: g["GROUP_VALUE"])
+            if len(pair) != 2:
+                continue
+            a, b = pair
+            for column, outcome in TESTED_OUTCOMES.items():
+                p = fisher_exact(a[column], a["URGENT_VISITS"], b[column], b["URGENT_VISITS"])
+                rows.append({"SCOPE": scope, "SENSITIVE_VARIABLE": by, "OUTCOME": outcome,
+                             "GROUP_A": a["GROUP_VALUE"], "A_EVENTS": a[column], "A_URGENT": a["URGENT_VISITS"],
+                             "A_RATE": round(a[column] / a["URGENT_VISITS"], 4),
+                             "GROUP_B": b["GROUP_VALUE"], "B_EVENTS": b[column], "B_URGENT": b["URGENT_VISITS"],
+                             "B_RATE": round(b[column] / b["URGENT_VISITS"], 4),
+                             "FISHER_P": round(p, 4), "TESTS_RUN": TESTS, "SIGNIFICANT": int(p < 0.05 / TESTS)})
+    return rows
 
 
 def check_against_metrics(groups: list, metrics: dict) -> list:
@@ -195,6 +241,10 @@ def main(argv=None) -> int:
         print(f"  {g['SCOPE']:17} {g['GROUP_VALUE']:12} urgent {g['URGENT_VISITS']:3}: AI put {g['GIVEN_3_5']} at 3-5 "
               f"({g['PLACED_LOWER_RATE']:.1%}, {g['PLACED_LOWER_LOW']:.1%}-{g['PLACED_LOWER_HIGH']:.1%}), "
               f"no level {g['NO_LEVEL']}{nurse}; flagged urgent {g['TPR']:.1%} of urgent it rated")
+    for t in tables["BIAS_TESTS"]:
+        print(f"  {t['SCOPE']:17} {t['OUTCOME']:24} {t['GROUP_A']} {t['A_EVENTS']}/{t['A_URGENT']} vs "
+              f"{t['GROUP_B']} {t['B_EVENTS']}/{t['B_URGENT']}: Fisher p {t['FISHER_P']:.4f}"
+              f"{'  SIGNIFICANT after ' + str(t['TESTS_RUN']) + ' tests' if t['SIGNIFICANT'] else ''}")
     problems = check_against_metrics(tables["BIAS_GROUPS"],
                                      json.loads((RESULTS / "metrics.json").read_text(encoding="utf-8")))
     print("SAS counts match metrics.json" if not problems else "MISMATCH:\n  " + "\n  ".join(problems))

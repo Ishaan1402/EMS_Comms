@@ -17,6 +17,7 @@ class FakeCas:
 
     def __init__(self, counts):
         self.counts = counts  # {(where, by, outcome): {group: {outcome value: frequency}}}
+        self.settings = sas_sync.Settings(url='', client_id='', client_secret='')
         self.calls = []
 
     async def open_session(self):
@@ -104,7 +105,7 @@ class BenchmarkSasTest(unittest.TestCase):
                          (1, 1, 1, 1))
         default = rows["SAS gradient boosting, default cutoff"]
         self.assertEqual((default["URGENT_CAUGHT"], default["NOT_URGENT_FLAGGED"]), (1, 1))
-        matched = rows["SAS gradient boosting, cutoff matched to Eir's false flags"]
+        matched = rows["SAS gradient boosting, cutoff tuned on the holdout to Eir's false flags"]
         self.assertEqual((matched["CUTOFF"], matched["URGENT_CAUGHT"], matched["NOT_URGENT_FLAGGED"]), (0.3, 2, 1))
         self.assertEqual(rows["Triage nurses"]["URGENT_CAUGHT"], 1)
         self.assertEqual(rows["Simple vitals rule"]["URGENT_CAUGHT"], 1)
@@ -117,7 +118,8 @@ class BenchmarkSasTest(unittest.TestCase):
         card = sas_register.model_card(metrics, self.tables, comparison)
         self.assertIn("Eir put 138 at 1-2", card)
         self.assertIn("| Eir AI | the crew's report | 63 | 9 | 2 | 77 of 306 |", card)
-        self.assertIn("KTAS by sex: Female 5/100, Male 2/146", card)
+        self.assertIn("KTAS by sex, put at 3-5: Female 5/100, Male 2/146", card)
+        self.assertIn("KTAS by age band, no level: 65 and over 8/124, Under 65 23/122 (Fisher p 0.004, significant", card)
         for prop in sas_register.properties(metrics, self.tables):
             self.assertRegex(prop["name"], r"^[A-Za-z0-9 _.-]+$")  # what Model Manager accepts
 

@@ -12,8 +12,10 @@ the six vitals) find the urgent patients (expert KTAS 1-2) as well as the AI rea
 - decisionTree.gbtreeTrain / gbtreeScore fit 100 trees on the 70% and score the holdout.
 - EIR_BENCH_MODEL_COMPARISON counts, on the holdout only, how many urgent visits each one
   caught, held for review (the AI's "Cannot assess") or missed, and how many non-urgent visits it
-  flagged: the AI, the model at its default cutoff (0.5) and at the cutoff that flags no more
-  non-urgent visits than the AI does, the triage nurses and the simple vitals rule.
+  flagged: the AI, the model at its default cutoff (0.5), the model at the cutoff that flags no
+  more non-urgent holdout visits than the AI does, the triage nurses and the simple vitals rule.
+  That second cutoff is tuned on the holdout itself, which favours the model: it is a like-for-like
+  false-alarm comparison, not an unbiased estimate of how the model would do on new visits.
 
 The AI's columns are kept in the table for the comparison and must stay rejected as inputs.
 """
@@ -30,10 +32,10 @@ HOLDOUT_PERCENT = 30
 INPUTS = ("AGE", "SEX", "EMS_ARRIVAL", "MENTAL_STATE", "HR", "SBP", "DBP", "RR", "SPO2", "TEMP_C")
 NOMINALS = ("SEX", "EMS_ARRIVAL", "MENTAL_STATE")
 # PRIMARY is an SQL keyword, so it is quoted.
-FEATURES_QUERY = f"""create table Public.{PREFIX}FEATURES_SOURCE {{options replace=true}} as
-    select CASE_ID, REFERENCE_LEVEL, REFERENCE_URGENT, {", ".join(INPUTS)},
+FEATURES_QUERY = """create table {caslib}.""" + PREFIX + """FEATURES_SOURCE {{options replace=true}} as
+    select CASE_ID, REFERENCE_LEVEL, REFERENCE_URGENT, """ + ", ".join(INPUTS) + """,
            NURSE_KTAS, SIMPLE_RULE, AI_GAVE_LEVEL, AI_ESI, AI_URGENT
-    from Public.{PREFIX}CALLS where DATASET = 'ktas' and "PRIMARY" = 1"""
+    from {caslib}.""" + PREFIX + """CALLS where DATASET = 'ktas' and "PRIMARY" = 1"""
 
 COLUMNS = {
     "MODEL_COMPARISON": [
@@ -82,7 +84,7 @@ def compare(scored: list, probability: str) -> list:
     candidates = sorted({round(r[probability], 6) for r in scored})
     matched = min((c for c in candidates if sum(r[probability] >= c for r in not_urgent) <= ai_flagged),
                   default=1.0)
-    rows.append(model_row(matched, "SAS gradient boosting, cutoff matched to Eir's false flags"))
+    rows.append(model_row(matched, "SAS gradient boosting, cutoff tuned on the holdout to Eir's false flags"))
     rows.append(_row("Triage nurses", "the patient, at triage", urgent, not_urgent,
                      sum(r["NURSE_KTAS"] <= 2 for r in urgent), 0, sum(r["NURSE_KTAS"] <= 2 for r in not_urgent)))
     rows.append(_row("Simple vitals rule", "mental state and 5 vitals", urgent, not_urgent,
@@ -91,34 +93,34 @@ def compare(scored: list, probability: str) -> list:
 
 
 async def analyse(client) -> list:
-    features = PREFIX + "FEATURES"
+    features, caslib = PREFIX + "FEATURES", client.settings.caslib
     session = await client.open_session()
     try:
         for action_set in ("fedSql", "sampling", "decisionTree"):
             await client.action(session, "builtins.loadActionSet", {"actionSet": action_set})
-        await client.action(session, "fedSql.execDirect", {"query": FEATURES_QUERY})
+        await client.action(session, "fedSql.execDirect", {"query": FEATURES_QUERY.format(caslib=caslib)})
         await client.action(session, "sampling.stratified", {
-            "table": {"caslib": "Public", "name": PREFIX + "FEATURES_SOURCE", "groupBy": ["REFERENCE_URGENT"]},
+            "table": {"caslib": caslib, "name": PREFIX + "FEATURES_SOURCE", "groupBy": ["REFERENCE_URGENT"]},
             "samppct": HOLDOUT_PERCENT, "seed": SEED, "partInd": True,
-            "output": {"casOut": {"caslib": "Public", "name": features + "_STAGE", "replace": True},
+            "output": {"casOut": {"caslib": caslib, "name": features + "_STAGE", "replace": True},
                        "copyVars": "ALL"}})
-        await client.action(session, "table.dropTable", {"caslib": "Public", "name": features, "quiet": True})
-        await client.action(session, "table.promote", {"caslib": "Public", "name": features + "_STAGE",
-                                                       "target": features, "targetLib": "Public", "drop": True})
-        await client.action(session, "table.save", {"table": {"caslib": "Public", "name": features},
-                                                    "caslib": "Public", "name": f"{features}.sashdat", "replace": True})
+        await client.action(session, "table.dropTable", {"caslib": caslib, "name": features, "quiet": True})
+        await client.action(session, "table.promote", {"caslib": caslib, "name": features + "_STAGE",
+                                                       "target": features, "targetLib": caslib, "drop": True})
+        await client.action(session, "table.save", {"table": {"caslib": caslib, "name": features},
+                                                    "caslib": caslib, "name": f"{features}.sashdat", "replace": True})
         await client.action(session, "decisionTree.gbtreeTrain", {
-            "table": {"caslib": "Public", "name": features, "where": "_PartInd_ = 0"},
+            "table": {"caslib": caslib, "name": features, "where": "_PartInd_ = 0"},
             "target": "REFERENCE_URGENT", "inputs": list(INPUTS), "nominals": ["REFERENCE_URGENT", *NOMINALS],
-            "nTree": 100, "seed": SEED, "casOut": {"caslib": "Public", "name": "EIR_BENCH_GB_SESSION", "replace": True}})
+            "nTree": 100, "seed": SEED, "casOut": {"caslib": caslib, "name": "EIR_BENCH_GB_SESSION", "replace": True}})
         await client.action(session, "decisionTree.gbtreeScore", {
-            "table": {"caslib": "Public", "name": features, "where": "_PartInd_ = 1"},
-            "modelTable": {"caslib": "Public", "name": "EIR_BENCH_GB_SESSION"},
-            "casOut": {"caslib": "Public", "name": "EIR_BENCH_SCORED_SESSION", "replace": True},
+            "table": {"caslib": caslib, "name": features, "where": "_PartInd_ = 1"},
+            "modelTable": {"caslib": caslib, "name": "EIR_BENCH_GB_SESSION"},
+            "casOut": {"caslib": caslib, "name": "EIR_BENCH_SCORED_SESSION", "replace": True},
             "copyVars": ["CASE_ID", "REFERENCE_URGENT", "AI_URGENT", "AI_GAVE_LEVEL", "NURSE_KTAS", "SIMPLE_RULE"],
             "encodeName": True})
         fetched = await client.action(session, "table.fetch", {
-            "table": {"caslib": "Public", "name": "EIR_BENCH_SCORED_SESSION"}, "to": 100000, "maxRows": 100000})
+            "table": {"caslib": caslib, "name": "EIR_BENCH_SCORED_SESSION"}, "to": 100000, "maxRows": 100000})
         scored = _rows(fetched["results"]["Fetch"])
     finally:
         try:

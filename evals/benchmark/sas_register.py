@@ -16,7 +16,8 @@ from collections import Counter
 from pathlib import Path
 
 from backend import sas_sync
-from .to_sas import PREFIX, RESULTS, build_tables
+from .stats import fisher_exact
+from .to_sas import NO_LEVEL, PREFIX, RESULTS, build_tables
 
 PROJECT = "Eir AI triage"
 MODEL = "Eir AI triage suggestion"
@@ -30,15 +31,19 @@ def share(k, n):
 
 
 def fairness_lines(calls: list) -> list:
-    """Urgent visits the AI put at 3-5, per group: the counts sas_fairness.py had SAS compute."""
+    """Per dataset and variable, urgent visits put at 3-5 and given no level, with Fisher's exact p."""
     lines = []
     for dataset in ("ktas", "mimic"):
         urgent = [r for r in calls if r["DATASET"] == dataset and r["PRIMARY"] and r["REFERENCE_URGENT"]]
         for column in ("SEX", "AGE_BAND"):
-            groups = Counter(r[column] for r in urgent)
-            lower = Counter(r[column] for r in urgent if r["URGENT_OUTCOME"] == "Given 3-5")
-            lines.append(f"{dataset.upper()} by {column.lower().replace('_', ' ')}: " + ", ".join(
-                f"{group} {lower[group]}/{groups[group]}" for group in sorted(groups)))
+            groups = sorted(Counter(r[column] for r in urgent).items())
+            for outcome, label in (("Given 3-5", "put at 3-5"), (NO_LEVEL, "no level")):
+                events = Counter(r[column] for r in urgent if r["URGENT_OUTCOME"] == outcome)
+                (a, n1), (b, n2) = groups
+                p = fisher_exact(events[a], n1, events[b], n2)
+                lines.append(f"{dataset.upper()} by {column.lower().replace('_', ' ')}, {label}: "
+                             f"{a} {events[a]}/{n1}, {b} {events[b]}/{n2} (Fisher p {p:.3f}"
+                             f"{', significant after 8 tests' if p < 0.05 / 8 else ''})")
     return lines
 
 
@@ -91,7 +96,7 @@ def model_card(metrics: dict, tables: dict, comparison: list) -> str:
 
 ## Baseline: a SAS model on the numbers alone
 SAS gradient boosting (100 trees, CAS `decisionTree.gbtreeTrain`) on age, sex, arrival, mental state and six vitals,
-trained on 70% of the KTAS visits and compared on the same 30% holdout (`Public.{PREFIX}FEATURES`, `_PartInd_ = 1`).
+trained on 70% of the KTAS visits and compared on the same 30% holdout; the matched cutoff is tuned on that holdout, which favours the model (`Public.{PREFIX}FEATURES`, `_PartInd_ = 1`).
 
 | Who | Reads | Urgent caught | Held for review | Urgent missed | Non-urgent flagged |
 | --- | --- | --- | --- | --- | --- |
@@ -101,8 +106,9 @@ trained on 70% of the KTAS visits and compared on the same 30% holdout (`Public.
 Urgent visits put at 3-5, by group:
 {chr(10).join('- ' + line for line in fairness_lines(tables['CALLS']))}
 
-No difference is significant (two-sided Fisher p 0.06 to 0.55) and the direction flips between the datasets.
-The counts are small, so this cannot rule out a gap; it is the check to repeat on live data.
+Eight two-sided Fisher tests (2 datasets x 2 variables x 2 outcomes). The AI did not put one group's urgent
+patients at 3-5 significantly more often. It did give no level (Needs review) to more urgent KTAS patients under 65
+than 65 and over. The counts are small; these are the checks to repeat on live data.
 
 ## Limits
 - No result is clinical validation. KTAS is not ESI; use it for "urgent flagged urgent", not ESI accuracy.
@@ -130,7 +136,7 @@ def properties(metrics: dict, tables: dict) -> list:
         "KTAS ambulance - within one level": share(ems["ai_vs_reference"]["within_one"]["k"],
                                                    ems["ai_vs_reference"]["within_one"]["n"]),
         "KTAS ambulance - weighted kappa": f"{ems['ai_vs_reference']['kappa_quadratic']['value']:.2f}",
-        "Fairness": "No significant gap by sex or age band (Fisher p 0.06-0.55)",
+        "Fairness": "No significant gap in urgent put at 3-5; more no-level for KTAS urgent under 65 (see card)",
         "Clinical validation": "None",
     }
     # Model Manager allows only letters, digits, spaces, _ - and . in property names.
@@ -141,7 +147,7 @@ async def fetch_comparison(client) -> list:
     session = await client.open_session()
     try:
         result = await client.action(session, "table.fetch", {
-            "table": {"caslib": "Public", "name": PREFIX + "MODEL_COMPARISON"}, "to": 100, "maxRows": 100})
+            "table": {"caslib": client.settings.caslib, "name": PREFIX + "MODEL_COMPARISON"}, "to": 100, "maxRows": 100})
     finally:
         await client.close_session(session)
     table = result["results"]["Fetch"]
@@ -185,7 +191,7 @@ async def register(client, settings, card: str, props: list, metrics: dict) -> s
                                     "function": "classification", "algorithm": "Large language model",
                                     "tool": "Python", "modeler": "Eir team", "scoreCodeType": "None",
                                     "targetVariable": "REFERENCE_URGENT", "targetEvent": "1", "targetLevel": "binary",
-                                    "eventProbVar": "AI_URGENT", "trainTable": f"Public.{PREFIX}CALLS",
+                                    "eventProbVar": "AI_URGENT", "trainTable": f"{settings.caslib}.{PREFIX}CALLS",
                                     "inputVariables": [
                                         {"name": "CURRENT_TRANSCRIPT", "role": "input", "type": "string", "level": "nominal"},
                                         {"name": "PRIOR_INFORMATION", "role": "input", "type": "string", "level": "nominal"},

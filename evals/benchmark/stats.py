@@ -136,3 +136,17 @@ def percentile(values, q):
     position = q * (len(values) - 1)
     low = math.floor(position)
     return values[low] + (values[min(low + 1, len(values) - 1)] - values[low]) * (position - low)
+
+
+def fisher_exact(a: int, n1: int, b: int, n2: int) -> float:
+    """
+    Two-sided Fisher's exact test for a events of n1 vs b events of n2: the sum of the
+    probabilities of every table no more likely than the observed one (as SAS PROC FREQ's FISHER).
+    """
+    events, total = a + b, n1 + n2
+
+    def probability(x):
+        return math.comb(n1, x) * math.comb(n2, events - x) / math.comb(total, events)
+    observed = probability(a)
+    return min(1.0, sum(probability(x) for x in range(max(0, events - n2), min(events, n1) + 1)
+                        if probability(x) <= observed * (1 + 1e-7)))
