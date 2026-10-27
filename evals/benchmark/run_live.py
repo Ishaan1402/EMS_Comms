@@ -30,7 +30,8 @@ CASES_DIR = HERE / "cases"
 # (dataset, subset, repeats). Repeat 1 of every case is the primary analysis; the others measure
 # run-to-run consistency. Fixed before any result was seen (PROTOCOL.md).
 ASSESS_PLAN = [("purav", "all", 5), ("mimic", "all", 3), ("ktas", "all", 1), ("ktas", "ems", 3),
-               ("ktas_spoken", "all", 1)]
+               ("ktas_spoken", "all", 1),
+               ("nhamcs", "all", 1)]  # added by protocol eir-benchmark-v1.1 (2026-10-27)
 EXTRACT_PLAN = [("mimic", "all", 1), ("ktas", "all", 1), ("ktas_spoken", "all", 1)]
 CONCURRENCY = 8  # = backend.case_assessment.assessment_executor's workers, so no call waits for a thread
 
