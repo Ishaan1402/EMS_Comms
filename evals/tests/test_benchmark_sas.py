@@ -5,7 +5,7 @@ import io
 import unittest
 
 from backend import sas_sync
-from evals.benchmark import sas_fairness, to_sas
+from evals.benchmark import sas_fairness, sas_model, sas_register, to_sas
 
 
 def cas_table(columns, rows):
@@ -91,6 +91,35 @@ class BenchmarkSasTest(unittest.TestCase):
         problems = sas_fairness.check_against_metrics(tables["BIAS_GROUPS"], metrics)
         self.assertTrue(any(p.startswith("KTAS, all visits by AGE_BAND") for p in problems))
         self.assertFalse(any(p.startswith("KTAS, all visits by SEX") for p in problems))
+
+    def test_model_comparison_counts_the_holdout_and_matches_the_ai_false_flags(self):
+        def visit(urgent, p, ai, gave=1, nurse=3, rule=3):
+            return {"REFERENCE_URGENT": urgent, "P": p, "AI_URGENT": ai, "AI_GAVE_LEVEL": gave,
+                    "NURSE_KTAS": nurse, "SIMPLE_RULE": rule}
+        scored = [visit(1, 0.9, 1, nurse=2), visit(1, 0.3, None, gave=0), visit(1, 0.1, 0, rule=2),
+                  visit(0, 0.6, 1), visit(0, 0.2, 0), visit(0, 0.05, 0)]
+        rows = {r["MODEL"]: r for r in sas_model.compare(scored, "P")}
+        ai = rows["Eir AI"]
+        self.assertEqual((ai["URGENT_CAUGHT"], ai["URGENT_HELD"], ai["URGENT_MISSED"], ai["NOT_URGENT_FLAGGED"]),
+                         (1, 1, 1, 1))
+        default = rows["SAS gradient boosting, default cutoff"]
+        self.assertEqual((default["URGENT_CAUGHT"], default["NOT_URGENT_FLAGGED"]), (1, 1))
+        matched = rows["SAS gradient boosting, cutoff matched to Eir's false flags"]
+        self.assertEqual((matched["CUTOFF"], matched["URGENT_CAUGHT"], matched["NOT_URGENT_FLAGGED"]), (0.3, 2, 1))
+        self.assertEqual(rows["Triage nurses"]["URGENT_CAUGHT"], 1)
+        self.assertEqual(rows["Simple vitals rule"]["URGENT_CAUGHT"], 1)
+
+    def test_model_card_and_property_names(self):
+        import json
+        metrics = json.loads((to_sas.RESULTS / "metrics.json").read_text(encoding="utf-8"))
+        comparison = [{"MODEL": "Eir AI", "READS": "the crew's report", "URGENT_CAUGHT": 63, "URGENT_HELD": 9,
+                       "URGENT_MISSED": 2, "NOT_URGENT_FLAGGED": 77, "HOLDOUT_NOT_URGENT": 306}]
+        card = sas_register.model_card(metrics, self.tables, comparison)
+        self.assertIn("Eir put 138 at 1-2", card)
+        self.assertIn("| Eir AI | the crew's report | 63 | 9 | 2 | 77 of 306 |", card)
+        self.assertIn("KTAS by sex: Female 5/100, Male 2/146", card)
+        for prop in sas_register.properties(metrics, self.tables):
+            self.assertRegex(prop["name"], r"^[A-Za-z0-9 _.-]+$")  # what Model Manager accepts
 
 
 if __name__ == "__main__":

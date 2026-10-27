@@ -26,7 +26,11 @@ python -m evals.benchmark.score --raw evals/benchmark/results/raw --out evals/be
 python -m evals.benchmark.to_sas push
 # 6. Fairness by sex and age band, computed in CAS (freqTab, fairAITools.assessBias): EIR_BENCH_BIAS_*
 python -m evals.benchmark.sas_fairness
-# 7. The same kappas, headline and fairness tests in SAS Studio: run sas/eir_ai_agreement.sas
+# 7. A SAS baseline: gradient boosting on the structured fields, same holdout as Model Studio
+python -m evals.benchmark.sas_model
+# 8. The AI's governance record in SAS Model Manager (project "Eir AI triage"), with results/MODEL_CARD.md
+python -m evals.benchmark.sas_register
+# 9. The same kappas, headline and fairness tests in SAS Studio: run sas/eir_ai_agreement.sas
 ```
 
 Tests (offline, fake model): `python -m unittest evals.tests.test_benchmark`.
@@ -40,6 +44,8 @@ Tests (offline, fake model): `python -m unittest evals.tests.test_benchmark`.
 - `guardrails.py`: mutation tests of the two deterministic checks on the real outputs.
 - `to_sas.py`: the results as CAS tables (no free text), pushed and saved like the app's own sync.
 - `sas_fairness.py`: SAS's bias assessment by sex and age band; checks SAS's counts against metrics.json.
+- `sas_model.py`: EIR_BENCH_FEATURES (KTAS visits with a fixed 30% holdout) and SAS gradient boosting vs the AI.
+- `sas_register.py`: registers the AI in Model Manager with its properties, model card, metrics and prompt.
 - `data/purav_patient_review_v2.1.csv`: Purav's returned review (source of his ESI labels).
 
 ## Data licences and credit
