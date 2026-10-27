@@ -412,25 +412,30 @@ def _vitals_table(keys: dict) -> list:
     return vital_rows
 
 
-def table_vars(name: str) -> list:
+# Every helper below takes the column lists of another set of tables as `columns` (same shape as
+# TABLES); evals/benchmark/to_sas.py pushes the benchmark results through them.
+
+def table_vars(name: str, columns: Optional[dict] = None) -> list:
     """CAS import options for each column, in file order: fixed types so empty columns stay numeric."""
     return [{"name": column, "type": "double" if kind == "num" else "varchar", "label": label}
-            for column, kind, label in TABLES[name]]
+            for column, kind, label in (columns or TABLES)[name]]
 
 
-def table_formats(name: str) -> list:
-    return [{"name": column, "format": DATETIME_FORMAT} for column, _, _ in TABLES[name] if column.endswith("_DT")]
+def table_formats(name: str, columns: Optional[dict] = None) -> list:
+    return [{"name": column, "format": DATETIME_FORMAT} for column, _, _ in (columns or TABLES)[name]
+            if column.endswith("_DT")]
 
 
-def schema(tables: dict, prefix: str) -> dict:
+def schema(tables: dict, prefix: str, columns: Optional[dict] = None) -> dict:
     """What sas/load_csvs.py needs to load the CSV files exactly as the sync would."""
-    return {"tables": {prefix + name: {"rows": len(rows), "vars": table_vars(name), "formats": table_formats(name)}
+    return {"tables": {prefix + name: {"rows": len(rows), "vars": table_vars(name, columns),
+                                       "formats": table_formats(name, columns)}
                        for name, rows in tables.items()}}
 
 
-def to_csv(name: str, rows: list) -> bytes:
+def to_csv(name: str, rows: list, columns: Optional[dict] = None) -> bytes:
     """CSV with the table's columns in order; missing values are empty."""
-    columns = [column for column, _, _ in TABLES[name]]
+    columns = [column for column, _, _ in (columns or TABLES)[name]]
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(columns)
@@ -516,11 +521,12 @@ class CasClient:
         )
         return self._check(response, action)
 
-    async def upload_csv(self, session: str, table: str, name: str, data: bytes) -> dict:
+    async def upload_csv(self, session: str, table: str, name: str, data: bytes,
+                         columns: Optional[dict] = None) -> dict:
         """table.upload into a session-scope table, with every column's type and label fixed."""
         params = {
             "casOut": {"caslib": self.settings.caslib, "name": table, "replace": True},
-            "importOptions": {"fileType": "CSV", "vars": table_vars(name)},
+            "importOptions": {"fileType": "CSV", "vars": table_vars(name, columns)},
         }
         response = await self._call(
             "PUT", f"{self.cas_url}/cas/sessions/{session}/actions/table.upload", f"upload {table}",
@@ -528,7 +534,7 @@ class CasClient:
         )
         return self._check(response, f"upload {table}")
 
-    async def replace_tables(self, tables: dict) -> None:
+    async def replace_tables(self, tables: dict, columns: Optional[dict] = None) -> None:
         """
         Replace each shared table with new contents ({name: csv bytes}). Upload to a staging table,
         then swap it in, so a failed upload leaves the old table. Nothing to upload (no rows) leaves
@@ -545,9 +551,10 @@ class CasClient:
             for name, data in tables.items():
                 target = self.settings.prefix + name
                 stage = f"{target}_STAGE"
-                await self.upload_csv(session, stage, name, data)
-                await self.action(session, "table.alterTable",
-                                  {"caslib": caslib, "name": stage, "columns": table_formats(name)})
+                await self.upload_csv(session, stage, name, data, columns)
+                formats = table_formats(name, columns)
+                if formats:
+                    await self.action(session, "table.alterTable", {"caslib": caslib, "name": stage, "columns": formats})
                 await self.action(session, "table.dropTable", {"caslib": caslib, "name": target, "quiet": True})
                 try:
                     await self.action(session, "table.promote", {

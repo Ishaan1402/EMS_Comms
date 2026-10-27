@@ -22,7 +22,11 @@ python -m evals.benchmark.build_cases --data evals/local/benchmark_data
 python -m evals.benchmark.run_live --env .env --out evals/benchmark/results/raw
 # 4. Scoring (offline, deterministic)
 python -m evals.benchmark.score --raw evals/benchmark/results/raw --out evals/benchmark/results
-# 5. Same kappas in SAS: upload results/esi_pairs.csv, run sas/eir_ai_agreement.sas
+# 5. Into SAS Viya with the app's SAS client (.env): EIR_BENCH_CALLS, _HEADLINE, _METRICS in Public
+python -m evals.benchmark.to_sas push
+# 6. Fairness by sex and age band, computed in CAS (freqTab, fairAITools.assessBias): EIR_BENCH_BIAS_*
+python -m evals.benchmark.sas_fairness
+# 7. The same kappas, headline and fairness tests in SAS Studio: run sas/eir_ai_agreement.sas
 ```
 
 Tests (offline, fake model): `python -m unittest evals.tests.test_benchmark`.
@@ -34,6 +38,8 @@ Tests (offline, fake model): `python -m unittest evals.tests.test_benchmark`.
 - `score.py`, `stats.py`: metrics (weighted kappa and its standard error as in SAS PROC FREQ;
   cross-checked against scikit-learn and statsmodels), Wilson intervals, bootstrap.
 - `guardrails.py`: mutation tests of the two deterministic checks on the real outputs.
+- `to_sas.py`: the results as CAS tables (no free text), pushed and saved like the app's own sync.
+- `sas_fairness.py`: SAS's bias assessment by sex and age band; checks SAS's counts against metrics.json.
 - `data/purav_patient_review_v2.1.csv`: Purav's returned review (source of his ESI labels).
 
 ## Data licences and credit

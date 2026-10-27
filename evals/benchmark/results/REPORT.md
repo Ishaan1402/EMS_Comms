@@ -108,7 +108,8 @@ price. Extraction: median 2.5 s, p90 3.2 s, $0.0002 per call.
 
 ## Checking it in SAS
 
-Upload [esi_pairs.csv](esi_pairs.csv) and run `sas/eir_ai_agreement.sas`. PROC FREQ's weighted
+`python -m evals.benchmark.to_sas push` loads these results into CAS (`Public.EIR_BENCH_CALLS`), and
+`sas/eir_ai_agreement.sas` reads that table in SAS Studio (or upload [esi_pairs.csv](esi_pairs.csv)). PROC FREQ's weighted
 kappa (Fleiss-Cohen) should print: purav/all 0.53, mimic/all 0.16, mimic/ems 0.12, ktas/all 0.40,
 ktas/ems 0.34, ktas_spoken/all 0.32, and 0.88 for KTAS nurses vs experts. The linear
 (Cicchetti-Allison) kappas should print: 0.36, 0.08, 0.04, 0.31, 0.27, 0.25, and 0.83 for the nurses. Not yet run in SAS; the
