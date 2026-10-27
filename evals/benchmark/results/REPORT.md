@@ -32,9 +32,11 @@ Every visit with reference level 1-2, primary run:
 Every reference level 1 visit that got a level was put at 1-2: KTAS ambulance 16/16, KTAS all
 19/19, MIMIC 11/11, Purav 2/2.
 
-For comparison, on the same 154 KTAS ambulance visits the triage nurses' own KTAS put **15
-(10%)** at 3 or lower. The nurses used KTAS itself, so this is a same-scale human yardstick; the
-AI was asked for ESI, a different 5-level scale, so the comparison is coarse (urgent vs not).
+For context only, on the same 154 KTAS ambulance visits the triage nurses' own KTAS put **15
+(10%)** at 3 or lower. This is not a fair head-to-head: the experts' label and the AI's report both
+come from the same written record, while the nurses triaged the live patient; the AI could also
+decline to give a level and the nurses could not; and the AI was asked for ESI, a different scale.
+Do not present it as Eir doing better than nurses.
 
 ### Exact level agreement (where Eir is weaker)
 
@@ -196,9 +198,11 @@ Each line is exact; footnote the source set on the slide.
 1. "We tested Eir's AI on 1,474 real, de-identified emergency department visits from two public
    datasets, plus our clinician-labelled cases: 5,096 AI calls, every one logged."
 2. "Of 154 ambulance arrivals experts rated critical or emergent, Eir put 138 in its top two
-   levels, held 14 for clinician review, and placed 2 lower." (KTAS data, Moon et al. 2019)
-3. "Triage nurses in the same study placed 15 of those 154 lower." (same-scale human yardstick;
-   say "for context", not "Eir beats nurses")
+   levels, held 14 for clinician review, and placed 2 lower. On a second dataset, it placed 10 of
+   75 urgent ambulance visits lower." (KTAS, Moon et al. 2019; MIMIC-IV-ED Demo, nurse ESI). Never
+   use the first sentence without the second.
+3. (Dropped: the triage nurse comparison. The experts and the AI read the same record while the
+   nurses saw the live patient, and the AI could abstain, so on a slide it reads as "beats nurses".)
 4. "We planted 25,500 wrong numbers in real AI handoffs. The check caught every one that wasn't
    already in the report: 23,684 of 23,684." (the other 1,816 equalled another number in the report)
 5. "It read 10,232 of 10,233 vital signs correctly, and never recorded a wrong value."
