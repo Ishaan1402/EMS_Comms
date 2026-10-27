@@ -84,7 +84,7 @@ title;
    Expect the AI: Given 1-2 138, No level (Needs review) 14, Given 3-5 2; the nurses: 3-5 15. */
 data work.urgent;
   set work.pairs;
-  where repeat = 1 and reference_level <= 2 and dataset in ('ktas', 'mimic');
+  where repeat = 1 and reference_level <= 2 and dataset in ('ktas', 'mimic', 'nhamcs');
   length nurse_placed $ 9;
   if not missing(nurse_ktas) then nurse_placed = ifc(nurse_ktas <= 2, 'Given 1-2', 'Given 3-5');
   ai_put_at_3_5 = (urgent_outcome = 'Given 3-5');
@@ -98,9 +98,13 @@ proc freq data=work.urgent;
 run;
 
 /* Fairness: of the urgent visits, did the AI put one sex or age band at 3-5, or give it no level,
-   more often? 8 tests, so the bar is p < 0.05 / 8 = 0.006. Expected two-sided Fisher p:
-     put at 3-5: KTAS sex 0.12, age 0.06; MIMIC sex 0.55, age 0.12 (none significant)
-     no level:   KTAS sex 0.56, age 0.004 (under 65 23/122 vs 65+ 8/124); MIMIC sex 0.67, age 0.19 */
+   more often? Two families, each with its own bar: KTAS and MIMIC, 8 tests, p < 0.05 / 8 = 0.006;
+   NHAMCS, 10 tests (these 4 plus race/ethnicity, which is in Public.EIR_BENCH_BIAS_TESTS), p < 0.005.
+   Expected two-sided Fisher p:
+     put at 3-5: KTAS sex 0.12, age 0.06; MIMIC sex 0.55, age 0.12; NHAMCS sex 0.84, age 0.84
+     no level:   KTAS sex 0.56, age 0.004 (under 65 23/122 vs 65+ 8/124); MIMIC sex 0.67, age 0.19;
+                 NHAMCS sex 0.022, age 0.046
+   Only KTAS no level by age band is below its bar. */
 proc sort data=work.urgent; by dataset; run;
 title "Urgent visits Eir put at 3-5 or gave no level, by sex and by age band (Fisher's exact test)";
 proc freq data=work.urgent;
