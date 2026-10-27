@@ -46,6 +46,7 @@ Tests (offline, fake model): `python -m unittest evals.tests.test_benchmark`.
 - `sas_fairness.py`: SAS's bias assessment by sex and age band; checks SAS's counts against metrics.json.
 - `sas_model.py`: EIR_BENCH_FEATURES (KTAS visits with a fixed 30% holdout) and SAS gradient boosting vs the AI.
 - `sas_register.py`: registers the AI in Model Manager with its properties, model card, metrics and prompt.
+- `sas_decision.py`: inputs for the Intelligent Decisioning safety net (and `check` against its reference rule) and the Model Manager monitoring batches.
 - `data/purav_patient_review_v2.1.csv`: Purav's returned review (source of his ESI labels).
 
 ## Data licences and credit

@@ -5,7 +5,7 @@ import io
 import unittest
 
 from backend import sas_sync
-from evals.benchmark import sas_fairness, sas_model, sas_register, to_sas
+from evals.benchmark import sas_decision, sas_fairness, sas_model, sas_register, to_sas
 
 
 def cas_table(columns, rows):
@@ -131,6 +131,15 @@ class BenchmarkSasTest(unittest.TestCase):
         self.assertEqual(rows[critical + ("KTAS experts", "Given 1-2")]["GROUP_VISITS"], 39)
         self.assertEqual(rows[critical + ("Triage nurses", "Given 3-5")]["VISITS"], 19)
         self.assertNotIn(critical + ("Triage nurses", to_sas.NO_LEVEL), rows)
+
+    def test_safety_net_rule_never_treats_a_missing_vital_as_danger(self):
+        base = {"AI_GAVE_LEVEL": 0, "AI_ESI": None, "MENTAL_CODE": None, "HR": None, "SBP": None, "RR": None, "SPO2": None}
+        self.assertEqual(sas_decision.RULE(base), "Needs review: no AI level")
+        self.assertEqual(sas_decision.RULE(base | {"SPO2": 88.0}), "Urgent: safety net (no AI level, danger-zone vitals)")
+        self.assertEqual(sas_decision.RULE(base | {"AI_GAVE_LEVEL": 1, "AI_ESI": 3, "HR": 140.0}), "Not urgent: AI level 3-5")
+        counts = sas_decision.expected(sas_decision.decision_rows(self.tables["CALLS"]))["KTAS ambulance arrivals"]
+        self.assertEqual(counts[(1, "Urgent: safety net (no AI level, danger-zone vitals)")], 7)
+        self.assertEqual(counts[(1, "Needs review: no AI level")], 7)
 
 
 if __name__ == "__main__":
