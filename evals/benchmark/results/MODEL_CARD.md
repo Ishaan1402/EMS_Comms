@@ -25,8 +25,8 @@
 ## Results (primary run)
 - Of 154 KTAS ambulance arrivals experts rated 1-2: Eir put 138 at 1-2,
   held 14 for review, placed
-  2 at 3-5. Triage nurses placed
-  15 at 3-5.
+  2 at 3-5. For context only (see the note under Limits), the triage
+  nurses' own KTAS put 15 at 3-5.
 - Exact level agreement is modest: KTAS ambulance 139/277 (50%), within one level
   250/277 (90%), weighted kappa 0.34
   (0.25-0.43). It leans urgent: over-triage 130/277 (47%).
@@ -48,6 +48,8 @@ trained on 70% of the KTAS visits and compared on the same 30% holdout; the matc
 | Triage nurses | the patient, at triage | 62 | 0 | 12 | 11 of 306 |
 | Simple vitals rule | mental state and 5 vitals | 33 | 0 | 41 | 71 of 306 |
 
+The triage nurses' row is context only, not a head-to-head (see Limits).
+
 ## Patient outcomes (what happened after triage)
 A triage level is a judgement, even the experts'. KTAS and NHAMCS also record each visit's disposition:
 
@@ -59,6 +61,8 @@ A triage level is a judgement, even the experts'. KTAS and NHAMCS also record ea
 | NHAMCS ambulance arrivals | ICU, death or surgery from ED | 155 | 110 / 38 / 7 | 105 / 50 | n/a |
 | NHAMCS ambulance arrivals | Ward admission | 351 | 224 / 95 / 32 | 155 / 196 | n/a |
 | NHAMCS ambulance arrivals | Sent home (discharge or AMA) | 1073 | 597 / 393 / 83 | 237 / 836 | n/a |
+
+The nurse column is context only: the nurses saw the live patient and could not decline to give a level.
 
 ## Fairness (SAS `fairAITools.assessBias` and Fisher's exact test)
 Urgent visits put at 3-5, by group:
@@ -81,12 +85,13 @@ Urgent visits put at 3-5, by group:
 - NHAMCS by race ethnicity, put at 3-5: Non-Hispanic White 13/289, Non-Hispanic other 1/31 (Fisher p 1.000)
 - NHAMCS by race ethnicity, no level: Non-Hispanic White 79/289, Non-Hispanic other 7/31 (Fisher p 0.673)
 
-KTAS urgent patients got no level 65 and over 8/124 vs Under 65 23/122 (Fisher p 0.004); no other gap was significant (8 tests on KTAS and MIMIC and 10 tests on NHAMCS, each family with its own Bonferroni bar). Eight two-sided Fisher tests (2 datasets x 2 variables
-x 2 outcomes), significant below 0.05 / 8. A visit with no level goes to Needs review, so a clinician sees it. The counts
-are small; these are the checks to repeat on live data.
+KTAS urgent patients got no level 65 and over 8/124 vs Under 65 23/122 (Fisher p 0.004); no other gap was significant (8 tests on KTAS and MIMIC and 10 tests on NHAMCS, each family with its own Bonferroni bar). Two-sided Fisher tests within each dataset, each family with its
+own Bonferroni bar. A visit with no level goes to Needs review, so a clinician sees it. The counts are small; these are
+the checks to repeat on live data.
 
 ## Limits
 - No result is clinical validation. KTAS is not ESI; use it for "urgent flagged urgent", not ESI accuracy.
 - The MIMIC intervals treat repeat visits as independent. Reasons were not graded. Transcription was not tested.
+- Nurse comparisons are context only, not a head-to-head: the experts' label and the AI's report both come from the same written record, while the nurses triaged the live patient; only the AI could decline to give a level; and the AI was asked for ESI, a different scale from KTAS.
 
 Source: `evals/benchmark/results/REPORT.md` and `metrics.json` in the Eir repository.

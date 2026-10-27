@@ -20,6 +20,10 @@ from .stats import fisher_exact
 from .to_sas import NO_LEVEL, PREFIX, RESULTS, build_tables
 
 PROJECT = "Eir AI triage"
+# Same caveat as REPORT.md (#80): every nurse figure is context, never a head-to-head.
+NURSE_NOTE = ("Nurse comparisons are context only, not a head-to-head: the experts' label and the AI's report both come "
+              "from the same written record, while the nurses triaged the live patient; only the AI could decline to give "
+              "a level; and the AI was asked for ESI, a different scale from KTAS.")
 MODEL = "Eir AI triage suggestion"
 PROMPTS = Path(__file__).parents[1] / "prompts"
 PROJECT_TYPE = "application/vnd.sas.models.project+json"
@@ -153,8 +157,8 @@ def model_card(metrics: dict, tables: dict, comparison: list) -> str:
 ## Results (primary run)
 - Of {urgent_n} KTAS ambulance arrivals experts rated 1-2: Eir put {head[(ktas, 'Eir AI', 'Given 1-2')]['VISITS']} at 1-2,
   held {head[(ktas, 'Eir AI', 'No level (Needs review)')]['VISITS']} for review, placed
-  {head[(ktas, 'Eir AI', 'Given 3-5')]['VISITS']} at 3-5. Triage nurses placed
-  {head[(ktas, 'Triage nurses', 'Given 3-5')]['VISITS']} at 3-5.
+  {head[(ktas, 'Eir AI', 'Given 3-5')]['VISITS']} at 3-5. For context only (see the note under Limits), the triage
+  nurses' own KTAS put {head[(ktas, 'Triage nurses', 'Given 3-5')]['VISITS']} at 3-5.
 - Exact level agreement is modest: KTAS ambulance {share(ems['exact']['k'], ems['exact']['n'])}, within one level
   {share(ems['within_one']['k'], ems['within_one']['n'])}, weighted kappa {kappa['value']:.2f}
   ({kappa['low']:.2f}-{kappa['high']:.2f}). It leans urgent: over-triage {share(ems['over_triage']['k'], ems['over_triage']['n'])}.
@@ -172,6 +176,8 @@ trained on 70% of the KTAS visits and compared on the same 30% holdout; the matc
 | --- | --- | --- | --- | --- | --- |
 {baseline}
 
+The triage nurses' row is context only, not a head-to-head (see Limits).
+
 ## Patient outcomes (what happened after triage)
 A triage level is a judgement, even the experts'. KTAS and NHAMCS also record each visit's disposition:
 
@@ -179,17 +185,20 @@ A triage level is a judgement, even the experts'. KTAS and NHAMCS also record ea
 | --- | --- | --- | --- | --- | --- |
 {outcome_table(tables['OUTCOMES'])}
 
+The nurse column is context only: the nurses saw the live patient and could not decline to give a level.
+
 ## Fairness (SAS `fairAITools.assessBias` and Fisher's exact test)
 Urgent visits put at 3-5, by group:
 {chr(10).join('- ' + line for line in fairness_lines(tables['CALLS']))}
 
-{fairness_summary(tables['CALLS'])[len('Fairness: '):]} Eight two-sided Fisher tests (2 datasets x 2 variables
-x 2 outcomes), significant below 0.05 / 8. A visit with no level goes to Needs review, so a clinician sees it. The counts
-are small; these are the checks to repeat on live data.
+{fairness_summary(tables['CALLS'])[len('Fairness: '):]} Two-sided Fisher tests within each dataset, each family with its
+own Bonferroni bar. A visit with no level goes to Needs review, so a clinician sees it. The counts are small; these are
+the checks to repeat on live data.
 
 ## Limits
 - No result is clinical validation. KTAS is not ESI; use it for "urgent flagged urgent", not ESI accuracy.
 - The MIMIC intervals treat repeat visits as independent. Reasons were not graded. Transcription was not tested.
+- {NURSE_NOTE}
 
 Source: `evals/benchmark/results/REPORT.md` and `metrics.json` in the Eir repository.
 """
@@ -209,7 +218,8 @@ def properties(metrics: dict, tables: dict) -> list:
         "KTAS ambulance urgent - put at 1-2": share(head[(ktas, "Eir AI", "Given 1-2")]["VISITS"], n),
         "KTAS ambulance urgent - held for review": share(head[(ktas, "Eir AI", "No level (Needs review)")]["VISITS"], n),
         "KTAS ambulance urgent - put at 3-5": share(head[(ktas, "Eir AI", "Given 3-5")]["VISITS"], n),
-        "KTAS ambulance urgent - nurses put at 3-5": share(head[(ktas, "Triage nurses", "Given 3-5")]["VISITS"], n),
+        "KTAS ambulance urgent - nurses put at 3-5": share(head[(ktas, "Triage nurses", "Given 3-5")]["VISITS"], n)
+        + " (context only, not a head-to-head)",
         "KTAS ambulance - within one level": share(ems["ai_vs_reference"]["within_one"]["k"],
                                                    ems["ai_vs_reference"]["within_one"]["n"]),
         "KTAS ambulance - weighted kappa": f"{ems['ai_vs_reference']['kappa_quadratic']['value']:.2f}",
@@ -305,6 +315,10 @@ async def _update(client, url: str, model_id: str, props: list, files: dict, lim
     model = response.json()
     ours = {p["name"] for p in props}
     model["properties"] = [p for p in model.get("properties") or [] if p["name"] not in ours] + props
+    benefit = model.get("expectedBenefit") or ""
+    if "nurse" in benefit.lower() and "context only" not in benefit:
+        # Typed from an earlier card that compared the AI with the nurses; keep the text, add the caveat.
+        model["expectedBenefit"] = benefit.rstrip() + " (The nurse figure is context only, not a head-to-head; see Limitations.)"
     if limitation:
         # Ours is the sentence starting "Fairness: " at the end; text people typed before it stays.
         typed = (model.get("limitations") or "").split(" Fairness: ")[0].split("Fairness: ")[0].strip()
@@ -334,7 +348,7 @@ def main(argv=None) -> int:
             card = model_card(metrics, tables, comparison)
             (RESULTS / "MODEL_CARD.md").write_text(card, encoding="utf-8")
             return await register(client, settings, card, properties(metrics, tables), metrics,
-                                  fairness_summary(tables["CALLS"]))
+                                  f"{fairness_summary(tables['CALLS'])} {NURSE_NOTE}")
         finally:
             await client.close()
     try:
