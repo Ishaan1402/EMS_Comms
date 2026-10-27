@@ -440,6 +440,11 @@ class TestAssessments:
         assert after["processing"]["reasons"] == [
             "Handoff mentions 165, not found in the crew's reports. Check before relying on it."]
 
+    def test_the_danger_zone_ages_in_an_esi_reason_are_not_flagged(self, monkeypatch):
+        use_scorer(monkeypatch, output(esi="2", esi_reason="HR above 100 over age 12; not an infant 28 days or younger."))
+        after = get_case(start_case()["id"])
+        assert after["processing"]["reasons"] == []
+
     def test_failure_keeps_the_previous_assessment_and_flags_it_outdated(self, monkeypatch):
         use_scorer(monkeypatch, SCORED, RuntimeError("model outage"))
         case = start_case()
