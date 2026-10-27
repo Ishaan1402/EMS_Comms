@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from evals.annotations import import_workbook, parse_patient_rows
-from evals.contracts import ROOT, case_dataset_version, load_cases, load_json
+from evals.contracts import ROOT, case_dataset_version, load_cases, load_json, reference_errors
 from evals.demo import raw_report_baseline
 from evals.evaluate import evaluate
 from evals.experiments import build_plan, case_input
@@ -35,6 +35,137 @@ class PatientReviewTests(unittest.TestCase):
 
     def set_answer(self, label, value):
         next(row for row in self.rows if row[0] == label)[1] = value
+
+    def use_esi_form(self):
+        labels = {"Preparation needed?": "ESI level (1–5)",
+                  "Reason for preparation / limits": "ESI reason / limits"}
+        for row in self.rows:
+            row[0] = labels.get(row[0], row[0])
+
+    def test_native_esi_levels_remain_distinct_and_keep_legacy_metric_mapping(self):
+        self.use_esi_form()
+        for level, category in ((1, "Prepare now"), (2, "Prepare now"), (3, "Can wait"),
+                                (4, "Routine"), (5, "Routine"), ("Cannot assess", "Unsure")):
+            with self.subTest(level=level):
+                self.set_answer("ESI level (1–5)", level)
+                self.set_answer("ESI reason / limits", "Reported findings.\nImportant limits remain.")
+                ref = parse_patient_rows(self.rows, self.cases)[0]
+                self.assertEqual(ref["esi_level"], str(level))
+                self.assertEqual(ref["esi_reason"], "Reported findings.\nImportant limits remain.")
+                self.assertEqual(ref["preparation_category"], category)
+                self.assertIn("ESI / limits: Reported findings.", ref["explanation_missing_information"])
+                self.assertFalse(ref["approved"])
+
+    def test_blank_esi_is_missing_rather_than_a_default_or_abstention(self):
+        self.use_esi_form()
+        ref = parse_patient_rows(self.rows, self.cases)[0]
+        self.assertIsNone(ref["esi_level"])
+        self.assertIsNone(ref["preparation_category"])
+        self.assertIsNone(ref["preparation_category_display"])
+        self.assertFalse(ref["approved"])
+
+    def test_integral_excel_scores_and_ascii_esi_label_import(self):
+        self.use_esi_form()
+        row = next(row for row in self.rows if row[0] == "ESI level (1–5)")
+        row[:] = ["ESI level (1-5)", 2.0]
+        self.rows.insert(6, ["Risk Score (1-10)", 7.0])
+        self.rows.insert(7, ["Risk reason / limits", "Reported deterioration."])
+        ref = parse_patient_rows(self.rows, self.cases)[0]
+        self.assertEqual(ref["esi_level"], "2")
+        self.assertEqual(ref["risk_score"], 7)
+        self.assertEqual(ref["risk_reason"], "Reported deterioration.")
+        self.assertNotIn("risk_score", parse_patient_rows(self.rows, self.cases)[1])
+
+    def test_invalid_esi_is_rejected_instead_of_clamped_or_mapped(self):
+        self.use_esi_form()
+        for level in (0, 6, 1.5, True, "ESI 2", "Unsure", "nan"):
+            with self.subTest(level=level):
+                self.set_answer("ESI level (1–5)", level)
+                with self.assertRaisesRegex(ValueError, "Invalid esi_level"):
+                    parse_patient_rows(self.rows, self.cases)
+
+    def test_optional_risk_score_does_not_accept_invalid_or_fractional_values(self):
+        self.use_esi_form()
+        row = ["Risk Score (1-10)", ""]
+        self.rows.insert(6, row)
+        for value in (0, 11, 4.5, True, "7/10"):
+            with self.subTest(value=value):
+                row[1] = value
+                with self.assertRaisesRegex(ValueError, "Invalid risk_score"):
+                    parse_patient_rows(self.rows, self.cases)
+        row[1] = ""
+        self.assertIsNone(parse_patient_rows(self.rows, self.cases)[0]["risk_score"])
+
+    def test_esi_form_rejects_duplicate_aliases_mixed_formats_and_missing_reason_row(self):
+        for extra in (["ESI level", "2"], ["Preparation needed?", "Can wait"]):
+            with self.subTest(extra=extra):
+                self.rows = form_rows(self.cases)
+                self.use_esi_form()
+                self.rows.insert(6, extra)
+                with self.assertRaisesRegex(ValueError, "Duplicate Patient review field|Mixed ESI"):
+                    parse_patient_rows(self.rows, self.cases)
+        self.rows = form_rows(self.cases)
+        self.use_esi_form()
+        self.rows.remove(next(row for row in self.rows if row[0] == "ESI reason / limits"))
+        with self.assertRaisesRegex(ValueError, "Incomplete/changed"):
+            parse_patient_rows(self.rows, self.cases)
+
+    def test_esi_form_still_rejects_changed_source_reports(self):
+        self.use_esi_form()
+        next(row for row in self.rows if "324 mg" in row[1])[1] = "A rewritten source report."
+        with self.assertRaisesRegex(ValueError, "current_transcript changed"):
+            parse_patient_rows(self.rows, self.cases)
+
+    def test_esi_approval_requires_its_reason_and_consistent_derived_category(self):
+        from evals.annotations import approve_complete
+        self.use_esi_form()
+        self.rows.insert(0, ["Reviewer alias", "Dr Test"])
+        for label, value in (("EMS to ED Handoff", "Handoff."), ("Meaningful change?", "No earlier report"),
+                             ("Evidence / missing information", "Source evidence."),
+                             ("ESI level (1–5)", "2"), ("Review status", "Done")):
+            self.set_answer(label, value)
+        reference = {"dataset_version": "patient_review_v2.1",
+                     "cases": parse_patient_rows(self.rows, self.cases), "queues": []}
+        self.assertIn("missing esi_reason", approve_complete(reference)[0])
+        self.assertFalse(reference["cases"][0]["approved"])
+        self.set_answer("ESI reason / limits", "Reported high-risk features.")
+        reference["cases"] = parse_patient_rows(self.rows, self.cases)
+        approve_complete(reference)
+        ref = reference["cases"][0]
+        self.assertTrue(ref["approved"])
+        ref["preparation_category"] = "Routine"
+        self.assertIn("preparation_category does not match esi_level", reference_errors(ref))
+
+    def test_real_xlsx_import_preserves_original_comments_without_approving_them(self):
+        try:
+            from openpyxl import Workbook
+            from openpyxl.comments import Comment
+        except ImportError:
+            self.skipTest("Optional openpyxl not installed")
+        self.use_esi_form()
+        self.set_answer("ESI level (1–5)", 3)
+        self.set_answer("ESI reason / limits", "Reported resource needs.")
+        book = Workbook()
+        sheet = book.active
+        sheet.title = "Patient review"
+        for row in self.rows:
+            sheet.append(row)
+        handoff_row = next(i for i, row in enumerate(self.rows, 1) if row[0] == "EMS to ED Handoff")
+        address = f"B{handoff_row}"
+        note = "Assistant-formatted summary.\nOriginal reviewer text: Good information, can structure  "
+        sheet[address].comment = Comment(note, "Reviewer")
+        archive = book.create_sheet("Original v2")
+        archive["B1"] = "Not a current answer."
+        archive["B1"].comment = Comment("Archived note must not enter current references.", "Reviewer")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "review.xlsx"
+            book.save(path)
+            book.close()
+            result = import_workbook(path, self.cases, [])
+        self.assertEqual(result["cases"][0]["esi_level"], "3")
+        self.assertEqual(result["source"]["cell_notes"], {
+            "Patient review": {address: {"author": "Reviewer", "text": note}}})
+        self.assertTrue(all(row["approved"] is False for row in result["cases"]))
 
     def test_partial_answers_and_optional_direction_survive_without_approval(self):
         self.set_answer("EMS to ED Handoff", "Partial clinician handoff, still under discussion.")
