@@ -27,7 +27,7 @@ from backend import sas_sync
 from .build_cases import checked, nhamcs_outcome
 
 PREFIX = "EIR_IMPACT_"
-US_EDS = 5613  # NEDI-USA count of non-federal, non-specialty US EDs (Sullivan et al., WestJEM 2024)
+US_EDS = 5613  # NEDI-USA count of non-federal, non-specialty US EDs (Bennett et al., West J Emerg Med 2024)
 LARGE_ED_AMBULANCES = 10000  # the example hospital of the existing Business Impact report
 CRITICAL = "ICU, death or surgery from ED"
 
