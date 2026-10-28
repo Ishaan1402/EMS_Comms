@@ -5,7 +5,7 @@ import io
 import unittest
 
 from backend import sas_sync
-from evals.benchmark import sas_decision, sas_fairness, sas_model, sas_register, to_sas
+from evals.benchmark import impact, sas_decision, sas_fairness, sas_model, sas_register, to_sas
 
 
 def cas_table(columns, rows):
@@ -140,6 +140,24 @@ class BenchmarkSasTest(unittest.TestCase):
         counts = sas_decision.expected(sas_decision.decision_rows(self.tables["CALLS"]))["KTAS ambulance arrivals"]
         self.assertEqual(counts[(1, "Urgent: safety net (no AI level, danger-zone vitals)")], 7)
         self.assertEqual(counts[(1, "Needs review: no AI level")], 7)
+
+    def test_impact_chain_scales_each_hospital_and_keeps_its_evidence_class(self):
+        eds = impact.US_EDS
+        national = {"visits": (eds * 30000, 100), "ambulance": (eds * 5000, 50), "critical": (eds * 465, 20),
+                    "admitted": (eds * 1500, 30), "stroke": (eds * 100, 30), "stemi": (eds * 10, 9)}
+        rows = {(r["HOSPITAL"], r["SCENARIO"], r["MEASURE"]): r for r in impact.hospital_rows(national)}
+        average = lambda measure, scenario="Middle": rows[("Average US ED", scenario, measure)]  # noqa: E731
+        self.assertAlmostEqual(average("Ambulance arrivals")["VALUE"], 5000)
+        self.assertAlmostEqual(average("Critical arrivals Eir flags urgent (ESI 1-2) before they arrive")["VALUE"], 330)
+        self.assertAlmostEqual(average("ED treatment hours freed")["VALUE"], 1500 * 0.8 * 0.5 * 30 / 60)
+        self.assertAlmostEqual(average("ED treatment hours freed", "Strong")["VALUE"], 1500 * 0.8 * 0.5 * 45 / 60)
+        self.assertEqual(average("Stroke arrivals with no advance notice")["EVIDENCE"], impact.STUDY)
+        self.assertEqual(average("Stroke patients newly announced through Eir")["EVIDENCE"], impact.ASSUMED)
+        large = rows[("Large ED (10,000 ambulances a year)", "Middle", "Ambulance arrivals")]
+        self.assertAlmostEqual(large["VALUE"], 10000)
+        steps = sorted(r["STEP"] for r in impact.hospital_rows(national)
+                       if r["HOSPITAL"] == "Average US ED" and r["SCENARIO"] == "Cautious")
+        self.assertEqual(steps, list(range(1, len(steps) + 1)))
 
 
 if __name__ == "__main__":
