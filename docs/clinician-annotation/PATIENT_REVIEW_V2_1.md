@@ -61,8 +61,8 @@ python -m evals import-annotations \
   --out evals/local/patient-review-v2.1-import-01
 ```
 
-`--approve-complete` approves every case marked Done with a handoff, change, preparation and at
-least one explanation, under the reviewer alias and the dataset version, and prints any case or
+`--approve-complete` approves every complete case marked Done under the reviewer alias and the
+dataset version, and prints any case or
 attention group it left unapproved. `--queues` reads the Attention exercise groups (A01, A02);
 "Cannot assess" there is stored as Unsure. Generate the replay with the same `--queues` file so the
 app's queue order is snapshotted for the same groups.
@@ -71,8 +71,26 @@ The importer checks the dataset version, case IDs, patient details, report text,
 and ETAs against the selected fixtures. It reads only `Patient review`, never the archived answers.
 Partial responses and both explanation fields are preserved. The displayed `Cannot assess` is
 explicitly stored as the existing evaluation contract's `Unsure`, with the display answer retained
-separately. `Done` is progress, not approval: every imported `approved` remains false and reviewer
-and rubric verification must still be completed before scoring.
+separately in the original preparation form.
+
+The updated form's `ESI level (1–5)` (also `ESI level (1-5)` or `ESI level`) and
+`ESI reason / limits` import as `esi_level` and `esi_reason`. ESI levels remain distinct strings
+`1`–`5` or `Cannot assess`; a blank remains missing. A compatibility preparation category is
+derived using the app's project mapping: 1–2 to Prepare now, 3 to Can wait, 4–5 to Routine,
+and Cannot assess to Unsure. This mapping is not a clinical equivalence. The importer rejects
+mixed ESI/preparation fields within a case and still accepts the older preparation form.
+Optional `Risk Score (1-10)` / `Risk score (1–10)` and `Risk reason / limits` rows retain a
+whole-number score and its explanation when supplied. Missing risk labels are not inferred.
+
+Cell notes from the imported tabs are retained verbatim, with their authors, under
+`source.cell_notes`, keyed by sheet name and cell address. Use the XLSX export to retain these
+notes; a values-only CSV cannot carry them. Notes distinguish assistant-formatted handoffs or
+added labels from the clinician's original entries; retaining a note does not approve its content.
+
+`Done` is progress, not approval. Without `--approve-complete`, every imported `approved` remains
+false. Only use that flag after checking the answers and their notes against the agreed rubric.
+An ESI reference also needs its ESI reason before it can be approved; reviewer and rubric
+verification must still be completed before scoring.
 
 The selected fixtures declare `patient_review_v2.1`; imported references and prepared files retain
 that version. Versioned case sets do not silently inherit the original pilot's queue exercises.

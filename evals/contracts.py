@@ -120,6 +120,14 @@ def reference_errors(row):
         errors.append("missing/invalid meaningful_change")
     if row.get("preparation_category") not in PREPARATION:
         errors.append("missing/invalid preparation_category")
+    if "esi_level" in row:
+        level = text(row.get("esi_level"))
+        if level not in ESI:
+            errors.append("missing/invalid esi_level")
+        elif row.get("preparation_category") != PREPARATION_FOR_ESI[level]:
+            errors.append("preparation_category does not match esi_level")
+        if not text(row.get("esi_reason")):
+            errors.append("missing esi_reason")
     return errors
 
 

@@ -4,7 +4,8 @@ import hashlib
 import re
 from pathlib import Path
 
-from .contracts import CHANGE, PREPARATION, STATUSES, blank_reference, case_dataset_version, text
+from .contracts import (CHANGE, ESI, PREPARATION, PREPARATION_FOR_ESI, STATUSES,
+                        blank_reference, case_dataset_version, text)
 
 PATIENT_ANSWERS = {
     "EMS to ED Handoff": "reference_summary",
@@ -13,8 +14,18 @@ PATIENT_ANSWERS = {
     "Evidence / missing information": "change_evidence",
     "Preparation needed?": "preparation_category",
     "Reason for preparation / limits": "preparation_explanation",
+    "ESI level (1–5)": "esi_level",
+    "ESI level (1-5)": "esi_level",
+    "ESI level": "esi_level",
+    "ESI reason / limits": "esi_reason",
+    "Risk Score (1-10)": "risk_score",
+    "Risk score (1–10)": "risk_score",
+    "Risk reason / limits": "risk_reason",
     "Review status": "status",
 }
+PATIENT_LEGACY_FIELDS = {"preparation_category", "preparation_explanation"}
+PATIENT_ESI_FIELDS = {"esi_level", "esi_reason"}
+PATIENT_OPTIONAL_FIELDS = {"risk_score", "risk_reason"}
 PATIENT_PREPARATION = ("Prepare now", "Can wait", "Routine", "Cannot assess")
 PATIENT_DIRECTIONS = ("Improvement", "Deterioration", "Mixed", "Unclear")
 
@@ -35,25 +46,50 @@ def parse_patient_rows(rows, cases):
         if active is None:
             return
         case = known[active["case_id"]]
-        expected = set(PATIENT_ANSWERS.values()) | {"patient_details", "current_transcript"}
+        esi_form = bool(seen & PATIENT_ESI_FIELDS)
+        expected = set(PATIENT_ANSWERS.values()) - PATIENT_ESI_FIELDS - PATIENT_OPTIONAL_FIELDS
+        if esi_form:
+            if seen & PATIENT_LEGACY_FIELDS:
+                raise ValueError(f"Mixed ESI and preparation fields for {active['case_id']}")
+            expected = (expected - PATIENT_LEGACY_FIELDS) | PATIENT_ESI_FIELDS
+        expected |= {"patient_details", "current_transcript"}
         if case["prior_information"] != "No earlier report provided.":
             expected.add("prior_information")
-        if seen != expected:
+        if seen - PATIENT_OPTIONAL_FIELDS != expected:
             raise ValueError(f"Incomplete/changed Patient review layout for {active['case_id']}")
         active["explanation_missing_information"] = "\n".join(
             f"{label}: {active[field]}" for label, field in (
                 ("Change / missing information", "change_evidence"),
-                ("Preparation / limits", "preparation_explanation")) if active.get(field)) or None
+                ("ESI / limits", "esi_reason") if esi_form else
+                ("Preparation / limits", "preparation_explanation"),
+                ("Risk / limits", "risk_reason")) if active.get(field)) or None
         for field, choices in (("meaningful_change", CHANGE), ("change_direction", PATIENT_DIRECTIONS),
                                ("status", STATUSES)):
             if active[field] is not None and active[field] not in choices:
                 raise ValueError(f"Invalid {field} for {active['case_id']}: {active[field]}")
-        display = active["preparation_category"]
-        if display is not None and display not in PATIENT_PREPARATION:
-            raise ValueError(f"Invalid preparation_category for {active['case_id']}: {display}")
-        active["preparation_category_display"] = display
-        if display == "Cannot assess":
-            active["preparation_category"] = "Unsure"
+        if esi_form:
+            level = active["esi_level"]
+            # Excel may store an integral dropdown value as a float (e.g. 2.0).
+            if level is not None and re.fullmatch(r"[1-5]\.0+", level):
+                level = level.split(".")[0]
+            if level is not None and level not in ESI:
+                raise ValueError(f"Invalid esi_level for {active['case_id']}: {level}")
+            active["esi_level"] = level
+            active["preparation_category"] = PREPARATION_FOR_ESI.get(level)
+            active["preparation_category_display"] = (
+                "Cannot assess" if level == "Cannot assess" else active["preparation_category"])
+        else:
+            display = active["preparation_category"]
+            if display is not None and display not in PATIENT_PREPARATION:
+                raise ValueError(f"Invalid preparation_category for {active['case_id']}: {display}")
+            active["preparation_category_display"] = display
+            if display == "Cannot assess":
+                active["preparation_category"] = "Unsure"
+        risk = active.get("risk_score")
+        if risk is not None:
+            if not re.fullmatch(r"(?:[1-9]|10)(?:\.0+)?", risk):
+                raise ValueError(f"Invalid risk_score for {active['case_id']}: {risk}")
+            active["risk_score"] = int(risk.split(".")[0])
 
     for row in rows:
         label, value = text(row[0] if row else None), text(row[1] if len(row) > 1 else None)
@@ -310,7 +346,9 @@ def import_workbook(path, cases, queue_definitions):
     except ImportError as exc:
         raise RuntimeError("XLSX import needs openpyxl: pip install -r evals/requirements.txt") from exc
     path = Path(path)
-    workbook = load_workbook(path, read_only=True, data_only=False)
+    # ReadOnlyCell drops comments. Normal mode keeps the source/provenance notes
+    # while the existing bounds and formula checks still apply to imported tabs.
+    workbook = load_workbook(path, read_only=False, data_only=False)
     try:
         patient_review = "Patient review" in workbook.sheetnames
         if patient_review and "Doctor review" in workbook.sheetnames:
@@ -319,7 +357,7 @@ def import_workbook(path, cases, queue_definitions):
             if patient_review else ("Doctor review", "Queue exercise")
         if any(name not in workbook.sheetnames for name in required):
             raise ValueError("Missing required review tabs: " + ", ".join(required))
-        grids = {}
+        grids, cell_notes = {}, {}
         for name in required:
             sheet = workbook[name]
             if (sheet.max_row or 0) > 10000:
@@ -332,6 +370,11 @@ def import_workbook(path, cases, queue_definitions):
                 if any(c.data_type == "f" for c in cells) and not (name == "Doctor review" and cells[0].row == 5):
                     raise ValueError(f"Formula in source/answer area: {name}, row {cells[0].row}")
                 grids[name].append([c.value for c in cells])
+                for cell in cells:
+                    comment = getattr(cell, "comment", None)
+                    if comment is not None:
+                        cell_notes.setdefault(name, {})[cell.coordinate] = {
+                            "author": comment.author, "text": comment.text}
         references = (parse_patient_rows(grids["Patient review"], cases) if patient_review
                       else parse_doctor_rows(grids["Doctor review"], cases))
         if "Attention exercise" in grids:
@@ -340,8 +383,11 @@ def import_workbook(path, cases, queue_definitions):
         else:
             queues = parse_queue_rows(grids["Queue exercise"], queue_definitions, cases) \
                 if "Queue exercise" in grids else []
+        source = {"file": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        if cell_notes:
+            source["cell_notes"] = cell_notes
         return {"kind": "clinician_reference", "dataset_version": case_dataset_version(cases) or "pilot_v1",
-                "source": {"file": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
+                "source": source,
                 "cases": references, "queues": queues}
     finally:
         workbook.close()
