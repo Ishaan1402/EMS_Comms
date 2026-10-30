@@ -1,0 +1,11 @@
+recordings/
+out/
+clips/
+stock/
+slides/
+.venv/
+rec/profile/
+rec/video/
+segment/segment
+*.png
+!diagram/eir_flow.png

@@ -1,0 +1,34 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  :root { --navy:#0F1B2D; --blue:#2563EB; --mist:#EEF2F7; --slate:#475569; --line:#94A3B8; }
+  * { box-sizing:border-box; margin:0; }
+  body { width:1920px; height:1080px; background:#fff; font-family:"Helvetica Neue", Helvetica, Arial, sans-serif; color:var(--navy); position:relative; overflow:hidden; }
+  h1 { position:absolute; left:96px; top:64px; font-size:56px; font-weight:700; letter-spacing:-0.5px; }
+  .row { position:absolute; left:96px; top:300px; display:flex; align-items:stretch; gap:0; }
+  .step { width:300px; background:var(--mist); border-radius:18px; padding:30px 26px; }
+  .step.doc { background:#E8F0FE; border:3px solid var(--blue); }
+  .n { width:44px; height:44px; border-radius:50%; background:var(--navy); color:#fff; font-size:22px; font-weight:700; display:flex; align-items:center; justify-content:center; margin-bottom:22px; }
+  .doc .n { background:var(--blue); }
+  .step b { display:block; font-size:30px; line-height:1.15; margin-bottom:12px; }
+  .step span { display:block; font-size:21px; line-height:1.4; color:var(--slate); }
+  .arrow { width:62px; display:flex; align-items:center; justify-content:center; }
+  .who { position:absolute; top:236px; font-size:18px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:var(--slate); }
+  .brand { position:absolute; left:96px; top:1030px; font-size:15px; color:var(--line); }
+</style></head><body>
+<h1>How Eir works</h1>
+<div class="who" style="left:96px">In the ambulance</div>
+<div class="who" style="left:458px">In the app</div>
+<div class="who" style="left:1546px">In the ED</div>
+<div class="row">
+  <div class="step"><div class="n">1</div><b>The medic talks</b><span>Describes the patient, the way crews already do. No typing.</span></div>
+  <div class="arrow"><svg width="40" height="24"><path d="M0,12 H30 M22,4 L32,12 L22,20" stroke="#94A3B8" stroke-width="3" fill="none"/></svg></div>
+  <div class="step"><div class="n">2</div><b>Written down</b><span>A live transcript reaches the hospital in about a second.</span></div>
+  <div class="arrow"><svg width="40" height="24"><path d="M0,12 H30 M22,4 L32,12 L22,20" stroke="#94A3B8" stroke-width="3" fill="none"/></svg></div>
+  <div class="step"><div class="n">3</div><b>Vitals and findings</b><span>Pulled out, each tied to the crew's own words.</span></div>
+  <div class="arrow"><svg width="40" height="24"><path d="M0,12 H30 M22,4 L32,12 L22,20" stroke="#94A3B8" stroke-width="3" fill="none"/></svg></div>
+  <div class="step"><div class="n">4</div><b>Suggested ESI level</b><span>The AI's urgency suggestion, 1 to 5, with its reason.</span></div>
+  <div class="arrow"><svg width="40" height="24"><path d="M0,12 H30 M22,4 L32,12 L22,20" stroke="#94A3B8" stroke-width="3" fill="none"/></svg></div>
+  <div class="step doc"><div class="n">5</div><b>The doctor decides</b><span>A live list of who's coming and why. One tap to acknowledge or change the level.</span></div>
+</div>
+<div class="brand">Eir · InTheBud</div>
+</body></html>

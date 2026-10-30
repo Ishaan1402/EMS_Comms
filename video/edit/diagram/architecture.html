@@ -1,0 +1,64 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  :root { --navy:#0F1B2D; --blue:#2563EB; --sky:#93C5FD; --mist:#EEF2F7; --slate:#475569; --line:#94A3B8; }
+  * { box-sizing:border-box; margin:0; }
+  body { width:1920px; height:1080px; background:#fff; font-family:"Helvetica Neue", Helvetica, Arial, sans-serif; color:var(--navy); position:relative; overflow:hidden; }
+  h1 { position:absolute; left:96px; top:64px; font-size:56px; font-weight:700; letter-spacing:-0.5px; }
+  .sub { position:absolute; left:96px; top:140px; font-size:24px; color:var(--slate); }
+  .col-title { position:absolute; top:212px; font-size:18px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:var(--slate); }
+  .card { position:absolute; background:var(--mist); border-radius:14px; padding:20px 22px; }
+  .card b { display:block; font-size:24px; margin-bottom:6px; }
+  .card span { display:block; font-size:18px; line-height:1.35; color:var(--slate); }
+  .card.dashed { background:#fff; border:2px dashed var(--line); }
+  .cas { position:absolute; left:968px; top:250px; width:200px; height:560px; background:var(--blue); border-radius:18px; color:#fff; padding:28px 22px; }
+  .cas b { font-size:44px; display:block; }
+  .cas span { font-size:19px; line-height:1.4; display:block; margin-top:10px; color:#DBEAFE; }
+  .tool { position:absolute; left:1252px; width:600px; height:68px; background:#fff; border:2px solid #DBE4F0; border-radius:12px; display:flex; align-items:center; padding:0 18px; gap:14px; }
+  .num { flex:none; width:38px; height:38px; border-radius:50%; background:var(--navy); color:#fff; font-size:19px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+  .tool b { font-size:21px; white-space:nowrap; }
+  .tool span { font-size:18px; color:var(--slate); white-space:nowrap; }
+  .who { margin-left:auto; font-size:15px; color:var(--blue); font-weight:600; white-space:nowrap; }
+  .foot { position:absolute; left:96px; top:990px; font-size:18px; color:var(--slate); width:1200px; }
+  .brand { position:absolute; left:96px; top:1030px; font-size:15px; color:var(--line); }
+  svg { position:absolute; left:0; top:0; }
+</style></head><body>
+<h1>How Eir uses SAS Viya</h1>
+
+<div class="col-title" style="left:96px">Data in</div>
+<div class="card" style="left:96px; top:250px; width:330px; height:150px"><b>Eir app</b><span>Synthetic patients.</span></div>
+<div class="card" style="left:96px; top:430px; width:330px; height:180px"><b>Real ER visits</b><span>CDC NHAMCS 2022, KTAS, MIMIC-IV-ED. De-identified, public.</span></div>
+<div class="card dashed" style="left:96px; top:640px; width:330px; height:170px"><b>SAS Data Maker</b><span>Synthetic EMS reports for testing, checked against our rules.</span></div>
+
+<div class="col-title" style="left:532px">Python</div>
+<div class="card" style="left:532px; top:250px; width:330px; height:150px"><b>Live sync</b><span>Five tables to CAS through its REST API, every 10 s.</span></div>
+<div class="card" style="left:532px; top:430px; width:330px; height:180px"><b>Benchmark harness</b><span>Runs Eir's AI on every visit and logs every call.</span></div>
+
+<div class="col-title" style="left:968px">SAS Viya</div>
+<div class="cas"><b>CAS</b><span>Every table lands in the Public caslib.</span></div>
+
+<div class="col-title" style="left:1252px">What SAS does with it</div>
+<div class="tool" style="top:250px"><div class="num">1</div><b>Visual Analytics</b><span>live handoffs</span></div>
+<div class="tool" style="top:330px"><div class="num">2</div><b>SAS Studio</b><span>re-runs the benchmark from raw AI calls</span></div>
+<div class="tool" style="top:410px"><div class="num">3</div><b>Bias assessment</b><span>fairAITools: error rates by sex, age, race</span></div>
+<div class="tool" style="top:490px"><div class="num">4</div><b>Model Studio</b><span>a baseline to compare</span></div>
+<div class="tool" style="top:570px"><div class="num">5</div><b>Model Manager</b><span>model card, monitoring</span></div>
+<div class="tool" style="top:650px"><div class="num">6</div><b>Intelligent Decisioning</b><span>safety-net rules</span></div>
+<div class="tool" style="top:730px"><div class="num">7</div><b>Visual Analytics</b><span>business impact projections</span></div>
+
+<svg width="1920" height="1080">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94A3B8"/></marker></defs>
+  <g stroke="#94A3B8" stroke-width="3" fill="none" marker-end="url(#a)">
+    <path d="M426,325 L528,325"/>
+    <path d="M426,520 L528,520"/>
+    <path d="M862,325 L964,325"/>
+    <path d="M862,520 L964,520"/>
+    <path d="M426,725 L940,725 L964,725" stroke-dasharray="8 7"/>
+  </g>
+  <g stroke="#94A3B8" stroke-width="3" fill="none" marker-end="url(#a)">
+    <path d="M1168,284 L1248,284"/><path d="M1168,364 L1248,364"/><path d="M1168,444 L1248,444"/>
+    <path d="M1168,524 L1248,524"/><path d="M1168,604 L1248,604"/><path d="M1168,684 L1248,684"/><path d="M1168,764 L1248,764"/>
+  </g>
+</svg>
+
+<div class="brand">Eir · InTheBud</div>
+</body></html>
