@@ -1,13 +1,14 @@
 {
  "inputs": {
-  "runs.jsonl": "9c111f691b65ffca7f6cc75ed16e234ec327788989d59709a5e9467c6e5f2867",
-  "assessments.jsonl": "9f984b2e0a37ec3f1b1eb4945166333e68459f913063d630bb77212d99742eb9",
+  "runs.jsonl": "ad7e6c28d482271ce4569d33af5ef90bf7eab1c83be4a9f8a74fdcdc7b3cad65",
+  "assessments.jsonl": "56eb0f44b7b0658c603e462748ba6c3fdefaca0a741dd2c3ad39736ce3c1b058",
   "extractions.jsonl": "b0bd6957e691aebbc4a8d5f96eaf0bf962bed7102acc2278d1e876e970a297a8"
  },
  "case_files_sha256": {
   "ktas.jsonl": "f14d0fdc745f0f0005d9c97ab64bef4e650a7cb79c474d4e88e82a9538c5acaa",
   "ktas_spoken.jsonl": "e25c78e3b4b97e6c086c6c0499b09a4e8c8d9362b73b1dc2a5bb3669df03c96a",
   "mimic.jsonl": "29beb8cad583f8ad402513babeee8f5591c17bc820da4eb00a10dcacc147e16c",
+  "nhamcs.jsonl": "30456529d17951b9d3c6310b048cd341da44f84d09135d06c9f2872ee784a018",
   "purav.jsonl": "d2dd82e7a4ae9ae2264adef9a3141f9cbfe45dfef6dd593342339695a26461eb"
  },
  "runs": [
@@ -158,6 +159,86 @@
    "reasoning_effort": "none",
    "scoring_model": "gpt-6-luna",
    "started_at": "2026-10-26T06:04:51.056+00:00"
+  },
+  {
+   "assess_plan": [
+    [
+     "purav",
+     "all",
+     5
+    ],
+    [
+     "mimic",
+     "all",
+     3
+    ],
+    [
+     "ktas",
+     "all",
+     1
+    ],
+    [
+     "ktas",
+     "ems",
+     3
+    ],
+    [
+     "ktas_spoken",
+     "all",
+     1
+    ],
+    [
+     "nhamcs",
+     "all",
+     1
+    ]
+   ],
+   "assessment_prompt": "awareness_v4",
+   "assessment_prompt_sha256": "22bb30c65e99e6d66fab14e79d9352e6698abea2f2799ba604c02fe8b1d76d20",
+   "case_files_sha256": {
+    "ktas.jsonl": "f14d0fdc745f0f0005d9c97ab64bef4e650a7cb79c474d4e88e82a9538c5acaa",
+    "ktas_spoken.jsonl": "e25c78e3b4b97e6c086c6c0499b09a4e8c8d9362b73b1dc2a5bb3669df03c96a",
+    "mimic.jsonl": "29beb8cad583f8ad402513babeee8f5591c17bc820da4eb00a10dcacc147e16c",
+    "nhamcs.jsonl": "30456529d17951b9d3c6310b048cd341da44f84d09135d06c9f2872ee784a018",
+    "purav.jsonl": "d2dd82e7a4ae9ae2264adef9a3141f9cbfe45dfef6dd593342339695a26461eb"
+   },
+   "concurrency": 8,
+   "extra_body": {
+    "max_completion_tokens": 1000,
+    "reasoning_effort": "none"
+   },
+   "extract_plan": [
+    [
+     "mimic",
+     "all",
+     1
+    ],
+    [
+     "ktas",
+     "all",
+     1
+    ],
+    [
+     "ktas_spoken",
+     "all",
+     1
+    ]
+   ],
+   "extraction_model": "gpt-6-luna",
+   "extraction_prompt": "extraction_v3",
+   "extraction_prompt_sha256": "d41d971adff9cb1910e00e5aad3328b4297cfb445f15da7ca997079321af7f5d",
+   "git_commit": "4c92b435e0dd8a41b018ab397c82aec1576215f1",
+   "git_dirty": false,
+   "openai_sdk": "1.12.0",
+   "platform": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+   "price_per_million_tokens": [
+    0.1,
+    0.5
+   ],
+   "python": "3.14.7",
+   "reasoning_effort": "none",
+   "scoring_model": "gpt-6-luna",
+   "started_at": "2026-10-27T03:20:05.045+00:00"
   }
  ],
  "esi": {
@@ -3079,6 +3160,373 @@
      ]
     }
    }
+  },
+  "nhamcs/all": {
+   "label": "NHAMCS 2022, adult ambulance arrivals from the scene (ED triage level)",
+   "cases": 1683,
+   "reference_levels": {
+    "1": 72,
+    "2": 460,
+    "3": 937,
+    "4": 186,
+    "5": 28
+   },
+   "outcomes": {
+    "assessed": 1683,
+    "Cannot assess": 568,
+    "needs review (any reason)": 571,
+    "needs review: handoff number not in reports": 3
+   },
+   "ai_gave_a_level": {
+    "k": 1115,
+    "n": 1683,
+    "value": 0.6625,
+    "low": 0.6396,
+    "high": 0.6847
+   },
+   "reference_1_2_all_cases": {
+    "given 1-2": {
+     "k": 366,
+     "n": 532,
+     "value": 0.688,
+     "low": 0.6474,
+     "high": 0.7259
+    },
+    "given 3-5": {
+     "k": 27,
+     "n": 532,
+     "value": 0.0508,
+     "low": 0.0351,
+     "high": 0.0728
+    },
+    "no level": {
+     "k": 139,
+     "n": 532,
+     "value": 0.2613,
+     "low": 0.2258,
+     "high": 0.3002
+    }
+   },
+   "ai_vs_reference": {
+    "n": 1115,
+    "exact": {
+     "k": 396,
+     "n": 1115,
+     "value": 0.3552,
+     "low": 0.3276,
+     "high": 0.3837
+    },
+    "within_one": {
+     "k": 1014,
+     "n": 1115,
+     "value": 0.9094,
+     "low": 0.8911,
+     "high": 0.9249
+    },
+    "under_triage": {
+     "k": 76,
+     "n": 1115,
+     "value": 0.0682,
+     "low": 0.0548,
+     "high": 0.0845
+    },
+    "over_triage": {
+     "k": 643,
+     "n": 1115,
+     "value": 0.5767,
+     "low": 0.5475,
+     "high": 0.6054
+    },
+    "under_by_2_or_more": {
+     "k": 4,
+     "n": 1115,
+     "value": 0.0036,
+     "low": 0.0014,
+     "high": 0.0092
+    },
+    "high_acuity_sensitivity": {
+     "k": 366,
+     "n": 393,
+     "value": 0.9313,
+     "low": 0.9019,
+     "high": 0.9524
+    },
+    "high_acuity_missed_to_3_plus": {
+     "k": 27,
+     "n": 393,
+     "value": 0.0687,
+     "low": 0.0476,
+     "high": 0.0981
+    },
+    "low_acuity_specificity": {
+     "k": 103,
+     "n": 722,
+     "value": 0.1427,
+     "low": 0.119,
+     "high": 0.1701
+    },
+    "level_1_caught_at_1_2": {
+     "k": 51,
+     "n": 53,
+     "value": 0.9623,
+     "low": 0.8725,
+     "high": 0.9896
+    },
+    "kappa_unweighted": {
+     "value": 0.0451,
+     "ase": 0.0129,
+     "low": 0.0199,
+     "high": 0.0704,
+     "n": 1115
+    },
+    "kappa_linear": {
+     "value": 0.0671,
+     "ase": 0.0134,
+     "low": 0.0409,
+     "high": 0.0933,
+     "n": 1115
+    },
+    "kappa_quadratic": {
+     "value": 0.1001,
+     "ase": 0.0188,
+     "low": 0.0633,
+     "high": 0.1368,
+     "n": 1115
+    },
+    "kappa_quadratic_bootstrap": {
+     "low": 0.0648,
+     "high": 0.1374,
+     "resamples": 2000,
+     "undefined": 0
+    },
+    "mean_signed_error": -0.6027,
+    "confusion": {
+     "rows_reference": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "columns_predicted": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "counts": [
+      [
+       8,
+       43,
+       2,
+       0,
+       0
+      ],
+      [
+       6,
+       309,
+       23,
+       2,
+       0
+      ],
+      [
+       1,
+       525,
+       76,
+       4,
+       0
+      ],
+      [
+       0,
+       81,
+       15,
+       3,
+       2
+      ],
+      [
+       0,
+       12,
+       3,
+       0,
+       0
+      ]
+     ]
+    }
+   },
+   "ai_levels": {
+    "1": 15,
+    "2": 970,
+    "3": 119,
+    "4": 9,
+    "5": 2
+   },
+   "simple_rule_vs_reference": {
+    "n": 1683,
+    "exact": {
+     "k": 869,
+     "n": 1683,
+     "value": 0.5163,
+     "low": 0.4925,
+     "high": 0.5402
+    },
+    "within_one": {
+     "k": 1584,
+     "n": 1683,
+     "value": 0.9412,
+     "low": 0.9289,
+     "high": 0.9514
+    },
+    "under_triage": {
+     "k": 334,
+     "n": 1683,
+     "value": 0.1985,
+     "low": 0.1801,
+     "high": 0.2182
+    },
+    "over_triage": {
+     "k": 480,
+     "n": 1683,
+     "value": 0.2852,
+     "low": 0.2641,
+     "high": 0.3072
+    },
+    "under_by_2_or_more": {
+     "k": 32,
+     "n": 1683,
+     "value": 0.019,
+     "low": 0.0135,
+     "high": 0.0267
+    },
+    "high_acuity_sensitivity": {
+     "k": 232,
+     "n": 532,
+     "value": 0.4361,
+     "low": 0.3946,
+     "high": 0.4785
+    },
+    "high_acuity_missed_to_3_plus": {
+     "k": 300,
+     "n": 532,
+     "value": 0.5639,
+     "low": 0.5215,
+     "high": 0.6054
+    },
+    "low_acuity_specificity": {
+     "k": 850,
+     "n": 1151,
+     "value": 0.7385,
+     "low": 0.7123,
+     "high": 0.7631
+    },
+    "level_1_caught_at_1_2": {
+     "k": 40,
+     "n": 72,
+     "value": 0.5556,
+     "low": 0.4409,
+     "high": 0.6646
+    },
+    "kappa_unweighted": {
+     "value": 0.0968,
+     "ase": 0.0191,
+     "low": 0.0593,
+     "high": 0.1342,
+     "n": 1683
+    },
+    "kappa_linear": {
+     "value": 0.1299,
+     "ase": 0.0181,
+     "low": 0.0944,
+     "high": 0.1653,
+     "n": 1683
+    },
+    "kappa_quadratic": {
+     "value": 0.1741,
+     "ase": 0.023,
+     "low": 0.129,
+     "high": 0.2191,
+     "n": 1683
+    },
+    "kappa_quadratic_bootstrap": {
+     "low": 0.1287,
+     "high": 0.2198,
+     "resamples": 2000,
+     "undefined": 0
+    },
+    "mean_signed_error": -0.1123,
+    "confusion": {
+     "rows_reference": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "columns_predicted": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "counts": [
+      [
+       6,
+       34,
+       32,
+       0,
+       0
+      ],
+      [
+       4,
+       188,
+       268,
+       0,
+       0
+      ],
+      [
+       5,
+       257,
+       675,
+       0,
+       0
+      ],
+      [
+       2,
+       32,
+       152,
+       0,
+       0
+      ],
+      [
+       1,
+       4,
+       23,
+       0,
+       0
+      ]
+     ]
+    }
+   },
+   "majority_class_exact": {
+    "k": 937,
+    "n": 1683,
+    "value": 0.5567,
+    "low": 0.5329,
+    "high": 0.5803,
+    "level": 3
+   },
+   "majority_class_exact_on_ai_assessed": {
+    "k": 606,
+    "n": 1115,
+    "value": 0.5435,
+    "low": 0.5142,
+    "high": 0.5725,
+    "level": 3
+   },
+   "distinct_patients": null,
+   "nurse_vs_reference": null,
+   "nurse_vs_reference_on_ai_assessed": null
   }
  },
  "consistency": {
@@ -3726,5 +4174,66 @@
    0.1,
    0.5
   ]
+ },
+ "added_sets": {
+  "nhamcs": {
+   "protocol": "eir-benchmark-v1.1",
+   "model_unsupported_numbers_on_real_outputs": {
+    "k": 3,
+    "n": 1683,
+    "value": 0.0018,
+    "low": 0.0006,
+    "high": 0.0052
+   },
+   "handoff_number_check": {
+    "mutants": 22820,
+    "caught_all": {
+     "k": 21914,
+     "n": 22820,
+     "value": 0.9603,
+     "low": 0.9577,
+     "high": 0.9628
+    },
+    "caught_when_wrong_value_not_in_report": {
+     "k": 21914,
+     "n": 21914,
+     "value": 1.0,
+     "low": 0.9998,
+     "high": 1.0
+    },
+    "wrong_value_also_in_report (undetectable by design)": {
+     "k": 906,
+     "n": 22820,
+     "value": 0.0397,
+     "low": 0.0372,
+     "high": 0.0423
+    },
+    "caught_when_collides": {
+     "k": 0,
+     "n": 906,
+     "value": 0.0,
+     "low": 0.0,
+     "high": 0.0042
+    },
+    "fabricated_reading_appended_caught": {
+     "k": 1683,
+     "n": 1683,
+     "value": 1.0,
+     "low": 0.9977,
+     "high": 1.0
+    }
+   },
+   "operations": {
+    "attempts": 1683,
+    "errors": 0,
+    "latency_ms_median": 2559.0,
+    "latency_ms_p90": 3359.0,
+    "latency_ms_max": 9869,
+    "input_tokens_mean": 1319.4843,
+    "output_tokens_mean": 186.9441,
+    "list_price_usd_total": 0.3794,
+    "list_price_usd_per_call": 0.0002
+   }
+  }
  }
 }

@@ -19,7 +19,7 @@ from .stats import agreement, kappa, percentile, wilson
 NUMBER_FLAG = "not found in the crew's reports"
 # (dataset, subset) analysed; repeat 1 of each case is the primary result (PROTOCOL.md).
 ANALYSES = [("purav", "all"), ("mimic", "all"), ("mimic", "ems"), ("ktas", "all"), ("ktas", "ems"),
-            ("ktas_spoken", "all")]
+            ("ktas_spoken", "all"), ("nhamcs", "all")]
 LABELS = {
     ("purav", "all"): "Purav's 10 synthetic cases (one clinician's ESI)",
     ("mimic", "all"): "MIMIC-IV-ED Demo, all stays with an ESI (triage nurse's ESI)",
@@ -27,6 +27,7 @@ LABELS = {
     ("ktas", "all"): "KTAS dataset, all patients (expert KTAS)",
     ("ktas", "ems"): "KTAS dataset, ambulance arrivals (expert KTAS)",
     ("ktas_spoken", "all"): "KTAS ambulance arrivals, numbers spoken as words (expert KTAS)",
+    ("nhamcs", "all"): "NHAMCS 2022, adult ambulance arrivals from the scene (ED triage level)",
 }
 
 
@@ -321,6 +322,23 @@ def write_csv(path: Path, rows: list):
         writer.writerows(rows)
 
 
+# Sets added after protocol v1. v1's pooled sections (guardrails, flags, operations) cover v1's own
+# sets only, so REPORT.md's figures stay reproducible; each added set gets its own section.
+ADDED_SETS = {"nhamcs": "eir-benchmark-v1.1"}
+
+
+def added_set(name, cases, by_key, assessments, run_infos):
+    keys = {k: r for k, r in by_key.items() if k[0] == name}
+    primary_ok = [r for k, r in keys.items() if k[2] == 1 and r["status"] == "ok"]
+    mutations, _ = guardrail_mutations(cases, keys, [])
+    return {"protocol": ADDED_SETS[name],
+            "model_unsupported_numbers_on_real_outputs": wilson(
+                sum(bool(r.get("unsupported_numbers")) for r in primary_ok), len(primary_ok)),
+            "handoff_number_check": mutations["handoff_number_check"],
+            "operations": operations({"assessment": [r for r in assessments if r["dataset"] == name]},
+                                     run_infos)["assessment"]}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--raw", type=Path, required=True)
@@ -335,10 +353,12 @@ def main(argv=None):
     run_infos = read_jsonl(args.raw / "runs.jsonl")
 
     esi, pairs_rows, by_key = analyse_assessments(cases, assessments)
-    mutations, number_mutants = guardrail_mutations(cases, by_key, extractions)
+    v1_key = {k: r for k, r in by_key.items() if k[0] not in ADDED_SETS}
+    v1_assessments = [r for r in assessments if r["dataset"] not in ADDED_SETS]
+    mutations, number_mutants = guardrail_mutations(cases, v1_key, extractions)
     extraction, extraction_errors = extraction_accuracy(cases, extractions)
-    flagged = flagged_numbers(cases, by_key)
-    primary_ok = [r for k, r in by_key.items() if k[2] == 1 and r["status"] == "ok"]
+    flagged = flagged_numbers(cases, by_key)  # the audit list covers every set (it has a dataset column)
+    primary_ok = [r for k, r in v1_key.items() if k[2] == 1 and r["status"] == "ok"]
     metrics = {
         "inputs": {name: hashlib.sha256((args.raw / name).read_bytes()).hexdigest()
                    for name in ("runs.jsonl", "assessments.jsonl", "extractions.jsonl") if (args.raw / name).exists()},
@@ -347,12 +367,14 @@ def main(argv=None):
         "esi": esi,
         "consistency": consistency(cases, by_key),
         "model_unsupported_numbers_all_runs": wilson(
-            sum(r["status"] == "ok" and bool(r.get("unsupported_numbers")) for r in by_key.values()), len(by_key)),
+            sum(r["status"] == "ok" and bool(r.get("unsupported_numbers")) for r in v1_key.values()), len(v1_key)),
         "model_unsupported_numbers_on_real_outputs": wilson(
             sum(bool(r.get("unsupported_numbers")) for r in primary_ok), len(primary_ok)),
         "guardrail_mutation_tests": mutations,
         "extraction": extraction,
-        "operations": operations({"assessment": assessments, "extraction": extractions}, run_infos),
+        "operations": operations({"assessment": v1_assessments, "extraction": extractions}, run_infos),
+        "added_sets": {name: added_set(name, cases, by_key, assessments, run_infos)
+                       for name in ADDED_SETS if any(k[0] == name for k in by_key)},
     }
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "metrics.json").write_text(json.dumps(round_floats(metrics), indent=1, ensure_ascii=False) + "\n",

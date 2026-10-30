@@ -77,3 +77,43 @@ simple vitals rule (`score.rule_baseline`, ours, not a clinical tool).
 - Reports built from triage fields are cleaner and shorter than real radio traffic.
 - `purav` is 10 fictional cases and one rater: it can show coarse agreement only.
 - No result here is clinical validation, and none supports autonomous triage.
+
+## Addendum `eir-benchmark-v1.1` (2026-10-27): NHAMCS 2022, written before its model calls
+
+The v1 run and its results are unchanged. This adds one set and its analyses, fixed before any
+model call on it.
+
+**Set `nhamcs`.** CDC/NCHS NHAMCS 2022 emergency department public-use file (US, real,
+de-identified, public domain; NCHS terms: statistics only, no attempt to identify anyone). Built
+by `build_cases.py --only nhamcs`: adult (18+) ambulance arrivals from the scene (not transfers from
+another facility, not dead on arrival) whose triage level (IMMEDR) is 1-5. 1,683 visits from 129
+hospitals; levels 1/2/3/4/5 = 72/460/937/186/28.
+
+- **Report:** age, sex, up to three coded reasons for visit (NCHS's 40-character labels; the
+  commonest cut ones written out in full), pulse, BP, respirations, SpO2, temperature (°F), pain
+  score. No mental status (not in the file). No injury flag: NHAMCS derives it partly from the ED
+  diagnosis, which is after triage. No diagnosis, test, disposition or outcome is in the report.
+- **Reference:** the triage level the ED recorded: one nurse at the time, on each hospital's
+  5-level scale (usually ESI; not verified per hospital).
+- **Outcome (kept apart from the report):** ICU, death or surgery from ED = died in the ED, died in
+  hospital, or admitted to critical care, the operating room or the cath lab (155 visits); ward
+  admission (351); transferred (104); sent home, including AMA (1,073).
+
+**Plan.** Assessment only, repeat 1, every case (1,683 calls). No extraction (v1 measured it on
+10,233 vitals).
+
+**Primary metrics.** (1) Of the visits triaged 1-2: how many the AI put at 1-2, gave no level, or
+put at 3-5. (2) Of the critical-outcome visits: the same three counts for the AI, and the ED's own
+triage at 1-2 / 3-5 as the human yardstick. (3) Of the visits sent home: how many the AI put at 1-2
+(over-triage), against the ED's triage. All with 95% Wilson intervals.
+
+**Secondary.** Exact and within-one agreement, quadratic weighted kappa, under- and over-triage, the
+simple vitals rule (no mental status here), latency and cost. Fairness: for urgent (triaged 1-2)
+visits, put at 3-5 and given no level, by sex, age band (under 65 / 65 and over) and race/ethnicity
+(NHAMCS's imputed RACERETH; each group against non-Hispanic White), two-sided Fisher's exact tests
+with a Bonferroni bar over every NHAMCS fairness test.
+
+**Stated limits.** Counts are of the sample, not national estimates (no survey weights). Reports are
+written from coded reasons, terser than KTAS's free-text complaints and real radio. 2022 includes
+COVID-19-era visits. One nurse's triage, on scales that may differ by hospital, is not truth; the
+outcome check exists for that reason.

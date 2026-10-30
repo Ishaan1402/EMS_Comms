@@ -1,3 +1,5 @@
 # Optional XLSX import. Core metrics, CLI, HTML reporting and tests use the standard library.
 openpyxl>=3.1,<4
 # Open the notebook in the Jupyter environment you already use (including JupyterHub).
+# Only to build the NHAMCS cases (its source is a SAS dataset): build_cases.py --only nhamcs
+pandas>=2,<4

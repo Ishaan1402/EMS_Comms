@@ -1,0 +1,1268 @@
+case_id,disposition,disposition_label
+KTAS-0001,1,Discharge
+KTAS-0002,1,Discharge
+KTAS-0003,2,Ward admission
+KTAS-0004,1,Discharge
+KTAS-0005,1,Discharge
+KTAS-0006,2,Ward admission
+KTAS-0007,1,Discharge
+KTAS-0008,1,Discharge
+KTAS-0009,1,Discharge
+KTAS-0010,1,Discharge
+KTAS-0011,1,Discharge
+KTAS-0012,1,Discharge
+KTAS-0013,1,Discharge
+KTAS-0014,2,Ward admission
+KTAS-0015,2,Ward admission
+KTAS-0016,2,Ward admission
+KTAS-0017,1,Discharge
+KTAS-0018,2,Ward admission
+KTAS-0019,1,Discharge
+KTAS-0020,1,Discharge
+KTAS-0021,2,Ward admission
+KTAS-0022,1,Discharge
+KTAS-0023,1,Discharge
+KTAS-0024,2,Ward admission
+KTAS-0025,5,Transfer
+KTAS-0026,1,Discharge
+KTAS-0027,2,Ward admission
+KTAS-0028,2,Ward admission
+KTAS-0029,1,Discharge
+KTAS-0030,1,Discharge
+KTAS-0031,2,Ward admission
+KTAS-0032,1,Discharge
+KTAS-0033,1,Discharge
+KTAS-0034,1,Discharge
+KTAS-0035,1,Discharge
+KTAS-0036,1,Discharge
+KTAS-0037,2,Ward admission
+KTAS-0038,1,Discharge
+KTAS-0039,1,Discharge
+KTAS-0040,1,Discharge
+KTAS-0041,1,Discharge
+KTAS-0042,1,Discharge
+KTAS-0043,1,Discharge
+KTAS-0044,1,Discharge
+KTAS-0045,1,Discharge
+KTAS-0046,2,Ward admission
+KTAS-0047,2,Ward admission
+KTAS-0048,2,Ward admission
+KTAS-0049,2,Ward admission
+KTAS-0050,7,Surgery from ED
+KTAS-0051,2,Ward admission
+KTAS-0052,1,Discharge
+KTAS-0053,5,Transfer
+KTAS-0054,1,Discharge
+KTAS-0055,2,Ward admission
+KTAS-0056,1,Discharge
+KTAS-0057,1,Discharge
+KTAS-0058,1,Discharge
+KTAS-0059,2,Ward admission
+KTAS-0060,1,Discharge
+KTAS-0061,1,Discharge
+KTAS-0062,6,Death
+KTAS-0063,1,Discharge
+KTAS-0064,1,Discharge
+KTAS-0065,1,Discharge
+KTAS-0066,1,Discharge
+KTAS-0067,1,Discharge
+KTAS-0068,2,Ward admission
+KTAS-0069,1,Discharge
+KTAS-0070,1,Discharge
+KTAS-0071,1,Discharge
+KTAS-0072,1,Discharge
+KTAS-0073,1,Discharge
+KTAS-0074,1,Discharge
+KTAS-0075,1,Discharge
+KTAS-0076,2,Ward admission
+KTAS-0077,2,Ward admission
+KTAS-0078,1,Discharge
+KTAS-0079,1,Discharge
+KTAS-0080,1,Discharge
+KTAS-0081,1,Discharge
+KTAS-0082,2,Ward admission
+KTAS-0083,1,Discharge
+KTAS-0084,1,Discharge
+KTAS-0085,1,Discharge
+KTAS-0086,1,Discharge
+KTAS-0087,1,Discharge
+KTAS-0088,1,Discharge
+KTAS-0089,1,Discharge
+KTAS-0090,1,Discharge
+KTAS-0091,1,Discharge
+KTAS-0092,3,ICU admission
+KTAS-0093,4,AMA discharge
+KTAS-0094,1,Discharge
+KTAS-0095,1,Discharge
+KTAS-0096,1,Discharge
+KTAS-0097,1,Discharge
+KTAS-0098,1,Discharge
+KTAS-0099,1,Discharge
+KTAS-0100,2,Ward admission
+KTAS-0101,7,Surgery from ED
+KTAS-0102,2,Ward admission
+KTAS-0103,2,Ward admission
+KTAS-0104,2,Ward admission
+KTAS-0105,1,Discharge
+KTAS-0106,5,Transfer
+KTAS-0107,1,Discharge
+KTAS-0108,1,Discharge
+KTAS-0109,1,Discharge
+KTAS-0110,1,Discharge
+KTAS-0111,1,Discharge
+KTAS-0112,1,Discharge
+KTAS-0113,1,Discharge
+KTAS-0114,1,Discharge
+KTAS-0115,1,Discharge
+KTAS-0116,2,Ward admission
+KTAS-0117,1,Discharge
+KTAS-0118,4,AMA discharge
+KTAS-0119,1,Discharge
+KTAS-0120,1,Discharge
+KTAS-0121,1,Discharge
+KTAS-0122,1,Discharge
+KTAS-0123,3,ICU admission
+KTAS-0124,3,ICU admission
+KTAS-0125,1,Discharge
+KTAS-0126,1,Discharge
+KTAS-0127,1,Discharge
+KTAS-0128,1,Discharge
+KTAS-0129,2,Ward admission
+KTAS-0130,1,Discharge
+KTAS-0131,5,Transfer
+KTAS-0132,2,Ward admission
+KTAS-0133,2,Ward admission
+KTAS-0134,5,Transfer
+KTAS-0135,2,Ward admission
+KTAS-0136,2,Ward admission
+KTAS-0137,1,Discharge
+KTAS-0138,1,Discharge
+KTAS-0139,2,Ward admission
+KTAS-0140,1,Discharge
+KTAS-0141,1,Discharge
+KTAS-0142,2,Ward admission
+KTAS-0143,1,Discharge
+KTAS-0144,1,Discharge
+KTAS-0145,1,Discharge
+KTAS-0146,1,Discharge
+KTAS-0147,1,Discharge
+KTAS-0148,1,Discharge
+KTAS-0149,1,Discharge
+KTAS-0150,7,Surgery from ED
+KTAS-0151,2,Ward admission
+KTAS-0152,2,Ward admission
+KTAS-0153,5,Transfer
+KTAS-0154,5,Transfer
+KTAS-0155,2,Ward admission
+KTAS-0156,2,Ward admission
+KTAS-0157,1,Discharge
+KTAS-0158,1,Discharge
+KTAS-0159,1,Discharge
+KTAS-0160,2,Ward admission
+KTAS-0161,2,Ward admission
+KTAS-0162,3,ICU admission
+KTAS-0163,2,Ward admission
+KTAS-0164,2,Ward admission
+KTAS-0165,5,Transfer
+KTAS-0166,2,Ward admission
+KTAS-0167,4,AMA discharge
+KTAS-0168,1,Discharge
+KTAS-0169,1,Discharge
+KTAS-0170,2,Ward admission
+KTAS-0171,1,Discharge
+KTAS-0172,2,Ward admission
+KTAS-0173,2,Ward admission
+KTAS-0174,2,Ward admission
+KTAS-0175,1,Discharge
+KTAS-0176,1,Discharge
+KTAS-0177,5,Transfer
+KTAS-0178,2,Ward admission
+KTAS-0179,1,Discharge
+KTAS-0180,1,Discharge
+KTAS-0181,1,Discharge
+KTAS-0182,2,Ward admission
+KTAS-0183,2,Ward admission
+KTAS-0184,2,Ward admission
+KTAS-0185,2,Ward admission
+KTAS-0186,1,Discharge
+KTAS-0187,1,Discharge
+KTAS-0188,1,Discharge
+KTAS-0189,1,Discharge
+KTAS-0190,1,Discharge
+KTAS-0191,1,Discharge
+KTAS-0192,1,Discharge
+KTAS-0193,1,Discharge
+KTAS-0194,1,Discharge
+KTAS-0195,1,Discharge
+KTAS-0196,1,Discharge
+KTAS-0197,2,Ward admission
+KTAS-0198,1,Discharge
+KTAS-0199,1,Discharge
+KTAS-0200,2,Ward admission
+KTAS-0201,1,Discharge
+KTAS-0202,1,Discharge
+KTAS-0203,1,Discharge
+KTAS-0204,1,Discharge
+KTAS-0205,1,Discharge
+KTAS-0206,1,Discharge
+KTAS-0207,2,Ward admission
+KTAS-0208,1,Discharge
+KTAS-0209,1,Discharge
+KTAS-0210,1,Discharge
+KTAS-0211,1,Discharge
+KTAS-0212,2,Ward admission
+KTAS-0213,1,Discharge
+KTAS-0214,2,Ward admission
+KTAS-0215,2,Ward admission
+KTAS-0216,2,Ward admission
+KTAS-0217,1,Discharge
+KTAS-0218,1,Discharge
+KTAS-0219,5,Transfer
+KTAS-0220,2,Ward admission
+KTAS-0221,1,Discharge
+KTAS-0222,1,Discharge
+KTAS-0223,1,Discharge
+KTAS-0224,1,Discharge
+KTAS-0225,1,Discharge
+KTAS-0226,1,Discharge
+KTAS-0227,1,Discharge
+KTAS-0228,1,Discharge
+KTAS-0229,1,Discharge
+KTAS-0230,1,Discharge
+KTAS-0231,1,Discharge
+KTAS-0232,2,Ward admission
+KTAS-0233,2,Ward admission
+KTAS-0234,1,Discharge
+KTAS-0235,1,Discharge
+KTAS-0236,1,Discharge
+KTAS-0237,1,Discharge
+KTAS-0238,1,Discharge
+KTAS-0239,1,Discharge
+KTAS-0240,1,Discharge
+KTAS-0241,2,Ward admission
+KTAS-0242,1,Discharge
+KTAS-0243,1,Discharge
+KTAS-0244,1,Discharge
+KTAS-0245,2,Ward admission
+KTAS-0246,1,Discharge
+KTAS-0247,2,Ward admission
+KTAS-0248,1,Discharge
+KTAS-0249,1,Discharge
+KTAS-0250,1,Discharge
+KTAS-0251,1,Discharge
+KTAS-0252,1,Discharge
+KTAS-0253,1,Discharge
+KTAS-0254,1,Discharge
+KTAS-0255,1,Discharge
+KTAS-0256,1,Discharge
+KTAS-0257,1,Discharge
+KTAS-0258,1,Discharge
+KTAS-0259,1,Discharge
+KTAS-0260,1,Discharge
+KTAS-0261,1,Discharge
+KTAS-0262,1,Discharge
+KTAS-0263,1,Discharge
+KTAS-0264,1,Discharge
+KTAS-0265,1,Discharge
+KTAS-0266,1,Discharge
+KTAS-0267,1,Discharge
+KTAS-0268,1,Discharge
+KTAS-0269,2,Ward admission
+KTAS-0270,1,Discharge
+KTAS-0271,1,Discharge
+KTAS-0272,1,Discharge
+KTAS-0273,1,Discharge
+KTAS-0274,1,Discharge
+KTAS-0275,1,Discharge
+KTAS-0276,1,Discharge
+KTAS-0277,1,Discharge
+KTAS-0278,1,Discharge
+KTAS-0279,1,Discharge
+KTAS-0280,1,Discharge
+KTAS-0281,1,Discharge
+KTAS-0282,2,Ward admission
+KTAS-0283,1,Discharge
+KTAS-0284,2,Ward admission
+KTAS-0285,1,Discharge
+KTAS-0286,1,Discharge
+KTAS-0287,2,Ward admission
+KTAS-0288,1,Discharge
+KTAS-0289,1,Discharge
+KTAS-0290,1,Discharge
+KTAS-0291,1,Discharge
+KTAS-0292,2,Ward admission
+KTAS-0293,1,Discharge
+KTAS-0294,1,Discharge
+KTAS-0295,1,Discharge
+KTAS-0296,1,Discharge
+KTAS-0297,2,Ward admission
+KTAS-0298,1,Discharge
+KTAS-0299,1,Discharge
+KTAS-0300,5,Transfer
+KTAS-0301,1,Discharge
+KTAS-0302,1,Discharge
+KTAS-0303,1,Discharge
+KTAS-0304,1,Discharge
+KTAS-0305,1,Discharge
+KTAS-0306,1,Discharge
+KTAS-0307,2,Ward admission
+KTAS-0308,1,Discharge
+KTAS-0309,1,Discharge
+KTAS-0310,1,Discharge
+KTAS-0311,1,Discharge
+KTAS-0312,1,Discharge
+KTAS-0313,1,Discharge
+KTAS-0314,2,Ward admission
+KTAS-0315,1,Discharge
+KTAS-0316,1,Discharge
+KTAS-0317,1,Discharge
+KTAS-0318,1,Discharge
+KTAS-0319,1,Discharge
+KTAS-0320,2,Ward admission
+KTAS-0321,1,Discharge
+KTAS-0322,1,Discharge
+KTAS-0323,1,Discharge
+KTAS-0324,1,Discharge
+KTAS-0325,1,Discharge
+KTAS-0326,1,Discharge
+KTAS-0327,1,Discharge
+KTAS-0328,1,Discharge
+KTAS-0329,1,Discharge
+KTAS-0330,1,Discharge
+KTAS-0331,1,Discharge
+KTAS-0332,7,Surgery from ED
+KTAS-0333,2,Ward admission
+KTAS-0334,1,Discharge
+KTAS-0335,2,Ward admission
+KTAS-0336,1,Discharge
+KTAS-0337,1,Discharge
+KTAS-0338,2,Ward admission
+KTAS-0339,1,Discharge
+KTAS-0340,1,Discharge
+KTAS-0341,1,Discharge
+KTAS-0342,1,Discharge
+KTAS-0343,4,AMA discharge
+KTAS-0344,2,Ward admission
+KTAS-0345,1,Discharge
+KTAS-0346,2,Ward admission
+KTAS-0347,4,AMA discharge
+KTAS-0348,1,Discharge
+KTAS-0349,1,Discharge
+KTAS-0350,1,Discharge
+KTAS-0351,4,AMA discharge
+KTAS-0352,1,Discharge
+KTAS-0353,2,Ward admission
+KTAS-0354,1,Discharge
+KTAS-0355,1,Discharge
+KTAS-0356,2,Ward admission
+KTAS-0357,1,Discharge
+KTAS-0358,1,Discharge
+KTAS-0359,1,Discharge
+KTAS-0360,1,Discharge
+KTAS-0361,5,Transfer
+KTAS-0362,2,Ward admission
+KTAS-0363,1,Discharge
+KTAS-0364,2,Ward admission
+KTAS-0365,2,Ward admission
+KTAS-0366,1,Discharge
+KTAS-0367,2,Ward admission
+KTAS-0368,1,Discharge
+KTAS-0369,1,Discharge
+KTAS-0370,1,Discharge
+KTAS-0371,1,Discharge
+KTAS-0372,1,Discharge
+KTAS-0373,5,Transfer
+KTAS-0374,1,Discharge
+KTAS-0375,1,Discharge
+KTAS-0376,1,Discharge
+KTAS-0377,2,Ward admission
+KTAS-0378,1,Discharge
+KTAS-0379,2,Ward admission
+KTAS-0380,1,Discharge
+KTAS-0381,2,Ward admission
+KTAS-0382,1,Discharge
+KTAS-0383,1,Discharge
+KTAS-0384,2,Ward admission
+KTAS-0385,1,Discharge
+KTAS-0386,5,Transfer
+KTAS-0387,2,Ward admission
+KTAS-0388,1,Discharge
+KTAS-0389,1,Discharge
+KTAS-0390,1,Discharge
+KTAS-0391,1,Discharge
+KTAS-0392,7,Surgery from ED
+KTAS-0393,1,Discharge
+KTAS-0394,1,Discharge
+KTAS-0395,1,Discharge
+KTAS-0396,1,Discharge
+KTAS-0397,1,Discharge
+KTAS-0398,1,Discharge
+KTAS-0399,1,Discharge
+KTAS-0400,1,Discharge
+KTAS-0401,1,Discharge
+KTAS-0402,1,Discharge
+KTAS-0403,1,Discharge
+KTAS-0404,2,Ward admission
+KTAS-0405,5,Transfer
+KTAS-0406,7,Surgery from ED
+KTAS-0407,1,Discharge
+KTAS-0408,2,Ward admission
+KTAS-0409,1,Discharge
+KTAS-0410,2,Ward admission
+KTAS-0411,5,Transfer
+KTAS-0412,1,Discharge
+KTAS-0413,2,Ward admission
+KTAS-0414,2,Ward admission
+KTAS-0415,1,Discharge
+KTAS-0416,2,Ward admission
+KTAS-0417,1,Discharge
+KTAS-0418,2,Ward admission
+KTAS-0419,1,Discharge
+KTAS-0420,5,Transfer
+KTAS-0421,1,Discharge
+KTAS-0422,1,Discharge
+KTAS-0423,2,Ward admission
+KTAS-0424,1,Discharge
+KTAS-0425,7,Surgery from ED
+KTAS-0426,2,Ward admission
+KTAS-0427,2,Ward admission
+KTAS-0428,1,Discharge
+KTAS-0429,1,Discharge
+KTAS-0430,2,Ward admission
+KTAS-0431,7,Surgery from ED
+KTAS-0432,2,Ward admission
+KTAS-0433,2,Ward admission
+KTAS-0434,1,Discharge
+KTAS-0435,2,Ward admission
+KTAS-0436,1,Discharge
+KTAS-0437,1,Discharge
+KTAS-0438,2,Ward admission
+KTAS-0439,2,Ward admission
+KTAS-0440,2,Ward admission
+KTAS-0441,2,Ward admission
+KTAS-0442,2,Ward admission
+KTAS-0443,2,Ward admission
+KTAS-0444,1,Discharge
+KTAS-0445,2,Ward admission
+KTAS-0446,2,Ward admission
+KTAS-0447,1,Discharge
+KTAS-0448,2,Ward admission
+KTAS-0449,1,Discharge
+KTAS-0450,2,Ward admission
+KTAS-0451,1,Discharge
+KTAS-0452,1,Discharge
+KTAS-0453,1,Discharge
+KTAS-0454,1,Discharge
+KTAS-0455,2,Ward admission
+KTAS-0456,1,Discharge
+KTAS-0457,1,Discharge
+KTAS-0458,1,Discharge
+KTAS-0459,1,Discharge
+KTAS-0460,1,Discharge
+KTAS-0461,1,Discharge
+KTAS-0462,1,Discharge
+KTAS-0463,1,Discharge
+KTAS-0464,2,Ward admission
+KTAS-0465,1,Discharge
+KTAS-0466,1,Discharge
+KTAS-0467,1,Discharge
+KTAS-0468,1,Discharge
+KTAS-0469,1,Discharge
+KTAS-0470,2,Ward admission
+KTAS-0471,1,Discharge
+KTAS-0472,1,Discharge
+KTAS-0473,1,Discharge
+KTAS-0474,2,Ward admission
+KTAS-0475,1,Discharge
+KTAS-0476,2,Ward admission
+KTAS-0477,1,Discharge
+KTAS-0478,2,Ward admission
+KTAS-0479,1,Discharge
+KTAS-0480,7,Surgery from ED
+KTAS-0481,1,Discharge
+KTAS-0482,1,Discharge
+KTAS-0483,1,Discharge
+KTAS-0484,1,Discharge
+KTAS-0485,1,Discharge
+KTAS-0486,1,Discharge
+KTAS-0487,2,Ward admission
+KTAS-0488,7,Surgery from ED
+KTAS-0489,5,Transfer
+KTAS-0490,1,Discharge
+KTAS-0491,1,Discharge
+KTAS-0492,7,Surgery from ED
+KTAS-0493,1,Discharge
+KTAS-0494,2,Ward admission
+KTAS-0495,1,Discharge
+KTAS-0496,2,Ward admission
+KTAS-0497,1,Discharge
+KTAS-0498,7,Surgery from ED
+KTAS-0499,2,Ward admission
+KTAS-0500,1,Discharge
+KTAS-0501,1,Discharge
+KTAS-0502,1,Discharge
+KTAS-0503,1,Discharge
+KTAS-0504,2,Ward admission
+KTAS-0505,2,Ward admission
+KTAS-0506,2,Ward admission
+KTAS-0507,7,Surgery from ED
+KTAS-0508,1,Discharge
+KTAS-0509,1,Discharge
+KTAS-0510,1,Discharge
+KTAS-0511,2,Ward admission
+KTAS-0512,1,Discharge
+KTAS-0513,1,Discharge
+KTAS-0514,1,Discharge
+KTAS-0515,5,Transfer
+KTAS-0516,1,Discharge
+KTAS-0517,1,Discharge
+KTAS-0518,1,Discharge
+KTAS-0519,1,Discharge
+KTAS-0520,2,Ward admission
+KTAS-0521,1,Discharge
+KTAS-0522,1,Discharge
+KTAS-0523,1,Discharge
+KTAS-0524,1,Discharge
+KTAS-0525,1,Discharge
+KTAS-0526,1,Discharge
+KTAS-0527,2,Ward admission
+KTAS-0528,2,Ward admission
+KTAS-0529,1,Discharge
+KTAS-0530,1,Discharge
+KTAS-0531,1,Discharge
+KTAS-0532,1,Discharge
+KTAS-0533,1,Discharge
+KTAS-0534,1,Discharge
+KTAS-0535,1,Discharge
+KTAS-0536,1,Discharge
+KTAS-0537,2,Ward admission
+KTAS-0538,2,Ward admission
+KTAS-0539,1,Discharge
+KTAS-0540,1,Discharge
+KTAS-0541,2,Ward admission
+KTAS-0542,1,Discharge
+KTAS-0543,1,Discharge
+KTAS-0544,7,Surgery from ED
+KTAS-0545,1,Discharge
+KTAS-0546,2,Ward admission
+KTAS-0547,1,Discharge
+KTAS-0548,2,Ward admission
+KTAS-0549,1,Discharge
+KTAS-0550,2,Ward admission
+KTAS-0551,2,Ward admission
+KTAS-0552,2,Ward admission
+KTAS-0553,1,Discharge
+KTAS-0554,4,AMA discharge
+KTAS-0555,1,Discharge
+KTAS-0556,2,Ward admission
+KTAS-0557,1,Discharge
+KTAS-0558,2,Ward admission
+KTAS-0559,1,Discharge
+KTAS-0560,4,AMA discharge
+KTAS-0561,1,Discharge
+KTAS-0562,2,Ward admission
+KTAS-0563,1,Discharge
+KTAS-0564,1,Discharge
+KTAS-0565,1,Discharge
+KTAS-0566,1,Discharge
+KTAS-0567,2,Ward admission
+KTAS-0568,1,Discharge
+KTAS-0569,1,Discharge
+KTAS-0570,1,Discharge
+KTAS-0571,1,Discharge
+KTAS-0572,1,Discharge
+KTAS-0573,1,Discharge
+KTAS-0574,1,Discharge
+KTAS-0575,1,Discharge
+KTAS-0576,1,Discharge
+KTAS-0577,1,Discharge
+KTAS-0578,1,Discharge
+KTAS-0579,1,Discharge
+KTAS-0580,1,Discharge
+KTAS-0581,1,Discharge
+KTAS-0582,1,Discharge
+KTAS-0583,2,Ward admission
+KTAS-0584,1,Discharge
+KTAS-0585,1,Discharge
+KTAS-0586,1,Discharge
+KTAS-0587,1,Discharge
+KTAS-0588,1,Discharge
+KTAS-0589,1,Discharge
+KTAS-0590,1,Discharge
+KTAS-0591,1,Discharge
+KTAS-0592,1,Discharge
+KTAS-0593,1,Discharge
+KTAS-0594,1,Discharge
+KTAS-0595,2,Ward admission
+KTAS-0596,2,Ward admission
+KTAS-0597,1,Discharge
+KTAS-0598,1,Discharge
+KTAS-0599,1,Discharge
+KTAS-0600,1,Discharge
+KTAS-0601,1,Discharge
+KTAS-0602,1,Discharge
+KTAS-0603,1,Discharge
+KTAS-0604,2,Ward admission
+KTAS-0605,1,Discharge
+KTAS-0606,1,Discharge
+KTAS-0607,1,Discharge
+KTAS-0608,1,Discharge
+KTAS-0609,2,Ward admission
+KTAS-0610,1,Discharge
+KTAS-0611,1,Discharge
+KTAS-0612,1,Discharge
+KTAS-0613,1,Discharge
+KTAS-0614,1,Discharge
+KTAS-0615,1,Discharge
+KTAS-0616,1,Discharge
+KTAS-0617,1,Discharge
+KTAS-0618,1,Discharge
+KTAS-0619,2,Ward admission
+KTAS-0620,1,Discharge
+KTAS-0621,2,Ward admission
+KTAS-0622,2,Ward admission
+KTAS-0623,4,AMA discharge
+KTAS-0624,1,Discharge
+KTAS-0625,2,Ward admission
+KTAS-0626,2,Ward admission
+KTAS-0627,1,Discharge
+KTAS-0628,2,Ward admission
+KTAS-0629,1,Discharge
+KTAS-0630,2,Ward admission
+KTAS-0631,1,Discharge
+KTAS-0632,2,Ward admission
+KTAS-0633,1,Discharge
+KTAS-0634,1,Discharge
+KTAS-0635,1,Discharge
+KTAS-0636,1,Discharge
+KTAS-0637,1,Discharge
+KTAS-0638,1,Discharge
+KTAS-0639,2,Ward admission
+KTAS-0640,1,Discharge
+KTAS-0641,1,Discharge
+KTAS-0642,1,Discharge
+KTAS-0643,1,Discharge
+KTAS-0644,1,Discharge
+KTAS-0645,1,Discharge
+KTAS-0646,1,Discharge
+KTAS-0647,2,Ward admission
+KTAS-0648,3,ICU admission
+KTAS-0649,1,Discharge
+KTAS-0650,2,Ward admission
+KTAS-0651,2,Ward admission
+KTAS-0652,2,Ward admission
+KTAS-0653,2,Ward admission
+KTAS-0654,1,Discharge
+KTAS-0655,1,Discharge
+KTAS-0656,1,Discharge
+KTAS-0657,1,Discharge
+KTAS-0658,1,Discharge
+KTAS-0659,2,Ward admission
+KTAS-0660,1,Discharge
+KTAS-0661,1,Discharge
+KTAS-0662,1,Discharge
+KTAS-0663,2,Ward admission
+KTAS-0664,1,Discharge
+KTAS-0665,2,Ward admission
+KTAS-0666,1,Discharge
+KTAS-0667,1,Discharge
+KTAS-0668,2,Ward admission
+KTAS-0669,1,Discharge
+KTAS-0670,2,Ward admission
+KTAS-0671,1,Discharge
+KTAS-0672,1,Discharge
+KTAS-0673,1,Discharge
+KTAS-0674,1,Discharge
+KTAS-0675,2,Ward admission
+KTAS-0676,1,Discharge
+KTAS-0677,4,AMA discharge
+KTAS-0678,1,Discharge
+KTAS-0679,4,AMA discharge
+KTAS-0680,2,Ward admission
+KTAS-0681,1,Discharge
+KTAS-0682,4,AMA discharge
+KTAS-0683,1,Discharge
+KTAS-0684,1,Discharge
+KTAS-0685,1,Discharge
+KTAS-0686,1,Discharge
+KTAS-0687,2,Ward admission
+KTAS-0688,1,Discharge
+KTAS-0689,1,Discharge
+KTAS-0690,1,Discharge
+KTAS-0691,2,Ward admission
+KTAS-0692,1,Discharge
+KTAS-0693,2,Ward admission
+KTAS-0694,1,Discharge
+KTAS-0695,1,Discharge
+KTAS-0696,1,Discharge
+KTAS-0697,1,Discharge
+KTAS-0698,2,Ward admission
+KTAS-0699,1,Discharge
+KTAS-0700,1,Discharge
+KTAS-0701,2,Ward admission
+KTAS-0702,1,Discharge
+KTAS-0703,2,Ward admission
+KTAS-0704,1,Discharge
+KTAS-0705,1,Discharge
+KTAS-0706,6,Death
+KTAS-0707,2,Ward admission
+KTAS-0708,2,Ward admission
+KTAS-0709,1,Discharge
+KTAS-0710,1,Discharge
+KTAS-0711,2,Ward admission
+KTAS-0712,2,Ward admission
+KTAS-0713,1,Discharge
+KTAS-0714,1,Discharge
+KTAS-0715,7,Surgery from ED
+KTAS-0716,2,Ward admission
+KTAS-0717,1,Discharge
+KTAS-0718,5,Transfer
+KTAS-0719,2,Ward admission
+KTAS-0720,7,Surgery from ED
+KTAS-0721,1,Discharge
+KTAS-0722,1,Discharge
+KTAS-0723,2,Ward admission
+KTAS-0724,2,Ward admission
+KTAS-0725,1,Discharge
+KTAS-0726,2,Ward admission
+KTAS-0727,2,Ward admission
+KTAS-0728,1,Discharge
+KTAS-0729,1,Discharge
+KTAS-0730,1,Discharge
+KTAS-0731,2,Ward admission
+KTAS-0732,1,Discharge
+KTAS-0733,1,Discharge
+KTAS-0734,1,Discharge
+KTAS-0735,1,Discharge
+KTAS-0736,1,Discharge
+KTAS-0737,1,Discharge
+KTAS-0738,1,Discharge
+KTAS-0739,1,Discharge
+KTAS-0740,1,Discharge
+KTAS-0741,1,Discharge
+KTAS-0742,4,AMA discharge
+KTAS-0743,1,Discharge
+KTAS-0744,1,Discharge
+KTAS-0745,1,Discharge
+KTAS-0746,1,Discharge
+KTAS-0747,1,Discharge
+KTAS-0748,1,Discharge
+KTAS-0749,1,Discharge
+KTAS-0750,1,Discharge
+KTAS-0751,1,Discharge
+KTAS-0752,1,Discharge
+KTAS-0753,1,Discharge
+KTAS-0754,2,Ward admission
+KTAS-0755,2,Ward admission
+KTAS-0756,2,Ward admission
+KTAS-0757,2,Ward admission
+KTAS-0758,1,Discharge
+KTAS-0759,2,Ward admission
+KTAS-0760,2,Ward admission
+KTAS-0761,1,Discharge
+KTAS-0762,2,Ward admission
+KTAS-0763,2,Ward admission
+KTAS-0764,2,Ward admission
+KTAS-0765,2,Ward admission
+KTAS-0766,4,AMA discharge
+KTAS-0767,3,ICU admission
+KTAS-0768,2,Ward admission
+KTAS-0769,1,Discharge
+KTAS-0770,1,Discharge
+KTAS-0771,1,Discharge
+KTAS-0772,2,Ward admission
+KTAS-0773,1,Discharge
+KTAS-0774,1,Discharge
+KTAS-0775,1,Discharge
+KTAS-0776,1,Discharge
+KTAS-0777,5,Transfer
+KTAS-0778,1,Discharge
+KTAS-0779,1,Discharge
+KTAS-0780,1,Discharge
+KTAS-0781,2,Ward admission
+KTAS-0782,1,Discharge
+KTAS-0783,2,Ward admission
+KTAS-0784,2,Ward admission
+KTAS-0785,2,Ward admission
+KTAS-0786,1,Discharge
+KTAS-0787,1,Discharge
+KTAS-0788,1,Discharge
+KTAS-0789,2,Ward admission
+KTAS-0790,2,Ward admission
+KTAS-0791,1,Discharge
+KTAS-0792,1,Discharge
+KTAS-0793,1,Discharge
+KTAS-0794,1,Discharge
+KTAS-0795,1,Discharge
+KTAS-0796,1,Discharge
+KTAS-0797,1,Discharge
+KTAS-0798,1,Discharge
+KTAS-0799,2,Ward admission
+KTAS-0800,2,Ward admission
+KTAS-0801,1,Discharge
+KTAS-0802,1,Discharge
+KTAS-0803,2,Ward admission
+KTAS-0804,1,Discharge
+KTAS-0805,2,Ward admission
+KTAS-0806,2,Ward admission
+KTAS-0807,1,Discharge
+KTAS-0808,1,Discharge
+KTAS-0809,1,Discharge
+KTAS-0810,2,Ward admission
+KTAS-0811,2,Ward admission
+KTAS-0812,1,Discharge
+KTAS-0813,1,Discharge
+KTAS-0814,1,Discharge
+KTAS-0815,1,Discharge
+KTAS-0816,1,Discharge
+KTAS-0817,1,Discharge
+KTAS-0818,2,Ward admission
+KTAS-0819,2,Ward admission
+KTAS-0820,2,Ward admission
+KTAS-0821,5,Transfer
+KTAS-0822,1,Discharge
+KTAS-0823,2,Ward admission
+KTAS-0824,2,Ward admission
+KTAS-0825,1,Discharge
+KTAS-0826,2,Ward admission
+KTAS-0827,1,Discharge
+KTAS-0828,1,Discharge
+KTAS-0829,4,AMA discharge
+KTAS-0830,1,Discharge
+KTAS-0831,1,Discharge
+KTAS-0832,1,Discharge
+KTAS-0833,1,Discharge
+KTAS-0834,1,Discharge
+KTAS-0835,1,Discharge
+KTAS-0836,1,Discharge
+KTAS-0837,2,Ward admission
+KTAS-0838,1,Discharge
+KTAS-0839,1,Discharge
+KTAS-0840,4,AMA discharge
+KTAS-0841,2,Ward admission
+KTAS-0842,1,Discharge
+KTAS-0843,2,Ward admission
+KTAS-0844,1,Discharge
+KTAS-0845,1,Discharge
+KTAS-0846,1,Discharge
+KTAS-0847,1,Discharge
+KTAS-0848,1,Discharge
+KTAS-0849,1,Discharge
+KTAS-0850,1,Discharge
+KTAS-0851,1,Discharge
+KTAS-0852,1,Discharge
+KTAS-0853,1,Discharge
+KTAS-0854,1,Discharge
+KTAS-0855,2,Ward admission
+KTAS-0856,1,Discharge
+KTAS-0857,1,Discharge
+KTAS-0858,1,Discharge
+KTAS-0859,1,Discharge
+KTAS-0860,4,AMA discharge
+KTAS-0861,1,Discharge
+KTAS-0862,1,Discharge
+KTAS-0863,1,Discharge
+KTAS-0864,1,Discharge
+KTAS-0865,1,Discharge
+KTAS-0866,1,Discharge
+KTAS-0867,1,Discharge
+KTAS-0868,2,Ward admission
+KTAS-0869,1,Discharge
+KTAS-0870,1,Discharge
+KTAS-0871,2,Ward admission
+KTAS-0872,2,Ward admission
+KTAS-0873,1,Discharge
+KTAS-0874,1,Discharge
+KTAS-0875,1,Discharge
+KTAS-0876,1,Discharge
+KTAS-0877,1,Discharge
+KTAS-0878,1,Discharge
+KTAS-0879,2,Ward admission
+KTAS-0880,1,Discharge
+KTAS-0881,1,Discharge
+KTAS-0882,2,Ward admission
+KTAS-0883,2,Ward admission
+KTAS-0884,1,Discharge
+KTAS-0885,1,Discharge
+KTAS-0886,1,Discharge
+KTAS-0887,1,Discharge
+KTAS-0888,4,AMA discharge
+KTAS-0889,1,Discharge
+KTAS-0890,1,Discharge
+KTAS-0891,4,AMA discharge
+KTAS-0892,1,Discharge
+KTAS-0893,1,Discharge
+KTAS-0894,1,Discharge
+KTAS-0895,2,Ward admission
+KTAS-0896,2,Ward admission
+KTAS-0897,1,Discharge
+KTAS-0898,1,Discharge
+KTAS-0899,2,Ward admission
+KTAS-0900,2,Ward admission
+KTAS-0901,1,Discharge
+KTAS-0902,1,Discharge
+KTAS-0903,1,Discharge
+KTAS-0904,2,Ward admission
+KTAS-0905,1,Discharge
+KTAS-0906,1,Discharge
+KTAS-0907,1,Discharge
+KTAS-0908,4,AMA discharge
+KTAS-0909,2,Ward admission
+KTAS-0910,1,Discharge
+KTAS-0911,2,Ward admission
+KTAS-0912,2,Ward admission
+KTAS-0913,1,Discharge
+KTAS-0914,1,Discharge
+KTAS-0915,1,Discharge
+KTAS-0916,1,Discharge
+KTAS-0917,1,Discharge
+KTAS-0918,1,Discharge
+KTAS-0919,1,Discharge
+KTAS-0920,1,Discharge
+KTAS-0921,1,Discharge
+KTAS-0922,2,Ward admission
+KTAS-0923,1,Discharge
+KTAS-0924,1,Discharge
+KTAS-0925,1,Discharge
+KTAS-0926,2,Ward admission
+KTAS-0927,1,Discharge
+KTAS-0928,1,Discharge
+KTAS-0929,1,Discharge
+KTAS-0930,1,Discharge
+KTAS-0931,5,Transfer
+KTAS-0932,7,Surgery from ED
+KTAS-0933,2,Ward admission
+KTAS-0934,2,Ward admission
+KTAS-0935,1,Discharge
+KTAS-0936,1,Discharge
+KTAS-0937,2,Ward admission
+KTAS-0938,2,Ward admission
+KTAS-0939,1,Discharge
+KTAS-0940,1,Discharge
+KTAS-0941,2,Ward admission
+KTAS-0942,2,Ward admission
+KTAS-0943,1,Discharge
+KTAS-0944,2,Ward admission
+KTAS-0945,1,Discharge
+KTAS-0946,1,Discharge
+KTAS-0947,1,Discharge
+KTAS-0948,2,Ward admission
+KTAS-0949,1,Discharge
+KTAS-0950,4,AMA discharge
+KTAS-0951,1,Discharge
+KTAS-0952,1,Discharge
+KTAS-0953,2,Ward admission
+KTAS-0954,2,Ward admission
+KTAS-0955,1,Discharge
+KTAS-0956,4,AMA discharge
+KTAS-0957,4,AMA discharge
+KTAS-0958,1,Discharge
+KTAS-0959,1,Discharge
+KTAS-0960,1,Discharge
+KTAS-0961,2,Ward admission
+KTAS-0962,2,Ward admission
+KTAS-0963,1,Discharge
+KTAS-0964,1,Discharge
+KTAS-0965,1,Discharge
+KTAS-0966,1,Discharge
+KTAS-0967,1,Discharge
+KTAS-0968,1,Discharge
+KTAS-0969,6,Death
+KTAS-0970,1,Discharge
+KTAS-0971,2,Ward admission
+KTAS-0972,2,Ward admission
+KTAS-0973,1,Discharge
+KTAS-0974,1,Discharge
+KTAS-0975,2,Ward admission
+KTAS-0976,2,Ward admission
+KTAS-0977,2,Ward admission
+KTAS-0978,2,Ward admission
+KTAS-0979,2,Ward admission
+KTAS-0980,2,Ward admission
+KTAS-0981,1,Discharge
+KTAS-0982,2,Ward admission
+KTAS-0983,4,AMA discharge
+KTAS-0984,1,Discharge
+KTAS-0985,2,Ward admission
+KTAS-0986,1,Discharge
+KTAS-0987,2,Ward admission
+KTAS-0988,2,Ward admission
+KTAS-0989,2,Ward admission
+KTAS-0990,2,Ward admission
+KTAS-0991,2,Ward admission
+KTAS-0992,1,Discharge
+KTAS-0993,1,Discharge
+KTAS-0994,1,Discharge
+KTAS-0995,1,Discharge
+KTAS-0996,1,Discharge
+KTAS-0997,1,Discharge
+KTAS-0998,1,Discharge
+KTAS-0999,2,Ward admission
+KTAS-1000,2,Ward admission
+KTAS-1001,1,Discharge
+KTAS-1002,1,Discharge
+KTAS-1003,1,Discharge
+KTAS-1004,1,Discharge
+KTAS-1005,2,Ward admission
+KTAS-1006,1,Discharge
+KTAS-1007,2,Ward admission
+KTAS-1008,2,Ward admission
+KTAS-1009,1,Discharge
+KTAS-1010,6,Death
+KTAS-1011,1,Discharge
+KTAS-1012,1,Discharge
+KTAS-1013,5,Transfer
+KTAS-1014,2,Ward admission
+KTAS-1015,1,Discharge
+KTAS-1016,2,Ward admission
+KTAS-1017,7,Surgery from ED
+KTAS-1018,1,Discharge
+KTAS-1019,4,AMA discharge
+KTAS-1020,1,Discharge
+KTAS-1021,1,Discharge
+KTAS-1022,1,Discharge
+KTAS-1023,1,Discharge
+KTAS-1024,1,Discharge
+KTAS-1025,1,Discharge
+KTAS-1026,2,Ward admission
+KTAS-1027,2,Ward admission
+KTAS-1028,2,Ward admission
+KTAS-1029,1,Discharge
+KTAS-1030,1,Discharge
+KTAS-1031,1,Discharge
+KTAS-1032,1,Discharge
+KTAS-1033,2,Ward admission
+KTAS-1034,1,Discharge
+KTAS-1035,2,Ward admission
+KTAS-1036,3,ICU admission
+KTAS-1037,1,Discharge
+KTAS-1038,2,Ward admission
+KTAS-1039,5,Transfer
+KTAS-1040,6,Death
+KTAS-1041,2,Ward admission
+KTAS-1042,1,Discharge
+KTAS-1043,1,Discharge
+KTAS-1044,1,Discharge
+KTAS-1045,2,Ward admission
+KTAS-1046,2,Ward admission
+KTAS-1047,5,Transfer
+KTAS-1048,1,Discharge
+KTAS-1049,1,Discharge
+KTAS-1050,1,Discharge
+KTAS-1051,1,Discharge
+KTAS-1052,1,Discharge
+KTAS-1053,2,Ward admission
+KTAS-1054,2,Ward admission
+KTAS-1055,1,Discharge
+KTAS-1056,5,Transfer
+KTAS-1057,2,Ward admission
+KTAS-1058,2,Ward admission
+KTAS-1059,4,AMA discharge
+KTAS-1060,2,Ward admission
+KTAS-1061,1,Discharge
+KTAS-1062,1,Discharge
+KTAS-1063,1,Discharge
+KTAS-1064,1,Discharge
+KTAS-1065,2,Ward admission
+KTAS-1066,1,Discharge
+KTAS-1067,2,Ward admission
+KTAS-1068,1,Discharge
+KTAS-1069,1,Discharge
+KTAS-1070,1,Discharge
+KTAS-1071,1,Discharge
+KTAS-1072,1,Discharge
+KTAS-1073,2,Ward admission
+KTAS-1074,2,Ward admission
+KTAS-1075,2,Ward admission
+KTAS-1076,1,Discharge
+KTAS-1077,2,Ward admission
+KTAS-1078,2,Ward admission
+KTAS-1079,3,ICU admission
+KTAS-1080,5,Transfer
+KTAS-1081,1,Discharge
+KTAS-1082,2,Ward admission
+KTAS-1083,2,Ward admission
+KTAS-1084,6,Death
+KTAS-1085,1,Discharge
+KTAS-1086,1,Discharge
+KTAS-1087,2,Ward admission
+KTAS-1088,2,Ward admission
+KTAS-1089,2,Ward admission
+KTAS-1090,1,Discharge
+KTAS-1091,2,Ward admission
+KTAS-1092,1,Discharge
+KTAS-1093,1,Discharge
+KTAS-1094,2,Ward admission
+KTAS-1095,1,Discharge
+KTAS-1096,1,Discharge
+KTAS-1097,1,Discharge
+KTAS-1098,1,Discharge
+KTAS-1099,2,Ward admission
+KTAS-1100,1,Discharge
+KTAS-1101,1,Discharge
+KTAS-1102,2,Ward admission
+KTAS-1103,1,Discharge
+KTAS-1104,1,Discharge
+KTAS-1105,1,Discharge
+KTAS-1106,2,Ward admission
+KTAS-1107,1,Discharge
+KTAS-1108,2,Ward admission
+KTAS-1109,2,Ward admission
+KTAS-1110,2,Ward admission
+KTAS-1111,2,Ward admission
+KTAS-1112,2,Ward admission
+KTAS-1113,2,Ward admission
+KTAS-1114,1,Discharge
+KTAS-1115,1,Discharge
+KTAS-1116,1,Discharge
+KTAS-1117,1,Discharge
+KTAS-1118,2,Ward admission
+KTAS-1119,1,Discharge
+KTAS-1120,1,Discharge
+KTAS-1121,1,Discharge
+KTAS-1122,1,Discharge
+KTAS-1123,1,Discharge
+KTAS-1124,1,Discharge
+KTAS-1125,1,Discharge
+KTAS-1126,2,Ward admission
+KTAS-1127,2,Ward admission
+KTAS-1128,2,Ward admission
+KTAS-1129,1,Discharge
+KTAS-1130,2,Ward admission
+KTAS-1131,2,Ward admission
+KTAS-1132,2,Ward admission
+KTAS-1133,6,Death
+KTAS-1134,2,Ward admission
+KTAS-1135,2,Ward admission
+KTAS-1136,1,Discharge
+KTAS-1137,1,Discharge
+KTAS-1138,2,Ward admission
+KTAS-1139,2,Ward admission
+KTAS-1140,5,Transfer
+KTAS-1141,1,Discharge
+KTAS-1142,2,Ward admission
+KTAS-1143,7,Surgery from ED
+KTAS-1144,6,Death
+KTAS-1145,1,Discharge
+KTAS-1146,1,Discharge
+KTAS-1147,1,Discharge
+KTAS-1148,2,Ward admission
+KTAS-1149,1,Discharge
+KTAS-1150,2,Ward admission
+KTAS-1151,2,Ward admission
+KTAS-1152,1,Discharge
+KTAS-1153,2,Ward admission
+KTAS-1154,2,Ward admission
+KTAS-1155,2,Ward admission
+KTAS-1156,1,Discharge
+KTAS-1157,1,Discharge
+KTAS-1158,2,Ward admission
+KTAS-1159,1,Discharge
+KTAS-1160,2,Ward admission
+KTAS-1161,2,Ward admission
+KTAS-1162,2,Ward admission
+KTAS-1163,1,Discharge
+KTAS-1164,1,Discharge
+KTAS-1165,2,Ward admission
+KTAS-1166,1,Discharge
+KTAS-1167,1,Discharge
+KTAS-1168,6,Death
+KTAS-1169,5,Transfer
+KTAS-1170,2,Ward admission
+KTAS-1171,2,Ward admission
+KTAS-1172,2,Ward admission
+KTAS-1173,1,Discharge
+KTAS-1174,2,Ward admission
+KTAS-1175,2,Ward admission
+KTAS-1176,2,Ward admission
+KTAS-1177,2,Ward admission
+KTAS-1178,5,Transfer
+KTAS-1179,1,Discharge
+KTAS-1180,1,Discharge
+KTAS-1181,1,Discharge
+KTAS-1182,1,Discharge
+KTAS-1183,2,Ward admission
+KTAS-1184,1,Discharge
+KTAS-1185,1,Discharge
+KTAS-1186,2,Ward admission
+KTAS-1187,1,Discharge
+KTAS-1188,1,Discharge
+KTAS-1189,2,Ward admission
+KTAS-1190,1,Discharge
+KTAS-1191,1,Discharge
+KTAS-1192,1,Discharge
+KTAS-1193,2,Ward admission
+KTAS-1194,1,Discharge
+KTAS-1195,2,Ward admission
+KTAS-1196,2,Ward admission
+KTAS-1197,2,Ward admission
+KTAS-1198,2,Ward admission
+KTAS-1199,1,Discharge
+KTAS-1200,1,Discharge
+KTAS-1201,2,Ward admission
+KTAS-1202,1,Discharge
+KTAS-1203,2,Ward admission
+KTAS-1204,2,Ward admission
+KTAS-1205,7,Surgery from ED
+KTAS-1206,2,Ward admission
+KTAS-1207,1,Discharge
+KTAS-1208,1,Discharge
+KTAS-1209,1,Discharge
+KTAS-1210,2,Ward admission
+KTAS-1211,2,Ward admission
+KTAS-1212,1,Discharge
+KTAS-1213,1,Discharge
+KTAS-1214,1,Discharge
+KTAS-1215,1,Discharge
+KTAS-1216,1,Discharge
+KTAS-1217,2,Ward admission
+KTAS-1218,5,Transfer
+KTAS-1219,1,Discharge
+KTAS-1220,2,Ward admission
+KTAS-1221,1,Discharge
+KTAS-1222,1,Discharge
+KTAS-1223,1,Discharge
+KTAS-1224,1,Discharge
+KTAS-1225,1,Discharge
+KTAS-1226,1,Discharge
+KTAS-1227,1,Discharge
+KTAS-1228,1,Discharge
+KTAS-1229,1,Discharge
+KTAS-1230,2,Ward admission
+KTAS-1231,2,Ward admission
+KTAS-1232,1,Discharge
+KTAS-1233,2,Ward admission
+KTAS-1234,2,Ward admission
+KTAS-1235,1,Discharge
+KTAS-1236,2,Ward admission
+KTAS-1237,2,Ward admission
+KTAS-1238,2,Ward admission
+KTAS-1239,1,Discharge
+KTAS-1240,2,Ward admission
+KTAS-1241,1,Discharge
+KTAS-1242,1,Discharge
+KTAS-1243,1,Discharge
+KTAS-1244,1,Discharge
+KTAS-1245,1,Discharge
+KTAS-1246,7,Surgery from ED
+KTAS-1247,1,Discharge
+KTAS-1248,2,Ward admission
+KTAS-1249,1,Discharge
+KTAS-1250,2,Ward admission
+KTAS-1251,2,Ward admission
+KTAS-1252,1,Discharge
+KTAS-1253,1,Discharge
+KTAS-1254,1,Discharge
+KTAS-1255,1,Discharge
+KTAS-1256,2,Ward admission
+KTAS-1257,2,Ward admission
+KTAS-1258,1,Discharge
+KTAS-1259,1,Discharge
+KTAS-1260,2,Ward admission
+KTAS-1261,2,Ward admission
+KTAS-1262,2,Ward admission
+KTAS-1263,2,Ward admission
+KTAS-1264,1,Discharge
+KTAS-1265,1,Discharge
+KTAS-1266,7,Surgery from ED
+KTAS-1267,2,Ward admission

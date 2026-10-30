@@ -8,6 +8,12 @@ Sources (see README.md for licenses and download URLs; checksums are checked her
   triage nurse assigned (triage.acuity). Age from MIMIC-IV Demo v2.2 patients.
 - ktas: Moon et al. 2019, PLOS ONE (real, de-identified, CC BY 4.0). Reference = the expert KTAS
   (three KTAS instructors' retrospective review); the triage nurse's KTAS is kept as a human comparison.
+- nhamcs: CDC/NCHS NHAMCS 2022 emergency department public-use file (US, real, de-identified,
+  public domain; NCHS data-use terms: statistics only, no attempt to identify anyone). Adult
+  ambulance arrivals from the scene (not transfers, not dead on arrival) with a triage level 1-5.
+  Reference = the triage level the ED recorded (IMMEDR; each hospital's 5-level scale, usually ESI).
+  The visit's outcome (critical care, operating room, cath lab, death; admission; discharge) is kept
+  in meta for the outcome check, never in the report. Needs pandas to read the SAS file.
 
 Each case is the app's assessment input (backend.case_assessment.read_inputs()["input"]) plus the
 reference label and, for the structured datasets, the vital signs the report states (truth for
@@ -34,6 +40,9 @@ SOURCES = {
     "mimic-iv-ed-demo-2.2/ed/triage.csv.gz": "086dadcb49adc5f24bdda0e342ec9cf0fbcb2e9595516c5c101d408434e1e09b",
     "mimic-iv-demo-2.2/hosp/patients.csv.gz": "59dcc6cd8450ddf03ad32cc7d76e41caa4c9633541715987f590c74835cf6fae",
     "ktas/S1_EMR_review_coding_data.xlsx": "f631c951178799179d0fbd74fe979464b955ea1b426222bf015b163b8a24beb0",
+    # Downloaded 2026-10-27 from ftp.cdc.gov/pub/Health_Statistics/NCHS/Dataset_Documentation/NHAMCS/sas/
+    "nhamcs/ed2022_sas.sas7bdat": "2f9aa0459f6224ce1583f157f251efbaf74122c86898b75e450928334f51c71c",
+    "nhamcs/ed22for.txt": "d7f2b37ce6da106246fb8bb182b486ce54b25435595ae886c691cb92b1a65339",
 }
 PURAV_REVIEW_SHA256 = "49077ff182bc79debb76befc74ab8d9ded703ca91b96000f6bdc5a2f961edd08"
 
@@ -262,14 +271,149 @@ def build_ktas(data: Path, words=False) -> list:
     return cases
 
 
+def rfv_labels(path: Path) -> dict:
+    """Reason-for-visit code -> words, from the RFVF format in NCHS's SAS format program."""
+    labels, inside = {}, False
+    for line in path.read_text(encoding="latin-1").splitlines():
+        if line.strip().startswith("VALUE "):
+            inside = line.split()[1] == "RFVF"
+            continue
+        if inside:
+            if line.strip().startswith(";"):
+                break
+            code, _, label = line.partition("=")
+            if code.strip().lstrip("-").isdigit():
+                labels[int(code)] = label.strip().strip("'\"").strip()  # SAS quotes with ' or "
+    return labels
+
+
+# NCHS cuts reason-for-visit labels at 40 characters ("Shoulder pain, ache, soreness, discom...").
+# The commonest cut ones in this sample are written out (our wording of the full NCHS names); any
+# other cut label ends at its last whole word.
+RFV_FULL = {
+    11650: "other symptoms or problems related to psychological and mental disorders",
+    58050: "motor vehicle accident, type of injury unspecified",
+    55050: "injury of the head, neck or face",
+    19401: "shoulder pain, ache, soreness, discomfort",
+    31300: "general psychiatric or psychological examination",
+    12400: "other symptoms of the nervous system",
+    19101: "low back pain, ache, soreness, discomfort",
+    59300: "complication of surgery or an implanted device",
+    10550: "pain, site not specified",
+    19351: "foot and toe pain, ache, soreness, discomfort",
+    54050: "contusions, abrasions or bruises of the head, neck or face",
+    22150: "other endocrine, nutritional or metabolic problems",
+    19601: "hand and finger pain, ache, soreness, discomfort",
+    47351: "police involvement",
+    54250: "contusions, abrasions or bruises of the arm",
+    54150: "contusions, abrasions or bruises of the trunk",
+    54200: "contusions, abrasions or bruises of the leg",
+    15450: "stomach and abdominal pain, cramps and spasms",
+    55500: "injury of the shoulder",
+    55200: "injury of the chest",
+    28000: "skin infection (boil, cellulitis or abscess)",
+    50150: "fracture or dislocation of the trunk",
+    19651: "muscle pain, ache, soreness",
+    19652: "muscle cramps or contractures",
+    54300: "contusion, abrasion or bruise",
+    55450: "injury of the foot",
+    55700: "injury of the hand",
+    51050: "sprain or strain of the neck",
+}
+DANGLING = {"to", "of", "and", "or", "the", "a", "an", "in", "for", "with", "by", "not", "relat", "type"}
+
+
+def plain(code: int, label: str) -> str:
+    """A reason for visit as words in a report: written out if NCHS cut it, lower case, no codes."""
+    if code in RFV_FULL:
+        return RFV_FULL[code]
+    text = label.strip()
+    if text.endswith("..."):
+        words = text[:-3].split()[:-1]  # the last word was cut mid-way
+        while words and words[-1].strip(",;/").lower() in DANGLING:
+            words.pop()
+        text = " ".join(words).rstrip(",;/ ")
+    text = text.replace("Oth ", "Other ").replace(" relat ", " related ").replace(", NOS", "")
+    return text[0].lower() + text[1:] if text[:2] != text[:2].upper() else text
+
+
+# NHAMCS 2022 codes (doc22-ed-508.pdf). 899xx reasons are administrative ("inadequate data base").
+NHAMCS_SEX = {1: "F", 2: "M"}
+NHAMCS_RACE = {1: "Non-Hispanic White", 2: "Non-Hispanic Black", 3: "Hispanic", 4: "Non-Hispanic other"}
+CRITICAL_ADMIT = {1: "critical care unit", 3: "operating room", 5: "cardiac catheterization lab"}
+
+
+def nhamcs_outcome(row) -> str:
+    """The visit's outcome group, from its disposition (used only for scoring, never in the report)."""
+    if row["DIEDED"] == 1 or row["HDSTAT"] == 2 or row["ADMIT"] in CRITICAL_ADMIT:
+        return "ICU, death or surgery from ED"
+    if row["ADMITHOS"] == 1 or row["OBSHOS"] == 1:
+        return "Ward admission"
+    if any(row[k] == 1 for k in ("TRANNH", "TRANPSYC", "TRANOTH")):
+        return "Transferred"
+    return "Sent home (discharge or AMA)"
+
+
+def build_nhamcs(data: Path) -> list:
+    import pandas  # only for this source: it ships as a SAS dataset
+
+    labels = rfv_labels(checked(data, "nhamcs/ed22for.txt"))
+    frame = pandas.read_sas(checked(data, "nhamcs/ed2022_sas.sas7bdat"), encoding="latin-1")
+    cases = []
+    for index, row in enumerate(frame.to_dict("records"), start=1):
+        if not (row["ARREMS"] == 1 and row["AMBTRANSFER"] != 1 and row["DOA"] != 1 and row["AGE"] >= 18
+                and row["IMMEDR"] in (1, 2, 3, 4, 5)):
+            continue
+        reasons = [plain(int(row[k]), labels[int(row[k])]) for k in ("RFV1", "RFV2", "RFV3")
+                   if row[k] > 0 and int(row[k]) in labels and not 89900 <= int(row[k]) < 90000]
+        complaint = "; also ".join(dict.fromkeys(reasons)) or "no clear complaint recorded"
+        temp = row["TEMPF"] / 10 if row["TEMPF"] > 0 else None
+        vitals = in_range({"hr": row["PULSE"] if 0 < row["PULSE"] < 998 else None,
+                           "sbp": row["BPSYS"] if row["BPSYS"] > 0 else None,
+                           "dbp": row["BPDIAS"] if 0 < row["BPDIAS"] < 998 else None,
+                           "rr": row["RESPR"] if row["RESPR"] > 0 else None,
+                           "spo2": row["POPCT"] if row["POPCT"] > 0 else None,
+                           "temp": round((temp - 32) * 5 / 9, 1) if temp and 90 <= temp <= 110 else None})
+        if "temp" in vitals:
+            vitals["temp"] = temp  # stated in Fahrenheit, as recorded
+        # A recorded 0 for pulse or systolic BP is said as not measurable, as KTAS's '측불' is.
+        unmeasured = [name for name, key in (("pulse", "PULSE"), ("BP", "BPSYS")) if row[key] == 0]
+        pain = (None if not 0 <= row["PAINSCALE"] <= 10 else "Reports no pain." if row["PAINSCALE"] == 0
+                else f"Pain {fmt(row['PAINSCALE'])} out of 10.")
+        case_id = f"NHAMCS-{index:05d}"
+        # No injury flag: NHAMCS's INJURY is derived partly from the ED diagnosis, i.e. after triage.
+        transcript = report(row["AGE"], NHAMCS_SEX[int(row["SEX"])], complaint, vitals, "Fahrenheit",
+                            pain=pain, unmeasured=unmeasured)
+        cases.append({
+            "dataset": "nhamcs", "case_id": case_id, "subset": ["all", "ems"],
+            "input": app_input(case_id, transcript),
+            "reference": {"scale": "ED triage (usually ESI)", "level": int(row["IMMEDR"]), "raw": int(row["IMMEDR"]),
+                          "labeler": "ED triage staff at the visit (NHAMCS 2022 IMMEDR)"},
+            "truth_vitals": truth(vitals, temp_unit="F"),
+            "meta": {"age": row["AGE"], "sex": NHAMCS_SEX[int(row["SEX"])], "arrival": "ambulance",
+                     "race_ethnicity": NHAMCS_RACE.get(int(row["RACERETH"])), "outcome": nhamcs_outcome(row),
+                     "source_row": {"row": index}},
+        })
+    return cases
+
+
+BUILDERS = {
+    "purav": lambda data: build_purav(),
+    "mimic": build_mimic,
+    "ktas": build_ktas,
+    # The spoken-number variant is only the EMS arrivals: it tests the same cases read as radio speech.
+    "ktas_spoken": lambda data: [c for c in build_ktas(data, words=True) if "ems" in c["subset"]],
+    "nhamcs": build_nhamcs,
+}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data", type=Path, required=True, help="Folder with the downloaded sources (README.md)")
+    parser.add_argument("--only", choices=sorted(BUILDERS), action="append", help="Build only these sets")
     args = parser.parse_args(argv)
     CASES_DIR.mkdir(exist_ok=True)
-    builds = {"purav": build_purav(), "mimic": build_mimic(args.data), "ktas": build_ktas(args.data)}
-    # The spoken-number variant is only the EMS arrivals: it tests the same cases read as radio speech.
-    builds["ktas_spoken"] = [c for c in build_ktas(args.data, words=True) if "ems" in c["subset"]]
+    builds = {name: build(args.data) for name, build in BUILDERS.items() if not args.only or name in args.only}
     for name, cases in builds.items():
         path = CASES_DIR / f"{name}.jsonl"
         path.write_text("".join(json.dumps(c, ensure_ascii=False, sort_keys=True) + "\n" for c in cases),
