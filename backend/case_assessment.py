@@ -389,8 +389,8 @@ def stated(number: float, numbers: set, temperature: bool = False) -> bool:
 # The ESI reasons may also cite the ESI scale itself: a level, a count of resources, a score out of 10,
 # or a danger-zone threshold (the prompt's decision points), none of which the crew states.
 ESI_REFERENCE = re.compile(r"\bESI\s*[1-5]\b|\b(?:[1-9]|10)\s*/\s*10\b", re.IGNORECASE)
-ESI_THRESHOLDS = {1.0, 2.0, 3.0, 4.0, 5.0, 7.0, 20.0, 30.0, 35.0, 38.0, 40.0, 55.0, 60.0, 92.0, 100.0, 120.0, 140.0,
-                  180.0, 190.0}
+ESI_THRESHOLDS = {1.0, 2.0, 3.0, 4.0, 5.0, 7.0, 12.0, 20.0, 28.0, 30.0, 35.0, 38.0, 40.0, 55.0, 60.0, 92.0, 100.0,
+                  120.0, 140.0, 180.0, 190.0}
 
 
 def unsupported_numbers(fields: dict, inputs: dict) -> list:
