@@ -16,7 +16,7 @@
 ## Evaluation data (benchmark run 2026-10-26)
 - KTAS (Moon et al. 2019, PLoS ONE, CC BY 4.0): 1,267 real ED visits, expert KTAS as the reference.
 - MIMIC-IV-ED Demo v2.2 (PhysioNet, ODbL): 207 stays from 56 patients, triage nurse ESI as the reference.
-- NHAMCS 2022 (CDC/NCHS, public domain): 1,683 adult ambulance arrivals from 129 US hospitals, the ED's own
+- NHAMCS 2022 (CDC/NCHS public-use file, used under the NCHS data use agreement): 1,683 adult ambulance arrivals from 129 US hospitals, the ED's own
   triage level as the reference (protocol addendum v1.1, written before its model calls). Counts are of the
   sample, not national estimates.
 - 10 fictional cases labelled by one clinician (Purav).

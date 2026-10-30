@@ -1,6 +1,6 @@
 # Eir AI benchmark: results (run of 2026-10-26)
 
-Every number below is in [metrics.json](metrics.json), recomputed from the raw call records in
+Every number below is in [metrics.json](metrics.json) (patient outcomes in [outcomes.json](outcomes.json)), recomputed from the raw call records in
 [raw/](raw/) by `python -m evals.benchmark.score`; the full tables are in [TABLES.md](TABLES.md).
 The analysis plan was committed before any model call ([PROTOCOL.md](../PROTOCOL.md), commit
 `d7c6a51`). Sources and licences: [SOURCES.md](SOURCES.md).
@@ -92,7 +92,7 @@ so this rate says little about live use either way; Purav's fuller cases had non
 - **On the unmodified outputs**, the check flagged 9 of 3,201 calls (6 of 1,905 primary runs; both in metrics.json). All 9
   were the same false alarm: the ESI reason quoting the prompt's "over age 12" threshold, which
   the check's list of allowed ESI thresholds lacks. Apart from those, the check found **no number
-  the model made up**. (Fix, not made here: add 12 to `ESI_THRESHOLDS` in backend/case_assessment.py.)
+  the model made up**. (The benchmark ran on the earlier code; the fix, adding the age-12 and 28-day thresholds to backend/case_assessment.py, was merged afterwards in PR #85.)
 - **Extraction quote check**, 9,053 real extracted vitals: a wrong value with its true quote was
   dropped 9,053/9,053; a quote not in the report failed the run 9,053/9,053.
 

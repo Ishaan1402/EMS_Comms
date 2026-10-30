@@ -4,7 +4,9 @@ Eir keeps the receiving hospital up to date while an ambulance is on the way. Th
 
 This is a hackathon prototype that runs on fictional patients. It isn't ready for real patient data (see [Limits](#limits)). The AI's suggested ESI level (Emergency Severity Index, 1 to 5, or Cannot assess) and risk score (1 to 10) are pre-arrival suggestions for clinician review from the EMS report only, not validated triage. A doctor can change the ESI level.
 
-[Run it](#run-it) · [Demo](#demo) · [Tests](#tests) · [Repo layout](#repo-layout) · [How it works](#how-it-works) · [API](#api) · [Limits](#limits)
+Built for the SAS Hackathon 2026 by team InTheBud: Ishaan, Vrishank, Dhananjay (DJ), Anand and Mayank.
+
+[Run it](#run-it) · [Demo](#demo) · [Benchmark](#benchmark) · [Tests](#tests) · [Repo layout](#repo-layout) · [How it works](#how-it-works) · [API](#api) · [Limits](#limits)
 
 ## Run it
 
@@ -47,7 +49,7 @@ The database is a SQLite file, `eir.db`, created when the server starts (an exis
 | `JWT_SECRET` | none | Signing logins. Without it, login and every signed-in route fail. |
 | `OPENAI_API_KEY` | none | Transcription, the AI handoff and extraction. Without it, all three fail and show as Needs Review with the reason; typed information still works. |
 | `OPENAI_TRANSCRIPTION_MODEL` | `gpt-transcribe` | Speech to text |
-| `OPENAI_SCORING_MODEL` | `gpt-6-luna` | The AI handoff (`gpt-4` shuts down 2026-10-23) |
+| `OPENAI_SCORING_MODEL` | `gpt-6-luna` | The AI handoff |
 | `OPENAI_EXTRACTION_MODEL` | the scoring model | Facts and vitals from the reports |
 | `OPENAI_REASONING_EFFORT` | `none` | Leave blank for models without reasoning |
 | `PORT` | `5000` | Server port |
@@ -68,6 +70,23 @@ The server starts even with settings missing, and warns about the main ones.
 The [simplified clinician guide and annotation notebook](docs/clinician-annotation/README.md) include live Google Doc/Sheet links, a one-page PDF guide, and an XLSX notebook. The 10 reports are fictional AI-authored fixtures; clinician answers are not prefilled. These materials support a hackathon evaluation pilot, not clinical validation.
 
 The [evaluation pipeline](evals/README.md) and [evaluation notebook](analytics/ems_evaluation.ipynb) import that workbook, compare model outputs with approved clinician references, and export a dashboard plus CSVs for Python/SAS. Mock mode tests the pipeline while annotations are pending; it does not report clinical performance. [Model comparison](evals/MODEL_COMPARISON.md) adds opt-in OpenAI, Claude, Gemini, and local Ollama adapters; planning is offline and does not run inference.
+
+## Benchmark
+
+`evals/benchmark/` runs the app's own AI steps on real, de-identified emergency visits and scores them against each dataset's reference triage. The plan was committed before any model call ([PROTOCOL.md](evals/benchmark/PROTOCOL.md)); full results are in [REPORT.md](evals/benchmark/results/REPORT.md), the model card in [MODEL_CARD.md](evals/benchmark/results/MODEL_CARD.md), sources and licences in [SOURCES.md](evals/benchmark/results/SOURCES.md).
+
+Data:
+- **NHAMCS 2022** (CDC/NCHS public-use file): 1,683 adult ambulance arrivals from 129 US hospitals, the ED's own triage level as the reference.
+- **KTAS** (Moon et al., PLOS ONE 2019, CC BY 4.0): expert-reviewed ED visits.
+- **MIMIC-IV-ED Demo v2.2** (PhysioNet, ODbL v1.0): triage-nurse ESI as the reference.
+
+Headline results (a benchmark, not clinical validation):
+- NHAMCS: of 155 ambulance patients who went to intensive care, surgery or died, Eir put 110 at ESI 1-2, held 38 for clinician review and placed 7 at 3-5.
+- KTAS: of 154 ambulance patients experts rated critical or emergent, 138 at the top two levels, 14 held, 2 lower. MIMIC demo: 10 of 75 urgent patients placed lower.
+- Eir leans urgent: of NHAMCS patients later sent home, it put 56% at ESI 1-2, against 22% for ED triage. That's why the doctor makes the call.
+- 4,884 assessments with no errors, median 2.9 s each, $1.09 in total at list price; the number check caught all 23,684 planted wrong numbers, and 10,232 of 10,233 vital signs were read correctly.
+
+`python -m evals.benchmark.to_sas push` loads the results into SAS Viya (CAS), where SAS Studio, Visual Analytics, fairAITools, Model Studio and Model Manager check them; see [sas/](sas/).
 
 ## Tests
 
