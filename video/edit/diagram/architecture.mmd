@@ -1,0 +1,25 @@
+%% Eir + SAS Viya architecture, in the order the jury video talks about it (slides 7-14)
+flowchart LR
+  subgraph IN["Data in"]
+    APP["Eir app<br/>medic talks, doctor decides<br/><i>synthetic patients</i>"]
+    REAL["Real ER visits<br/>CDC NHAMCS 2022 · KTAS · MIMIC-IV-ED<br/><i>de-identified, public</i>"]
+    DM["SAS Data Maker<br/>synthetic EMS reports<br/><i>checked against our rules</i>"]
+  end
+  subgraph PY["Python"]
+    SYNC["sas_sync<br/>5 tables via CAS REST<br/>every 10 s"]
+    BENCH["Benchmark harness<br/>Eir's AI on every visit"]
+  end
+  CAS[("CAS<br/>in-memory engine<br/>Public caslib")]
+  subgraph SAS["SAS Viya tools"]
+    VA1["① Visual Analytics<br/>live handoffs"]
+    ST["② SAS Studio<br/>re-computes the benchmark"]
+    FAIR["③ fairAITools + VA<br/>fairness by group"]
+    MS["④ Model Studio<br/>baseline to compare"]
+    MM["⑤ Model Manager<br/>model card + monitoring"]
+    ID["⑥ Intelligent Decisioning<br/>safety-net rules"]
+    VA2["⑦ Visual Analytics<br/>what it could be worth"]
+  end
+  APP --> SYNC --> CAS
+  REAL --> BENCH --> CAS
+  DM -.-> CAS
+  CAS --> VA1 & ST & FAIR & MS & MM & ID & VA2

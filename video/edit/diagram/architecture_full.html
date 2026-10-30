@@ -1,0 +1,87 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  :root { --navy:#0F1B2D; --blue:#2563EB; --sky:#DBEAFE; --mist:#EEF2F7; --slate:#475569; --line:#94A3B8; --teal:#0F766E; }
+  * { box-sizing:border-box; margin:0; }
+  body { width:1920px; height:1080px; background:#fff; font-family:"Helvetica Neue", Helvetica, Arial, sans-serif; color:var(--navy); position:relative; overflow:hidden; }
+  h1 { position:absolute; left:72px; top:44px; font-size:46px; font-weight:700; letter-spacing:-0.5px; }
+  .lane { position:absolute; left:48px; right:48px; border-radius:20px; }
+  .lane.app { top:126px; height:392px; background:#F8FAFC; border:2px solid #E2E8F0; }
+  .lane.sas { top:596px; height:438px; background:#F5F8FF; border:2px solid #DBE4F5; }
+  .lane-title { position:absolute; left:28px; top:16px; font-size:17px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; color:var(--slate); }
+  .step { position:absolute; width:214px; background:#fff; border:2px solid #DBE4F0; border-radius:14px; padding:14px 16px 16px; }
+  .step .k { font-size:14px; font-weight:700; color:var(--blue); letter-spacing:1px; text-transform:uppercase; margin-bottom:6px; }
+  .step b { display:block; font-size:21px; line-height:1.2; margin-bottom:6px; }
+  .step span { display:block; font-size:16px; line-height:1.35; color:var(--slate); }
+  .step.who { border-color:var(--navy); }
+  .step.doc { border-color:var(--blue); background:#F1F6FF; }
+  .pill { position:absolute; background:#fff; border:2px solid #DBE4F0; border-radius:12px; padding:10px 14px; font-size:16px; color:var(--slate); }
+  .pill b { color:var(--navy); font-size:17px; }
+  .store { position:absolute; background:var(--mist); border-radius:14px; padding:14px 16px; }
+  .store b { display:block; font-size:20px; margin-bottom:4px; }
+  .store span { display:block; font-size:16px; line-height:1.35; color:var(--slate); }
+  .cas { position:absolute; left:820px; top:658px; width:190px; height:330px; background:var(--blue); border-radius:18px; color:#fff; padding:22px 18px; }
+  .cas b { font-size:40px; display:block; }
+  .cas span { font-size:17px; line-height:1.4; display:block; margin-top:8px; color:var(--sky); }
+  .tool { position:absolute; left:1084px; width:776px; height:40px; display:flex; align-items:center; gap:12px; }
+  .num { flex:none; width:32px; height:32px; border-radius:50%; background:var(--navy); color:#fff; font-size:16px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+  .tool b { font-size:19px; white-space:nowrap; }
+  .tool span { font-size:16px; color:var(--slate); white-space:nowrap; }
+  .tool i { font-style:normal; font-size:13px; color:var(--line); white-space:nowrap; margin-left:auto; }
+  svg { position:absolute; left:0; top:0; }
+  .brand { position:absolute; right:56px; top:52px; font-size:14px; color:var(--line); }
+</style></head><body>
+<h1>Eir end to end: from the ambulance to SAS Viya</h1>
+
+<div class="lane app"><div class="lane-title">1 · In the ambulance and the ED: the Eir app (synthetic patients)</div></div>
+
+<div class="step who" style="left:76px; top:176px"><div class="k">Medic</div><b>Talks, as usual</b><span>Asks consent, presses Record, describes the patient.</span></div>
+<div class="step" style="left:316px; top:176px"><div class="k">Speech to text</div><b>Live transcript</b><span>Words reach the hospital in about a second.</span></div>
+<div class="step" style="left:556px; top:176px"><div class="k">AI extraction</div><b>Vitals and findings</b><span>Each fact keeps the crew's exact words.</span></div>
+<div class="step" style="left:796px; top:176px"><div class="k">Guardrail</div><b>Number check</b><span>Flags any number not in the crew's report.</span></div>
+<div class="step" style="left:1036px; top:176px"><div class="k">AI assessment</div><b>Suggested ESI, risk</b><span>ESI 1-5 and risk 1-10, or "cannot assess".</span></div>
+<div class="step" style="left:1276px; top:176px"><div class="k">Hospital queue</div><b>Who comes first</b><span>A written rule: new info, crew alerts, then arrival time.</span></div>
+<div class="step doc" style="left:1516px; top:176px; width:318px"><div class="k">Doctor</div><b>Decides</b><span>Acknowledges, sets the ESI level with one tap. The AI only suggests.</span></div>
+
+<div class="pill" style="left:76px; top:398px"><b>Crew alerts</b> · sepsis, stroke, STEMI, trauma jump to the top</div>
+<div class="pill" style="left:612px; top:398px"><b>Messages</b> · crew ↔ doctor, per case</div>
+<div class="pill" style="left:964px; top:398px"><b>Failures shown, not hidden</b> · a dropped radio clip turns red</div>
+<div class="pill" style="left:1516px; top:398px; width:318px"><b>FHIR export</b> · into the hospital's record</div>
+
+
+<div class="lane sas"><div class="lane-title" style="left:430px">2 · Checking it in SAS Viya</div></div>
+
+<div class="store" style="left:76px; top:650px; width:300px"><b>Case record (app database)</b><span>Every case, event, assessment, vital and queue change.</span></div>
+<div class="store" style="left:430px; top:650px; width:330px"><b>Live sync, every 10 s</b><span>5 tables via the CAS REST API. Transcripts and notes stay in the app.</span></div>
+
+<div class="store" style="left:76px; top:806px; width:300px"><b>Real ER visits</b><span>1,683 US ambulance arrivals (CDC NHAMCS 2022), plus KTAS and MIMIC-IV-ED. De-identified, public.</span></div>
+<div class="store" style="left:430px; top:806px; width:330px"><b>Benchmark harness</b><span>The same AI steps on every visit; every call logged.</span></div>
+
+<div class="store" style="left:430px; top:928px; width:330px; background:#fff; border:2px dashed var(--line); padding:10px 16px"><b style="font-size:18px">SAS Data Maker</b><span>Synthetic EMS reports, checked against our rules.</span></div>
+
+<div class="cas"><b>CAS</b><span>Every table lands in the Public caslib.</span></div>
+
+<div class="tool" style="top:664px"><div class="num">1</div><b>Visual Analytics</b><span>live handoffs, side by side with the app</span></div>
+<div class="tool" style="top:710px"><div class="num">2</div><b>SAS Studio</b><span>re-runs the benchmark from the raw AI calls (PROC FREQ)</span></div>
+<div class="tool" style="top:756px"><div class="num">3</div><b>Bias assessment</b><span>fairAITools: error rates by sex, age, race</span></div>
+<div class="tool" style="top:802px"><div class="num">4</div><b>Model Studio</b><span>a baseline model on the numbers alone</span></div>
+<div class="tool" style="top:848px"><div class="num">5</div><b>Model Manager</b><span>model card and monitoring for Eir's AI</span></div>
+<div class="tool" style="top:894px"><div class="num">6</div><b>Intelligent Decisioning</b><span>safety-net rules for patients the AI can't place</span></div>
+<div class="tool" style="top:940px"><div class="num">7</div><b>Visual Analytics</b><span>business impact projections</span></div>
+
+<svg width="1920" height="1080"><text x="240" y="560" font-size="15" fill="#475569" font-family="Helvetica Neue, Helvetica, Arial">every action is saved</text>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94A3B8"/></marker></defs>
+  <g stroke="#94A3B8" stroke-width="3" fill="none" marker-end="url(#a)">
+    <path d="M290,262 L312,262"/><path d="M530,262 L552,262"/><path d="M770,262 L792,262"/>
+    <path d="M1010,262 L1032,262"/><path d="M1250,262 L1272,262"/><path d="M1490,262 L1512,262"/>
+    <path d="M226,452 L226,642"/>
+    <path d="M376,700 L426,700"/>
+    <path d="M760,700 L816,700"/>
+    <path d="M376,860 L426,860"/>
+    <path d="M760,860 L816,860"/>
+    <path d="M760,965 L816,965" stroke-dasharray="7 6"/>
+    <path d="M1010,684 L1078,684"/><path d="M1010,730 L1078,730"/><path d="M1010,776 L1078,776"/><path d="M1010,822 L1078,822"/>
+    <path d="M1010,868 L1078,868"/><path d="M1010,914 L1078,914"/><path d="M1010,960 L1078,960"/>
+  </g>
+</svg>
+<div class="brand">Eir · InTheBud</div>
+</body></html>

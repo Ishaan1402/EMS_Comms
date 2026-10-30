@@ -1,0 +1,305 @@
+[
+ {
+  "video": "Pitch video (3:00)",
+  "time": "0:00–0:30",
+  "name": "The stakes",
+  "script": [
+   "Twenty-six million times a year, an ambulance brings someone to a US emergency room. That's more than seventy thousand a day.",
+   "Before each one arrives, the hospital's heads-up is often a short radio call. And in one study, about a quarter of what crews said at handoff never made it into the hospital's notes.",
+   "Across the country, that could mean seven million patients a year whose care starts without the full story."
+  ],
+  "part": "Challenge",
+  "show": "Open on the stock footage, full screen, under the first two paragraphs: lights at night, the crew on the radio, then loading the stretcher (clip links in the doc \"Pitch fixes after the dry run\"). Cut to this slide for the last sentence. On camera: nobody under the footage (voice-over only); Ishaan in the corner once the slide appears."
+ },
+ {
+  "video": "Pitch video (3:00)",
+  "time": "0:30–0:47",
+  "name": "Lost details",
+  "script": [
+   "That call is made while the crew is still treating the patient. In that same study, a patient's low blood pressure was said out loud twenty-eight times, and written down only ten. And that was face to face, not over a radio."
+  ],
+  "part": "Challenge",
+  "show": "On camera: Ishaan."
+ },
+ {
+  "video": "Pitch video (3:00)",
+  "time": "0:47–1:21",
+  "name": "Meet Eir",
+  "script": [
+   "So we built Eir, named after the Norse goddess of healing. In the myths, she's known as the best physician. The medic just talks, and Eir turns that into a clear picture for the hospital: the vitals, what changed, and who needs attention first.",
+   "And that heads-up matters. When the crew flags sepsis before they arrive, patients get antibiotics almost an hour sooner. If Eir helps a quarter of septic ambulance patients arrive flagged, that could mean about a thousand lives a year."
+  ],
+  "part": "Innovation",
+  "show": "On camera: Ishaan."
+ },
+ {
+  "video": "Pitch video (3:00)",
+  "time": "1:21–1:56",
+  "name": "Medic, then doctor",
+  "show": "Slide 4 is four frames, one per step. Click to the next frame as each sentence starts: Record, the doctor sees it, the sepsis alert, the acknowledgment. The highlighted step at the bottom matches what you're saying. On camera: Anand.",
+  "script": [
+   "Here's Medic 8, bringing in a patient with a fever. Medic's screen on the left, doctor's on the right.",
+   "The medic asks the patient's permission, presses Record, and just talks. A second later, the doctor sees it written out: the vitals, what changed, and a suggested ESI level, the one-to-five urgency scale where one is most urgent.",
+   "Then the crew calls a sepsis alert, a life-threatening infection, and Medic 8 jumps to the top. The doctor acknowledges, and the medic sees: Acknowledged by John Smith."
+  ],
+  "part": "Innovation"
+ },
+ {
+  "video": "Pitch video (3:00)",
+  "time": "1:56–2:14",
+  "name": "Keeping the AI in check",
+  "script": [
+   "Every case flows live into SAS Viya. SAS Studio checks the AI against experts on real ER visits, Visual Analytics checks it for fairness, and Model Studio builds a model to compare it with. The AI only suggests; the doctor decides with one tap."
+  ],
+  "show": "Start on the diagram on the left as you name each SAS tool, then 4 seconds of shot1 (the side-by-side) and quick cuts of shot2 and shot4. Come back to this slide for \"one tap\" and point at the ESI buttons. On camera: Mayank.",
+  "part": "Innovation"
+ },
+ {
+  "video": "Pitch video (3:00)",
+  "time": "2:14–2:31",
+  "name": "How it compares",
+  "script": [
+   "Compared with a radio call, the hospital sees a written report in about a second, and the AI's assessment in about four, measured on our server. Every fact shows the crew's own words, and every update shows exactly what changed."
+  ],
+  "part": "Impact",
+  "show": "On camera: Vrishank."
+ },
+ {
+  "video": "Pitch video (3:00)",
+  "time": "2:31–2:58",
+  "name": "Close",
+  "script": [
+   "Before real patients, we'll test it with clinicians on new cases, encrypt the audio, and sign a data agreement with our AI provider. Then we'll pilot it with a hospital and its EMS crews. Hospitals would subscribe, and each handoff would go straight into their record system.",
+   "So when the ambulance arrives, the team already knows what's coming. We're InTheBud, and this is Eir. Thank you."
+  ],
+  "part": "Impact",
+  "show": "On camera: DJ, then the whole team for the last line, \"We're InTheBud\"."
+ },
+ {
+  "video": "Pitch video (3:00)",
+  "time": "2:58–3:01",
+  "name": "Sources",
+  "part": "Impact",
+  "script": [],
+  "show": "No voice-over. Hold this slide for about 3 seconds at the very end so judges can pause on it. On camera: nobody."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "0:00–0:18",
+  "name": "The stakes",
+  "script": [
+   "Every day in the US, more than seventy thousand patients arrive at an emergency department by ambulance. Before each one arrives, the hospital's heads-up is often a short radio call from a moving ambulance."
+  ],
+  "part": "Challenge",
+  "show": "Open on the stock footage, full screen, with the voice-over (the same Pexels clips as the pitch: lights at night, the crew on the radio). Cut to this slide for \"seventy thousand\". On camera: nobody under the footage; Ishaan in the corner once the slide appears."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "0:18–1:20",
+  "name": "Lost details",
+  "script": [
+   "But that call happens while the crew is treating the patient. They're giving oxygen, checking a pulse, and the ambulance is moving fast. Critical details get missed, and updates come late.",
+   "In one study of trauma handoffs, a patient's low blood pressure was said out loud twenty-eight times, and written down only ten. Overall, about a quarter of the key details never reached the hospital's notes. And that was face to face. Across the country, that could mean seven million patients a year whose care starts without the full story.",
+   "It affects the crew, who repeat themselves. It affects the ER team, who prepare without the full picture. Most of all, it affects the patient.",
+   "Saving lives is reason enough to build this. But for me, it's also personal. People in my family have needed EMS again and again, and a system that helps manage that would make a real difference."
+  ],
+  "part": "Challenge",
+  "show": "Ishaan in the corner for the first three paragraphs, then full screen on camera for the last paragraph (the family story)."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "1:20–2:04",
+  "name": "The team",
+  "part": "Challenge",
+  "script": [
+   "Ishaan: I'm Ishaan, and I lead InTheBud. I architected and built the Eir platform, from the medic's app to the hospital dashboard.",
+   "Vrishank: I'm Vrishank. I evaluated how well our AI performs against expert triage decisions on real emergency department data.",
+   "DJ: I'm DJ. I worked on how Eir extracts vital signs from the crew's report and orders the hospital's patient queue.",
+   "Anand: I'm Anand. I built Eir's live transcription and messaging, and designed the clinician interface.",
+   "Mayank: I'm Mayank. I built our SAS Viya data pipeline and the Visual Analytics dashboards."
+  ],
+  "show": "Everyone on camera together, full screen, like DementAI's team shot. Each person says one line in their own words, with a name and role caption. If someone can't be filmed, show this slide while they speak. On camera: the whole team."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "2:04–2:36",
+  "name": "Why now",
+  "script": [
+   "So why now?",
+   "AI scribes are starting to reach ambulances. They help the crew write their own chart, and that's useful. But the hospital still gets a phone call.",
+   "We also know a heads-up helps. In a large study of stroke patients, advance notice from EMS was linked to faster brain scans.",
+   "And regulators are watching AI that ranks patients when time is short. So we built Eir to support the clinician's decision, not to replace it."
+  ],
+  "part": "Challenge",
+  "show": "On camera: DJ."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "2:36–3:06",
+  "name": "Meet Eir",
+  "script": [
+   "The name comes from Eir, the Norse goddess of healing. In the myths, she's known as the best physician.",
+   "Before the patient arrives, Eir turns an unstructured EMS handoff into a clear clinical picture. The medic talks, the way they already do. The app writes it down, pulls out the vitals and findings, and suggests an ESI level. The hospital sees a live list of who's coming, and the doctor stays in charge."
+  ],
+  "part": "Innovation",
+  "show": "On camera: Ishaan."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "3:06–5:56",
+  "name": "Demo",
+  "show": "Open on the slide, then cut to the full replay recording as a split screen: the medic's screen on the left, the doctor's on the right, each labeled. Follow the order medic, then doctor, then acknowledgment. On camera: Anand narrates over the full-screen recording (voice-over); no corner camera during the screens.",
+  "script": [
+   "Let's see it. Three ambulances are heading to General Hospital. On the left is the medic's screen in Medic 8. On the right is the doctor's screen.",
+   "First, on the medic's screen, the medic asks the patient: \"I'm turning on a secure digital scribe so I can focus on your care instead of typing. Is that okay?\" The patient says yes.",
+   "Now the medic just talks. About a second later, on the doctor's screen, the words show up and the vitals fill in by themselves. If I hover over one, you can see exactly what the medic said.",
+   "A moment later, the AI suggests an ESI level and a risk score. The list follows a simple written rule, and each case says why it sits where it does.",
+   "The doctor acknowledges. Back on the medic's screen, it says \"Seen by John Smith.\"",
+   "Now something goes wrong. Medic 8's radio drops out. Instead of guessing, the app flags it in red on both screens. The crew sends the update as text, and nothing is lost.",
+   "On the doctor's screen, Medic 2 and Medic 10 are getting worse. A \"new\" tag marks exactly what changed since the doctor last looked.",
+   "Then the medic calls a sepsis alert. On the doctor's screen, Medic 8 jumps straight to the top. The doctor acknowledges, and the medic sees it right away.",
+   "If the doctor disagrees with the AI, they can change the ESI level with one tap.",
+   "Finally, the handoff exports as a standard FHIR file, the format hospital record systems use. Every fact still carries the crew's words."
+  ],
+  "part": "Innovation"
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "5:56–6:23",
+  "name": "How we used SAS",
+  "part": "Innovation",
+  "script": [
+   "So where does SAS come in? A hospital needs more than an app. It needs to check the AI, trace every decision, and see the whole picture. That's why we built on SAS Viya.",
+   "Live cases from the app and the AI's results on real ER visits both land in CAS, SAS's in-memory engine. Every SAS tool you'll see next works from there.",
+   "We also used SAS Data Maker to generate synthetic EMS reports for testing, and checked them against our clinical rules."
+  ],
+  "show": "This slide (the data-flow diagram). Point to each part as you say it. On camera: Mayank."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "6:23–7:01",
+  "name": "Live into SAS",
+  "part": "Innovation",
+  "script": [
+   "Under the hood, a small Python service in our app sends five tables to CAS through its REST API, checking for changes every ten seconds. Transcripts and notes never leave the app.",
+   "Here's the app on the left and SAS Visual Analytics on the right. As crews report in, the app writes every case, vital sign and AI assessment straight into CAS, SAS's in-memory engine, and the live page catches up within seconds. These are synthetic patients, and every row keeps its case ID, so anything can be traced back."
+  ],
+  "show": "3 seconds of the Python code first: backend/sas_sync.py open in an editor, scrolled to the push loop (record locally). Then shot1_live_app_to_sas.mp4: the side-by-side, crews reporting in. On camera: Mayank."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "7:01–7:33",
+  "name": "Checking the AI",
+  "part": "Innovation",
+  "script": [
+   "Then SAS checks the AI on real data. A Python harness ran Eir's AI on every visit, and every result went into CAS. We ran Eir on real, de-identified ER visits from public datasets, including 1,683 US ambulance visits from the CDC. Of the 155 critical patients, the ones who ended up in intensive care, surgery or died, Eir put 110 in its top two levels, held 38 for a clinician to review, and placed 7 lower."
+  ],
+  "show": "3 seconds of the Python side first: the benchmark harness in evals/benchmark, or sas/load_into_cas.ipynb in SAS JupyterHub loading the tables with SWAT. Then shot3_sas_studio_audit.mp4, then the outcomes chart in shot2_critical_patients_and_outcomes.mp4. On camera: Vrishank."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "7:33–7:51",
+  "name": "Fairness",
+  "part": "Innovation",
+  "script": [
+   "SAS's fairness tools check whether the AI treats groups differently, by sex, age, and on the US data, race and ethnicity. One gap stood out: younger urgent patients were held for review more often than older ones. We report it rather than hide it."
+  ],
+  "show": "shot4_fairness.mp4. On camera: Vrishank."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "7:51–8:13",
+  "name": "A SAS model for comparison",
+  "part": "Innovation",
+  "script": [
+   "Could a standard model do this from the numbers alone? Model Studio trained gradient boosting on age, vitals and mental state. At the same false-alarm level, it caught 53 of 74 urgent patients we held out. Eir caught 63, held 9 for review and missed 2, because it reads the crew's whole report."
+  ],
+  "show": "shot7_model_studio_baseline.mp4. If the video runs over 10:00, cut this slide. On camera: Mayank."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "8:13–8:28",
+  "name": "Model Manager",
+  "part": "Innovation",
+  "script": [
+   "Model Manager holds the AI's model card: what it's for, what it isn't for, and its limits. And it monitors the AI across all three datasets, so a hospital would see drift before it matters."
+  ],
+  "show": "shot8_model_manager_card.mp4, then shot10_model_manager_monitoring.mp4. On camera: Mayank."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "8:28–9:08",
+  "name": "A safety net in Intelligent Decisioning",
+  "part": "Innovation",
+  "script": [
+   "The AI can't place every patient, so we added a safety net in SAS Intelligent Decisioning, written as plain rules. If the AI gives a level, the decision uses it. If it can't, the rules flag the patient urgent when a stated vital sign is in the danger zone, and a missing vital never counts as danger.",
+   "In SAS, we ran the rules on all 3,157 benchmark visits to check they work as written. The thresholds are a draft, and a clinician still has to sign them off."
+  ],
+  "show": "shot9_intelligent_decisioning.mp4 from 0:02 to 0:27 only: the rule set and how it decides. Stop before 0:28, where the decision-flow frame shows Ishaan's email and the caption gives numbers we no longer say. On camera: Vrishank."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "9:08–9:44",
+  "name": "What it could be worth",
+  "part": "Impact",
+  "script": [
+   "And what's it worth? An average US emergency department gets about 4,700 ambulances a year. 441 of those patients are critical, and Eir flags about 313 of them as urgent from the crew's report alone. Across the US, if that notice gets bed requests out 30 minutes sooner for half the patients Eir reaches, that could free about 1.5 million ED hours a year. And if Eir helps a quarter of septic ambulance patients arrive flagged, that could mean about a thousand lives a year. These are projections; a pilot has to measure them."
+  ],
+  "show": "The High impact page in Visual Analytics: Average US ED, then All US EDs. Until that clip is recorded, stay on this slide. On camera: Mayank."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "9:44–10:21",
+  "name": "Trustworthy AI",
+  "script": [
+   "We built it to be trusted, not just to be fast.",
+   "Every fact the AI pulls out shows the crew's own words, and the app checks the quote is really in the report. A number in the summary that isn't in the report gets flagged, and if there isn't enough to go on, the AI says \"cannot assess\" instead of guessing.",
+   "Every suggestion, and every change a doctor makes, is saved with its case ID, so there's a full audit trail in SAS. The AI suggests; the doctor decides."
+  ],
+  "part": "Innovation",
+  "show": "On camera: DJ."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "10:21–11:27",
+  "name": "Metrics",
+  "script": [
+   "So how well does it work? We also tested Eir's AI on 1,474 real, de-identified emergency visits from public research datasets. That's 5,096 AI calls, and every one is logged. Across all our test sets, SAS counts 4,884 AI assessments with no errors, a median of 2.9 seconds each, and $1.09 in total.",
+   "Of 154 ambulance patients that experts rated critical or emergent, Eir put 138 in its top two levels and held 14 for a clinician to review. Only 2 were placed lower. On the US hospital's data, 10 of 75 were placed lower, so there's still work to do.",
+   "The safety check caught every planted wrong number it could, all 23,684 of them, and the AI read 10,232 of 10,233 vital signs correctly.",
+   "But Eir leans urgent. In the CDC's national US data, of patients who were later sent home, it put 56% in its top two levels, against 22% for ED triage. That's why the doctor always makes the call."
+  ],
+  "part": "Impact",
+  "show": "Cut to shot5_speed_and_cost.mp4 (the Visual Analytics speed and cost page) on \"SAS counts\", then back to this slide. On camera: Vrishank."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "11:27–11:52",
+  "name": "What comes next",
+  "script": [
+   "Next, we want to test Eir with clinicians on cases it has never seen. Before real patients, we'll encrypt the audio and sign a data agreement with our AI provider.",
+   "Then we'll pilot it with a hospital and its EMS crews, with SAS bringing their data together. Hospitals would subscribe, and each handoff would go straight into their record system."
+  ],
+  "part": "Impact",
+  "show": "On camera: DJ."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "11:52–12:05",
+  "name": "Close",
+  "script": [
+   "So, back to that blood pressure: said out loud, and never written down. We built Eir so the ER team knows what's coming before the ambulance arrives.",
+   "We're InTheBud. Thank you."
+  ],
+  "part": "Impact",
+  "show": "Stock footage under the first sentence (the stretcher arriving at the ER), then this slide. On camera: Ishaan as voice-over under the footage, then the whole team for \"We're InTheBud\"."
+ },
+ {
+  "video": "Jury video (about 10:00)",
+  "time": "12:05–12:08",
+  "name": "Sources",
+  "part": "Impact",
+  "script": [],
+  "show": "No voice-over. Hold this slide for about 3 seconds at the very end so judges can pause on it. On camera: nobody."
+ }
+]
